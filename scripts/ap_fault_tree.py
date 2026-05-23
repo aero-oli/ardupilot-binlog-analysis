@@ -9,7 +9,7 @@ FAULT_TREES = {
     "Confirm commanded vs uncommanded yaw using ATT.DesYaw/ATT.Yaw and RCIN yaw.",
     "Check RATE.YDes/RATE.Y and RATE.YOut for controller demand vs achieved response.",
     "Check PIDY Err/P/I/D/FF/Dmod/SRate/Flags for limiting, windup or noise protection.",
-    "Check RCOU outputs for saturation/asymmetry and ESC telemetry for RPM/current/errors.",
+    "Check mapped RCOU/RCO2/RCO3 outputs for saturation/asymmetry and ESC telemetry for RPM/current/errors.",
     "Check XKF3/XKF4/MAG for yaw-source or magnetic innovation issues.",
     "Check VIBE/IMU/FFT and BAT/POWR for contributing vibration or power limitations."
   ],
@@ -17,7 +17,7 @@ FAULT_TREES = {
     "Check ATT desired vs achieved axis.",
     "Check RATE desired vs achieved axis.",
     "Check PIDR/PIDP terms and flags.",
-    "Check RCOU saturation, vibration, filtering and battery sag before gain changes."
+    "Check mapped output-channel saturation, vibration, filtering and battery sag before gain changes."
   ],
   "ekf_gps_issue": [
     "Check GPS NSats/HDop/HAcc/VAcc and dropouts.",

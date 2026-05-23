@@ -38,7 +38,7 @@ def classify_axis(axis, data):
             "finding": f"{axis} PID limit flag active",
             "confidence": "high",
             "interpretation": "PID output saturated or anti-windup active for part of the log.",
-            "recommended_checks": ["Check RCOU saturation at the same time", "Do not increase gains until actuator headroom is understood"],
+            "recommended_checks": ["Check mapped output-channel saturation at the same time", "Do not increase gains until actuator headroom is understood"],
         })
     terms = pid.get("terms", {})
     dmod = terms.get("Dmod", {}) if isinstance(terms, dict) else {}
@@ -97,10 +97,10 @@ def analyze_tuning(tables, analysis_window=None):
         }
     else:
         out["autotune"] = {"present": False}
-    if "RCOU" not in tables:
-        out["confidence"]["reasons"].append("RCOU missing; actuator saturation cannot be correlated with tracking error")
+    if not any(name in tables for name in ["RCOU", "RCO2", "RCO3"]):
+        out["confidence"]["reasons"].append("RCOU/RCO2/RCO3 missing; actuator saturation cannot be correlated with tracking error")
     elif not output_mapping_from_tables(tables):
-        out["confidence"]["reasons"].append("Output mapping could not be confirmed from parameters; RCOU channel interpretation is generic")
+        out["confidence"]["reasons"].append("Output mapping could not be confirmed from parameters; RCOU/RCO2/RCO3 channel interpretation is generic")
     if "VIBE" not in tables:
         out["confidence"]["reasons"].append("VIBE missing; vibration contribution cannot be assessed")
     return out

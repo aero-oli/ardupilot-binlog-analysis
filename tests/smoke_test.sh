@@ -16,8 +16,11 @@ from ap_log_validate import module_availability
 
 assert ap_common.parse_time_window("1:2") == {"start_s": 1.0, "end_s": 2.0}
 assert ap_common.parse_time_window("around:10:3") == {"start_s": 7.0, "end_s": 13.0}
-mapping = ap_common.output_mapping_from_params({"SERVO1_FUNCTION": 33})
+mapping = ap_common.output_mapping_from_params({"SERVO1_FUNCTION": 33, "SERVO9_FUNCTION": 82, "SERVO2_FUNCTION": 41})
 assert mapping["C1"]["role"] == "motor1"
+assert mapping["C1"]["category"] == "motor"
+assert mapping["C9"]["role"] == "motor9"
+assert mapping["C2"]["category"] == "tilt"
 assert ap_common.classify_symptom("toilet bowling in loiter after a GPS glitch") == "ekf_gps_issue"
 modules = module_availability({"messages": {"ATT": {}, "RATE": {}, "PIDY": {}, "RCOU": {}, "MODE": {}, "MSG": {}, "EV": {}, "ERR": {}}})
 assert modules["yaw_diagnosis"]["status"] == "available"

@@ -21,7 +21,7 @@ Use this when the user reports yaw, heading, spinning, pirouetting, toilet-bowli
    - Dmod reduction suggests dynamic D reduction due to limit-cycle/noise protection.
 
 4. Is there actuator authority?
-   - Check RCOU.C1-C14 saturation/asymmetry.
+   - Check mapped output channels from RCOU/RCO2/RCO3 for saturation/asymmetry.
    - Check ESC RPM/current/temp/error if present.
    - Correlate yaw error with high throttle, battery sag and motor outputs near limits.
 
@@ -37,7 +37,7 @@ Use this when the user reports yaw, heading, spinning, pirouetting, toilet-bowli
 
 ## Ranked causes
 
-- Yaw authority limited: RATE.YDes/RATE.Y diverge, RATE.YOut high, PIDY limit and/or RCOU saturation.
+- Yaw authority limited: RATE.YDes/RATE.Y diverge, RATE.YOut high, PIDY limit and/or mapped output-channel saturation.
 - Motor/ESC/prop/frame issue: one output/ESC abnormal or persistent yaw bias, especially with ESC RPM/current errors.
 - Yaw tune oscillation: RATE.Y oscillates around target without actuator saturation; PIDY terms oscillatory.
 - EKF/compass/yaw-source issue: heading/yaw estimate jumps or XKF/MAG evidence abnormal without matching motor outputs.

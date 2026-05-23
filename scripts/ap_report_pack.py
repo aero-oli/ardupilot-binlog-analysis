@@ -128,10 +128,10 @@ def render(index=None, metrics=None, tuning=None, diagnosis=None, fft=None):
             cannot.append("ESC-level confirmation of motor RPM/current/temperature/error/status is not possible because ESC/ESCX/EDT2 telemetry is missing.")
         elif "ESCX" in present and "ESC" not in present and "EDT2" not in present:
             cannot.append("ESCX duty/power/flags are available, but ESC RPM/current/temperature/error and EDT2 status confirmation are not available because ESC and EDT2 telemetry are missing.")
-        if "RCOU" not in present:
-            cannot.append("Actuator saturation cannot be confirmed because RCOU is missing.")
+        if not any(name in present for name in ["RCOU", "RCO2", "RCO3"]):
+            cannot.append("Actuator saturation cannot be confirmed because RCOU/RCO2/RCO3 is missing.")
         elif metrics and metrics.get("health", {}).get("motor_outputs", {}).get("mapping_available") is False:
-            cannot.append("Output mapping could not be confirmed from parameters; RCOU channel interpretation is generic.")
+            cannot.append("Output mapping could not be confirmed from parameters; RCOU/RCO2/RCO3 channel interpretation is generic.")
         if "VIBE" not in present:
             cannot.append("Processed vibration cannot be assessed because VIBE is missing.")
         if "RATE" not in present:

@@ -61,16 +61,24 @@ def validate_expression_ast(expr: str) -> ast.AST:
     return tree
 
 
-def resolve_series(tables, specs):
+def extraction_hint(message: str) -> str:
+    return (
+        f"{message}: message {message} not extracted. "
+        "Rerun ap_log_extract.py with --messages ALL for open-ended custom plots "
+        f"or --messages {message} plus any other requested messages."
+    )
+
+
+def resolve_series(tables, specs, align_tolerance=None):
     resolved = []
     missing = []
     for item in specs:
         if item.get("kind") == "expression":
-            resolved.append(resolve_expression_series(tables, item))
+            resolved.append(resolve_expression_series(tables, item, align_tolerance=align_tolerance))
             continue
         message = item["message"]
         if message not in tables:
-            missing.append(f"{item['target']}: message {message} not extracted")
+            missing.append(extraction_hint(message))
             continue
         df = tables[message]
         col = get_col(df, [item["field"]])
@@ -89,7 +97,7 @@ def resolve_field(tables, token):
     message, field = token.split(".", 1)
     message = message.upper()
     if message not in tables:
-        raise AnalysisError(f"{token}: message {message} not extracted")
+        raise AnalysisError(f"{token}: {extraction_hint(message)}")
     df = tables[message]
     col = get_col(df, [field])
     if not col:
@@ -101,7 +109,7 @@ def resolve_field(tables, token):
     return message, col, df[["TimeS", col]].dropna().sort_values("TimeS")
 
 
-def resolve_expression_series(tables, item):
+def resolve_expression_series(tables, item, align_tolerance=None):
     pd = require_package("pandas")
     fields = []
     var_map = {}
@@ -114,8 +122,20 @@ def resolve_expression_series(tables, item):
         fields.append(normalized)
         frames.append((var, frame.rename(columns={col: var})))
     base = frames[0][1][["TimeS"]].copy()
+    rows_before = int(len(base))
+    merge_kwargs = {"on": "TimeS", "direction": "nearest"}
+    if align_tolerance is not None:
+        merge_kwargs["tolerance"] = align_tolerance
     for var, frame in frames:
-        base = pd.merge_asof(base.sort_values("TimeS"), frame.sort_values("TimeS"), on="TimeS", direction="nearest")
+        base = pd.merge_asof(base.sort_values("TimeS"), frame.sort_values("TimeS"), **merge_kwargs)
+    value_cols = [var for var, _frame in frames]
+    base = base.dropna(subset=value_cols)
+    rows_after = int(len(base))
+    if rows_after == 0:
+        raise AnalysisError(
+            f"No aligned rows remained for expression '{item['expression']}'. "
+            "Use a larger --align-tolerance or plot the fields separately."
+        )
     expr = item["expression"]
     for token, var in sorted(var_map.items(), key=lambda kv: len(kv[0]), reverse=True):
         expr = re.sub(rf"\b{re.escape(token)}\b", var, expr)
@@ -124,7 +144,18 @@ def resolve_expression_series(tables, item):
     env["__builtins__"] = {}
     values = eval(compile(tree, "<custom-plot-expression>", "eval"), env, {})
     out = pd.DataFrame({"TimeS": base["TimeS"], "value": values})
-    return {**item, "df": out, "column": "value", "fields": fields}
+    return {
+        **item,
+        "df": out,
+        "column": "value",
+        "fields": fields,
+        "alignment": {
+            "align_tolerance_s": align_tolerance,
+            "rows_before_alignment": rows_before,
+            "rows_after_alignment": rows_after,
+            "rows_dropped_for_alignment": rows_before - rows_after,
+        },
+    }
 
 
 def add_event_markers(fig, markers):
@@ -145,11 +176,11 @@ def output_name(title: str) -> str:
     return (slug or "custom_plot") + ".html"
 
 
-def make_custom_plot(tables, series_specs, out, title="Custom ArduPilot plot", secondary=None, mode="overlay", analysis_window=None, events=False):
+def make_custom_plot(tables, series_specs, out, title="Custom ArduPilot plot", secondary=None, mode="overlay", analysis_window=None, events=False, align_tolerance=None):
     if not series_specs:
         raise AnalysisError("At least one --series value is required")
     go, make_subplots = _plotly()
-    series = resolve_series(tables, [parse_series_spec(s) if isinstance(s, str) else s for s in series_specs])
+    series = resolve_series(tables, [parse_series_spec(s) if isinstance(s, str) else s for s in series_specs], align_tolerance=align_tolerance)
     secondary_targets = {parse_series_spec(s)["target"].upper() for s in (secondary or [])}
     series_targets = {item["target"].upper() for item in series}
     unknown_secondary = sorted(secondary_targets - series_targets)
@@ -203,6 +234,7 @@ def make_custom_plot(tables, series_specs, out, title="Custom ArduPilot plot", s
         "mode": mode,
         "analysis_window": analysis_window or {"start_s": None, "end_s": None},
         "events_overlay": bool(events),
+        "align_tolerance_s": align_tolerance,
         "series": [
             {
                 "message": s.get("message"),
@@ -210,6 +242,7 @@ def make_custom_plot(tables, series_specs, out, title="Custom ArduPilot plot", s
                 "label": s["label"],
                 "expression": s.get("expression"),
                 "fields": s.get("fields", []),
+                "alignment": s.get("alignment"),
             }
             for s in series
         ],
@@ -229,12 +262,25 @@ def main() -> int:
     p.add_argument("--manifest", default=None)
     p.add_argument("--window", default=None, help="Optional TimeS window as START:END or around:CENTER:RADIUS")
     p.add_argument("--events", action="store_true", help="Overlay MODE/ERR/EV/MSG markers")
+    p.add_argument("--align-tolerance", type=float, default=None, help="Maximum timestamp gap in seconds when aligning fields in derived expressions")
     args = p.parse_args()
     try:
         tables = load_tables(args.tables)
         window = parse_time_window(args.window)
         tables = filter_tables_by_time(tables, **window)
-        manifest = make_custom_plot(tables, args.series, args.out, title=args.title, secondary=args.secondary, mode=args.mode, analysis_window=window, events=args.events)
+        if args.align_tolerance is not None and args.align_tolerance < 0:
+            raise AnalysisError("--align-tolerance must be non-negative")
+        manifest = make_custom_plot(
+            tables,
+            args.series,
+            args.out,
+            title=args.title,
+            secondary=args.secondary,
+            mode=args.mode,
+            analysis_window=window,
+            events=args.events,
+            align_tolerance=args.align_tolerance,
+        )
         if args.manifest:
             write_json(args.manifest, manifest)
         print(f"Wrote custom plot to {manifest['plot']}")

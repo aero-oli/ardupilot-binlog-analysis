@@ -19,7 +19,8 @@ These are heuristics for triage, not universal pass/fail rules.
 
 - Outputs near conventional PWM limits such as <=1100 us or >=1900 us are heuristically suspicious.
 - Actual limits depend on output protocol, ESC calibration, SERVO/MOT parameters and logging representation.
-- Output-channel conclusions are high confidence only when `SERVOx_FUNCTION` mapping is available; otherwise RCOU interpretation is generic.
+- Output-channel conclusions are high confidence only when `SERVOx_FUNCTION` mapping is available; otherwise RCOU/RCO2/RCO3 interpretation is generic.
+- For Copter, normal motor functions are `33-40` for Motor1-Motor8 and `82-85` for Motor9-Motor12; tilt outputs are not normal motor-output evidence.
 - Treat saturation as evidence of limited headroom only when correlated with controller error or requested output.
 
 ## Windows and segments

@@ -15,5 +15,5 @@ Official anchors:
 
 - ArduPilot DataFlash logs are onboard logs, distinct from telemetry logs.
 - DataFlash logs are self-describing through message/field definitions and should be interpreted by the actual fields present.
-- ATT, RATE, PID*, RCOU, ESC, VIBE, GPS and XKF* messages have official meanings in ArduPilot log documentation.
+- ATT, RATE, PID*, RCOU/RCO2/RCO3, ESC, VIBE, GPS and XKF* messages have official meanings in ArduPilot log documentation.
 - GPS/EKF/failsafe diagnosis should use the official diagnosing-logs guidance before community sources.

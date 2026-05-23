@@ -117,10 +117,16 @@ For a specific requested graph, plot named log fields directly from extracted ta
 python scripts/ap_log_custom_plot.py --tables out/tables --series GPS.Alt --series BARO.Press --secondary BARO.Press --title "GPS altitude and barometric pressure" --out out/plots/gps_altitude_pressure.html
 ```
 
-Use `MESSAGE.FIELD` names from the extracted CSV headers. Use repeated `--series` arguments for multiple traces, `--secondary MESSAGE.FIELD` when units differ, and `--mode subplots` when separate stacked plots are clearer than overlaying. Simple arithmetic expressions are supported for derived traces:
+Use `MESSAGE.FIELD` names from the extracted CSV headers. For open-ended requests such as “plot anything” or when the requested message may not be in the default extraction set, rerun extraction with `--messages ALL` before plotting:
 
 ```bash
-python scripts/ap_log_custom_plot.py --tables out/tables --series 'GPS.Alt-BARO.Alt=GPS minus baro' --events --out out/plots/gps_minus_baro.html
+python scripts/ap_log_extract.py LOG.BIN --messages ALL --out out/tables --format csv
+```
+
+Use repeated `--series` arguments for multiple traces, `--secondary MESSAGE.FIELD` when units differ, and `--mode subplots` when separate stacked plots are clearer than overlaying. Simple arithmetic expressions are supported for derived traces. Use `--align-tolerance SECONDS` to prevent sparse messages from being matched across a large timestamp gap:
+
+```bash
+python scripts/ap_log_custom_plot.py --tables out/tables --series 'GPS.Alt-BARO.Alt=GPS minus baro' --align-tolerance 0.25 --events --out out/plots/gps_minus_baro.html
 ```
 
 Use `--window START:END` or `--window around:CENTER:RADIUS` on metrics, plots, tuning, custom plots, extraction, and diagnosis when the user asks about a specific event or mode segment.
@@ -152,7 +158,7 @@ Required yaw evidence sources, if present:
 - `ATT.DesYaw` vs `ATT.Yaw`
 - `RATE.YDes` vs `RATE.Y` and `RATE.YOut`
 - `PIDY.Tar`, `PIDY.Act`, `PIDY.Err`, `PIDY.P`, `PIDY.I`, `PIDY.D`, `PIDY.FF`, `PIDY.Dmod`, `PIDY.SRate`, `PIDY.Flags`
-- `RCOU.C*`, interpreted with `SERVOx_FUNCTION` output mapping when `PARM` is present
+- mapped output channels from `RCOU`, `RCO2`, and `RCO3`, interpreted with `SERVOx_FUNCTION` output mapping when `PARM` is present
 - `ESC` / `ESCX` / `EDT2` telemetry if present
 - `MAG`, `XKF3`, `XKF4` if present
 - `VIBE`, `IMU`, raw IMU, or `ISBH`/`ISBD` batch sampling if present
@@ -165,7 +171,8 @@ Required yaw evidence sources, if present:
 - Use `ATT` for desired-vs-achieved vehicle attitude.
 - Use `RATE` for desired-vs-achieved angular rate and normalized controller outputs.
 - Use `PIDR`, `PIDP`, `PIDY` for controller target, actual, error, terms, slew limiting, and flags.
-- Use `RCOU` for servo/motor channel output saturation or asymmetry; output-channel conclusions are higher confidence when `SERVOx_FUNCTION` mapping is available from `PARM`.
+- Use `RCOU`, `RCO2`, and `RCO3` for servo/motor channel output saturation or asymmetry; output-channel conclusions are higher confidence when `SERVOx_FUNCTION` mapping is available from `PARM`.
+- For Copter motor-output conclusions, treat `SERVOx_FUNCTION` `33-40` as Motor1-Motor8 and `82-85` as Motor9-Motor12. Do not treat tilt functions such as `41`, `45-47`, or `75-76` as normal motor outputs.
 - Use `ESC`/`ESCX`/`EDT2` only if present; do not infer ESC telemetry if missing.
 - Use `VIBE` and clipping for vibration health; use raw IMU or `ISBH`/`ISBD` batch-sample data for FFT if available.
 - Use `GPS` and `XKF*` for estimator/navigation issues.

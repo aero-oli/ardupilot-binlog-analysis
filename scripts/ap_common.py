@@ -33,7 +33,7 @@ except Exception:  # pragma: no cover - dependency checked at runtime
 DEFAULT_MESSAGES = [
     "ATT", "RATE", "PIDR", "PIDP", "PIDY", "PIDA", "VIBE", "IMU", "GYR", "ACC",
     "GPS", "GPA", "GPS2", "MAG", "XKF1", "XKF2", "XKF3", "XKF4", "XKFS", "NKF1", "NKF2", "NKF3", "NKF4",
-    "BAT", "BCL", "POWR", "RCOU", "RCIN", "ESC", "ESCX", "EDT2", "CTUN", "NTUN", "POS", "BARO", "RNGF",
+    "BAT", "BCL", "POWR", "RCOU", "RCO2", "RCO3", "RCIN", "ESC", "ESCX", "EDT2", "CTUN", "NTUN", "POS", "BARO", "RNGF",
     "MODE", "MSG", "EV", "ERR", "ARM", "ATUN", "SID", "SIDD", "SIDS", "ISBH", "ISBD", "PARM"
 ]
 
@@ -45,15 +45,36 @@ AXIS_MAP = {
 
 RATE_FIELDS = ["RDes", "R", "ROut", "PDes", "P", "POut", "YDes", "Y", "YOut", "ADes", "A", "AOut"]
 PID_FIELDS = ["Tar", "Act", "Err", "P", "I", "D", "FF", "DFF", "Dmod", "SRate", "Flags"]
-MOTOR_FUNCTION_START = 33
-MOTOR_FUNCTION_END = 48
-OUTPUT_FUNCTION_NAMES = {
-    -1: "gpio",
-    0: "disabled",
-    1: "rc_passthrough",
-    70: "throttle",
-    73: "throttle_left",
-    74: "throttle_right",
+OUTPUT_MESSAGE_NAMES = ("RCOU", "RCO2", "RCO3")
+OUTPUT_FUNCTIONS = {
+    -1: ("gpio", "other"),
+    0: ("disabled", "other"),
+    1: ("rc_passthrough", "passthrough"),
+    30: ("motor_enable_switch", "other"),
+    31: ("rotor_head_speed", "heli"),
+    32: ("tail_rotor_speed", "heli"),
+    33: ("motor1", "motor"),
+    34: ("motor2", "motor"),
+    35: ("motor3", "motor"),
+    36: ("motor4", "motor"),
+    37: ("motor5", "motor"),
+    38: ("motor6", "motor"),
+    39: ("motor7", "motor"),
+    40: ("motor8", "motor"),
+    41: ("motor_tilt", "tilt"),
+    45: ("tilt_motor_rear", "tilt"),
+    46: ("tilt_motor_rear_left", "tilt"),
+    47: ("tilt_motor_rear_right", "tilt"),
+    70: ("throttle", "throttle"),
+    73: ("bicopter_motor_left", "motor"),
+    74: ("bicopter_motor_right", "motor"),
+    75: ("tilt_motor_left", "tilt"),
+    76: ("tilt_motor_right", "tilt"),
+    81: ("boost_throttle", "throttle"),
+    82: ("motor9", "motor"),
+    83: ("motor10", "motor"),
+    84: ("motor11", "motor"),
+    85: ("motor12", "motor"),
 }
 
 class AnalysisError(RuntimeError):
@@ -326,11 +347,13 @@ def output_mapping_from_params(params: Dict[str, Any], max_outputs: int = 32) ->
         function_id = safe_int(params.get(key))
         if function_id is None:
             continue
-        if MOTOR_FUNCTION_START <= function_id <= MOTOR_FUNCTION_END:
-            role = f"motor{function_id - MOTOR_FUNCTION_START + 1}"
-        else:
-            role = OUTPUT_FUNCTION_NAMES.get(function_id, f"function_{function_id}")
-        mapping[f"C{idx}"] = {"parameter": key, "function_id": function_id, "role": role}
+        role, category = OUTPUT_FUNCTIONS.get(function_id, (f"function_{function_id}", "other"))
+        mapping[f"C{idx}"] = {
+            "parameter": key,
+            "function_id": function_id,
+            "role": role,
+            "category": category,
+        }
     return mapping
 
 def output_mapping_from_tables(tables: Dict[str, Any], max_outputs: int = 32) -> Dict[str, Dict[str, Any]]:
@@ -339,13 +362,48 @@ def output_mapping_from_tables(tables: Dict[str, Any], max_outputs: int = 32) ->
 def motor_channels_from_mapping(mapping: Dict[str, Dict[str, Any]], fallback_channels: Sequence[str]) -> List[str]:
     mapped = [
         c for c, info in sorted(mapping.items(), key=lambda kv: safe_int(kv[0][1:], 999) or 999)
-        if str(info.get("role", "")).startswith("motor")
+        if info.get("category") == "motor"
     ]
     return mapped or list(fallback_channels)[:14]
 
 def output_channel_label(channel: str, mapping: Dict[str, Dict[str, Any]]) -> str:
     role = mapping.get(channel, {}).get("role")
     return f"{channel} {role}".strip() if role else channel
+
+def output_channel_columns(df: Any) -> List[str]:
+    if df is None or not hasattr(df, "columns"):
+        return []
+    return [c for c in df.columns if str(c).startswith("C") and str(c)[1:].isdigit()]
+
+def combined_rcout_dataframe(tables: Dict[str, Any]):
+    require_package("pandas")
+    import pandas as pd  # type: ignore
+    frames = []
+    for name in OUTPUT_MESSAGE_NAMES:
+        df = tables.get(name)
+        if df is None or len(df) == 0:
+            continue
+        cols = output_channel_columns(df)
+        if not cols:
+            continue
+        if "TimeS" in df.columns:
+            frames.append(df[["TimeS", *cols]].copy())
+        else:
+            frame = df[cols].copy()
+            frame.insert(0, "TimeS", range(len(frame)))
+            frames.append(frame)
+    if not frames:
+        return None
+    out = frames[0]
+    for frame in frames[1:]:
+        duplicate_cols = [c for c in frame.columns if c != "TimeS" and c in out.columns]
+        frame = frame.drop(columns=duplicate_cols)
+        out = pd.merge(out.sort_values("TimeS"), frame.sort_values("TimeS"), on="TimeS", how="outer")
+    return out.sort_values("TimeS", kind="stable").reset_index(drop=True)
+
+def output_channels_from_tables(tables: Dict[str, Any]) -> List[str]:
+    rc = combined_rcout_dataframe(tables)
+    return [] if rc is None else output_channel_columns(rc)
 
 def first_existing(tables: Dict[str, Any], names: Sequence[str]) -> Tuple[Optional[str], Any]:
     for n in names:

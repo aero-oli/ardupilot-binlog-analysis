@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from ap_common import (
+    combined_rcout_dataframe,
     get_col,
     motor_channels_from_mapping,
     numeric_series,
+    output_channel_columns,
     output_channel_label,
     output_mapping_from_tables,
 )
@@ -35,9 +37,9 @@ def _add_finding(findings, rank, possible_cause, severity, confidence, evidence,
 
 def add_motor_esc_findings(tables, findings, checked, rank=1):
     evidence = []
-    if "RCOU" in tables:
-        rcou = tables["RCOU"]
-        channels = [c for c in rcou.columns if c.startswith("C") and c[1:].isdigit()]
+    rcou = combined_rcout_dataframe(tables)
+    if rcou is not None:
+        channels = output_channel_columns(rcou)
         mapping = output_mapping_from_tables(tables)
         motor_channels = motor_channels_from_mapping(mapping, channels)
         for c in [ch for ch in channels if ch in motor_channels]:
@@ -47,7 +49,7 @@ def add_motor_esc_findings(tables, findings, checked, rank=1):
             high_pct = float((s >= 1900).mean() * 100)
             low_pct = float((s <= 1100).mean() * 100)
             if high_pct > 1 or low_pct > 1:
-                evidence.append(f"RCOU.{output_channel_label(c, mapping)}: {high_pct:.1f}% >=1900us, {low_pct:.1f}% <=1100us")
+                evidence.append(f"RCOUT.{output_channel_label(c, mapping)}: {high_pct:.1f}% >=1900us, {low_pct:.1f}% <=1100us")
     if "ESC" in tables:
         esc = tables["ESC"]
         err_col = get_col(esc, ["Err"])
@@ -101,13 +103,13 @@ def add_motor_esc_findings(tables, findings, checked, rank=1):
                     evidence.append(f"ESCX {col}: min={float(s.min()):.2f}, max={float(s.max()):.2f}")
     if evidence:
         _add_finding(
-            findings, rank, "Motor output saturation or ESC telemetry abnormality", "safety-critical", "high" if any("RCOU" in e or "status" in e for e in evidence) else "medium",
+            findings, rank, "Motor output saturation or ESC telemetry abnormality", "safety-critical", "high" if any("RCOUT" in e or "status" in e for e in evidence) else "medium",
             evidence[:14],
             "Requested outputs near conventional limits or ESC error/status evidence can indicate limited actuator headroom, wrong motor/prop setup, ESC/motor faults, or power-related thrust loss.",
             ["Verify motor order, prop direction, frame class/type and output mapping", "Bench inspect affected motor/ESC/wiring", "Correlate RCOU/ESC evidence with RATE errors, battery sag and mode changes before tuning"],
         )
     else:
-        checked.append({"check": "Motor outputs / ESC telemetry", "result": "No RCOU saturation or ESC error/status issue detected by heuristic"})
+        checked.append({"check": "Motor outputs / ESC telemetry", "result": "No RCOU/RCO2/RCO3 saturation or ESC error/status issue detected by heuristic"})
 
 
 def add_power_findings(tables, findings, checked, rank=3):
@@ -135,7 +137,7 @@ def add_power_findings(tables, findings, checked, rank=3):
         _add_finding(
             findings, rank, "Battery or board-power evidence needs correlation with the symptom", "likely-issue", "medium", evidence,
             "Flight battery voltage must be interpreted relative to cell count, chemistry, current and calibration; board-power drops or flags can indicate power-module or regulator problems.",
-            ["Correlate voltage/current/Vcc with throttle, RCOU saturation, mode changes and log end", "Verify battery health, cell count, connector resistance, power module calibration and regulator loading"],
+            ["Correlate voltage/current/Vcc with throttle, mapped output-channel saturation, mode changes and log end", "Verify battery health, cell count, connector resistance, power module calibration and regulator loading"],
         )
     else:
         checked.append({"check": "Battery / board power", "result": "No BAT or POWR evidence available or no heuristic power issue detected"})

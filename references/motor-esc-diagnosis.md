@@ -1,10 +1,10 @@
 # Motor/ESC diagnosis
 
-Use RCOU for commanded output and ESC/ESCX/EDT2 for feedback when present. Do not infer ESC health if ESC telemetry is absent.
+Use mapped output channels from RCOU/RCO2/RCO3 for commanded output and ESC/ESCX/EDT2 for feedback when present. Do not infer ESC health if ESC telemetry is absent.
 
 ## Checks
 
-- RCOU channels near min/max.
+- Mapped motor output channels near min/max.
 - One channel persistently higher/lower than peers.
 - ESC RPM mismatch for similar outputs.
 - ESC current or temperature abnormal on one instance.

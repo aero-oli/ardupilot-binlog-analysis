@@ -6,9 +6,9 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from ap_common import (
-    AXIS_MAP, AnalysisError, clip_columns, ensure_dir, event_markers_from_tables, filter_tables_by_time,
-    get_col, load_tables, motor_channels_from_mapping, output_channel_label, output_mapping_from_tables,
-    parse_time_window, read_json, write_json
+    AXIS_MAP, AnalysisError, clip_columns, combined_rcout_dataframe, ensure_dir, event_markers_from_tables,
+    filter_tables_by_time, get_col, load_tables, motor_channels_from_mapping, output_channel_columns,
+    output_channel_label, output_mapping_from_tables, parse_time_window, read_json, write_json
 )
 
 
@@ -63,12 +63,13 @@ def flight_overview(tables, out, markers=None):
     if "VIBE" in tables:
         for c in ["VibeX", "VibeY", "VibeZ", *clip_columns(tables["VIBE"])]:
             add_line(fig, tables["VIBE"], c, row=3)
-    if "RCOU" in tables:
+    rcou = combined_rcout_dataframe(tables)
+    if rcou is not None:
         mapping = output_mapping_from_tables(tables)
-        motor_channels = motor_channels_from_mapping(mapping, [c for c in tables["RCOU"].columns if c.startswith("C") and c[1:].isdigit()])
-        for c in [c for c in tables["RCOU"].columns if c.startswith("C") and c[1:].isdigit()][:12]:
+        motor_channels = motor_channels_from_mapping(mapping, output_channel_columns(rcou))
+        for c in output_channel_columns(rcou)[:12]:
             if c in motor_channels:
-                add_line(fig, tables["RCOU"], c, name=output_channel_label(c, mapping), row=4)
+                add_line(fig, rcou, c, name=output_channel_label(c, mapping), row=4)
     add_event_markers(fig, markers)
     write_fig(fig, out / "00_flight_overview.html", "ArduPilot flight overview")
 
@@ -118,15 +119,16 @@ def pid_terms(tables, out, markers=None):
 
 def health_plots(tables, out, markers=None):
     go, make_subplots = _plotly()
-    if "RCOU" in tables:
+    rcou = combined_rcout_dataframe(tables)
+    if rcou is not None:
         fig = go.Figure()
-        channels = [c for c in tables["RCOU"].columns if c.startswith("C") and c[1:].isdigit()]
+        channels = output_channel_columns(rcou)
         mapping = output_mapping_from_tables(tables)
         motor_channels = motor_channels_from_mapping(mapping, channels)
         for c in [c for c in channels if c in motor_channels]:
-            add_line(fig, tables["RCOU"], c, name=output_channel_label(c, mapping))
+            add_line(fig, rcou, c, name=output_channel_label(c, mapping))
         add_event_markers(fig, markers)
-        write_fig(fig, out / "05_motor_outputs_rcou.html", "RCOU motor/servo outputs")
+        write_fig(fig, out / "05_motor_outputs_rcout.html", "Mapped motor outputs")
     if "ESC" in tables:
         fig = make_subplots(rows=4, cols=1, shared_xaxes=True, vertical_spacing=0.04, subplot_titles=("ESC RPM", "ESC current", "ESC voltage", "ESC errors/temp"))
         esc = tables["ESC"]
@@ -227,6 +229,12 @@ def main() -> int:
         autotune_plot(tables, out, markers)
         generated = sorted(str(p) for p in out.glob("*.html"))
         manifest = {"tables": args.tables, "analysis_window": window, "events_overlay": bool(args.events), "plot_count": len(generated), "plots": generated}
+        if args.metrics:
+            metrics = read_json(args.metrics)
+            motor_outputs = metrics.get("health", {}).get("motor_outputs", {})
+            manifest["metrics_file"] = args.metrics
+            manifest["metrics_analysis_window"] = metrics.get("analysis_window")
+            manifest["motor_mapping_available"] = motor_outputs.get("mapping_available")
         write_json(args.manifest or out / "manifest.json", manifest)
         print(f"Generated {len(generated)} plots in {out}")
         return 0

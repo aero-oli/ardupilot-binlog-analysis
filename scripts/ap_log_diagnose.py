@@ -6,10 +6,10 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from ap_common import (
-    AnalysisError, AXIS_MAP, build_index, classify_symptom, clip_columns, ensure_dir, event_markers_from_tables,
-    filter_tables_by_time, get_col, missing_messages, motor_channels_from_mapping, numeric_series,
-    output_channel_label, output_mapping_from_tables, parse_dataflash, parse_time_window, percentile, rms,
-    rows_to_dataframe, safe_float, severity_rank, write_json
+    AnalysisError, AXIS_MAP, build_index, classify_symptom, clip_columns, combined_rcout_dataframe, ensure_dir,
+    event_markers_from_tables, filter_tables_by_time, get_col, missing_messages, motor_channels_from_mapping,
+    numeric_series, output_channel_columns, output_channel_label, output_mapping_from_tables, parse_dataflash,
+    parse_time_window, percentile, rms, rows_to_dataframe, safe_float, severity_rank, write_json
 )
 from ap_diag_helpers import add_motor_esc_findings, add_power_findings, vals
 
@@ -72,11 +72,11 @@ def make_targeted_plots_from_tables(tables, symptom_class, plots_dir, events=Fal
             fig.update_layout(title="Yaw PID terms", template="plotly_white", hovermode="x unified")
             add_event_markers(fig, markers)
             p = out / "yaw_pid_terms.html"; fig.write_html(str(p), include_plotlyjs="cdn"); generated.append(str(p))
-        if "RCOU" in tables:
-            rcou = tables["RCOU"]
+        rcou = combined_rcout_dataframe(tables)
+        if rcou is not None:
             fig = go.Figure()
             x = rcou["TimeS"] if "TimeS" in rcou.columns else list(range(len(rcou)))
-            channels = [c for c in rcou.columns if c.startswith("C") and c[1:].isdigit()]
+            channels = output_channel_columns(rcou)
             mapping = output_mapping_from_tables(tables)
             motor_channels = motor_channels_from_mapping(mapping, channels)
             for c in [c for c in channels if c in motor_channels]:
@@ -157,10 +157,11 @@ def make_targeted_plots_from_tables(tables, symptom_class, plots_dir, events=Fal
             add_event_markers(fig, markers)
             p = out / "battery_power_symptom.html"; fig.write_html(str(p), include_plotlyjs="cdn"); generated.append(str(p))
     if symptom_class in {"motor_esc_issue", "crash_or_loss_of_control", "general_diagnosis"}:
-        if "RCOU" in tables:
-            rcou = tables["RCOU"]; x = rcou["TimeS"] if "TimeS" in rcou.columns else list(range(len(rcou)))
+        rcou = combined_rcout_dataframe(tables)
+        if rcou is not None:
+            x = rcou["TimeS"] if "TimeS" in rcou.columns else list(range(len(rcou)))
             fig = go.Figure()
-            channels = [c for c in rcou.columns if c.startswith("C") and c[1:].isdigit()]
+            channels = output_channel_columns(rcou)
             mapping = output_mapping_from_tables(tables)
             motor_channels = motor_channels_from_mapping(mapping, channels)
             for c in [c for c in channels if c in motor_channels]:
@@ -348,7 +349,7 @@ def add_attitude_rate_findings(tables, findings, checked, axes=("roll", "pitch",
                     findings, rank, f"{axis} attitude tracking error", "likely-issue", "medium",
                     [f"ATT {axis} desired-vs-achieved p95 absolute error={p95:.1f} deg"],
                     "Desired attitude and achieved attitude diverge; use RATE, PID and actuator evidence to separate tune, authority, estimator and external-disturbance causes.",
-                    ["Inspect ATT and RATE around the symptom", "Check PID flags/Dmod and RCOU saturation before changing gains"],
+                    ["Inspect ATT and RATE around the symptom", "Check PID flags/Dmod and mapped output-channel saturation before changing gains"],
                 )
         if rate is not None and fields["rate_des"] in rate.columns and fields["rate"] in rate.columns:
             des = numeric_series(rate, [fields["rate_des"]])
@@ -476,7 +477,7 @@ def diagnose_yaw(tables, index):
                 "confidence": "high" if "RCOU" in tables else "medium",
                 "evidence": [f"RATE yaw error p95 is {p95:.1f} deg/s; max {maxabs:.1f} deg/s", f"RATE.YOut p95 abs is {out_p95:.2f}; max abs {out_max:.2f}"],
                 "interpretation": "The controller is asking for yaw response but achieved yaw rate is not following well. This points first to yaw authority, actuator saturation, motor/prop/ESC/frame setup, or severe power/throttle limitation rather than simply changing yaw P.",
-                "recommended_checks": ["Check motor order and prop direction", "Check frame class/type and motor mapping", "Check RCOU saturation", "Check ESC/motor health and yaw torque asymmetry", "Do not continue flight tests until bench/ground checks are complete"],
+                "recommended_checks": ["Check motor order and prop direction", "Check frame class/type and motor mapping", "Check mapped output-channel saturation", "Check ESC/motor health and yaw torque asymmetry", "Do not continue flight tests until bench/ground checks are complete"],
             })
         elif rate_tracking_bad:
             findings.append({
@@ -486,7 +487,7 @@ def diagnose_yaw(tables, index):
                 "confidence": "medium",
                 "evidence": [f"RATE yaw error p95 is {p95:.1f} deg/s; max {maxabs:.1f} deg/s"],
                 "interpretation": "Yaw rate response is not following target. Output/saturation evidence is incomplete or not high by heuristic.",
-                "recommended_checks": ["Check PIDY terms", "Check RCOU outputs", "Compare in hover vs high-throttle sections"],
+                "recommended_checks": ["Check PIDY terms", "Check mapped output channels", "Compare in hover vs high-throttle sections"],
             })
         else:
             checked.append({"check": "RATE yaw tracking", "result": f"Yaw rate tracking not flagged by heuristic; p95={p95}, YOut p95={out_p95}"})
@@ -654,10 +655,10 @@ def build_cannot_conclude(symptom_class, missing, tables=None):
         out.append("ESC-level motor/ESC confirmation is not possible because ESC/ESCX/EDT2 telemetry is missing.")
     elif "ESCX" in tables and "ESC" not in tables and "EDT2" not in tables:
         out.append("ESCX duty/power/flags are available, but ESC RPM/current/temperature/error and EDT2 status confirmation are not available because ESC and EDT2 telemetry are missing.")
-    if "RCOU" not in tables:
-        out.append("Actuator output saturation cannot be confirmed because RCOU is missing.")
+    if not any(name in tables for name in ["RCOU", "RCO2", "RCO3"]):
+        out.append("Actuator output saturation cannot be confirmed because RCOU/RCO2/RCO3 is missing.")
     elif not output_mapping_from_tables(tables):
-        out.append("Output mapping could not be confirmed from parameters; RCOU channel interpretation is generic.")
+        out.append("Output mapping could not be confirmed from parameters; RCOU/RCO2/RCO3 channel interpretation is generic.")
     if "PIDY" not in tables and symptom_class == "yaw_misbehaviour":
         out.append("Yaw PID limiting, I-term behaviour, and Dmod cannot be confirmed because PIDY is missing.")
     if "XKF4" not in tables and "NKF4" not in tables:

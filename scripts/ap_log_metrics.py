@@ -6,8 +6,9 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from ap_common import (
-    AnalysisError, AXIS_MAP, clip_columns, df_duration, filter_tables_by_time, first_existing, fmt, get_col, load_tables,
-    md_table, motor_channels_from_mapping, numeric_series, output_mapping_from_tables, parse_time_window,
+    AnalysisError, AXIS_MAP, clip_columns, combined_rcout_dataframe, df_duration, filter_tables_by_time,
+    first_existing, fmt, get_col, load_tables, md_table, motor_channels_from_mapping, numeric_series,
+    output_channel_columns, output_mapping_from_tables, parse_time_window,
     percentile, rms, summarise_numeric, write_json
 )
 
@@ -121,9 +122,9 @@ def compute_metrics(tables, analysis_window=None):
         metrics["health"]["vibration"] = d
 
     # Motor outputs saturation/asymmetry
-    if "RCOU" in tables:
-        rcou = tables["RCOU"]
-        channels = [c for c in rcou.columns if c.startswith("C") and c[1:].isdigit()]
+    rcou = combined_rcout_dataframe(tables)
+    if rcou is not None:
+        channels = output_channel_columns(rcou)
         output_mapping = output_mapping_from_tables(tables)
         motor_channels = motor_channels_from_mapping(output_mapping, channels)
         sat = {}
@@ -143,7 +144,7 @@ def compute_metrics(tables, analysis_window=None):
             "mean_outputs": means,
         }
         if not output_mapping:
-            metrics["confidence"]["reasons"].append("Output mapping could not be confirmed from parameters; RCOU channel interpretation is generic")
+            metrics["confidence"]["reasons"].append("Output mapping could not be confirmed from parameters; RCOU/RCO2/RCO3 channel interpretation is generic")
 
     # ESC summary
     if "ESC" in tables:
@@ -218,7 +219,7 @@ def compute_metrics(tables, analysis_window=None):
             metrics["tuning"].setdefault(axis, {}).update({"pid": pid_m})
 
     handled = {
-        "ATT", "RATE", "PIDR", "PIDP", "PIDY", "PIDA", "RCOU", "ESC", "ESCX", "EDT2", "BAT", "BCL",
+        "ATT", "RATE", "PIDR", "PIDP", "PIDY", "PIDA", "RCOU", "RCO2", "RCO3", "ESC", "ESCX", "EDT2", "BAT", "BCL",
         "POWR", "GPS", "GPS2", "GPA", "XKF1", "XKF2", "XKF3", "XKF4", "XKFS", "NKF1", "NKF2",
         "NKF3", "NKF4", "VIBE", "PARM", "MODE", "ERR", "EV", "MSG", "ARM", "CTUN", "BARO",
         "POS", "MAG", "RCIN", "ATUN", "SID", "SIDD", "SIDS", "ISBH", "ISBD",
@@ -235,8 +236,8 @@ def compute_metrics(tables, analysis_window=None):
     if "ATT" not in tables or "RATE" not in tables:
         metrics["confidence"]["overall"] = "low"
         metrics["confidence"]["reasons"].append("ATT and/or RATE missing; attitude/rate tracking conclusions are limited")
-    if "RCOU" not in tables:
-        metrics["confidence"]["reasons"].append("RCOU missing; actuator saturation cannot be confirmed")
+    if not any(name in tables for name in ["RCOU", "RCO2", "RCO3"]):
+        metrics["confidence"]["reasons"].append("RCOU/RCO2/RCO3 missing; actuator saturation cannot be confirmed")
     if "ESC" not in tables and "ESCX" not in tables and "EDT2" not in tables:
         metrics["confidence"]["reasons"].append("ESC/ESCX/EDT2 telemetry missing; motor/ESC-level confirmation not possible")
     return metrics

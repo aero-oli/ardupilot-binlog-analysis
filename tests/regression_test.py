@@ -18,6 +18,7 @@ from ap_log_diagnose import make_targeted_plots_from_tables
 from ap_log_fft import fft_from_isb_rows
 from ap_log_metrics import compute_metrics
 from ap_log_plots import health_plots
+from ap_log_plots import main as plots_main
 from ap_report_pack import render as render_report
 from ap_log_validate import module_availability
 
@@ -74,9 +75,29 @@ def test_output_mapping_reads_servo_function_parameters():
     params = {"SERVO1_FUNCTION": 33, "SERVO2_FUNCTION": 34, "SERVO3_FUNCTION": 1, "SERVO4_FUNCTION": 0}
     mapping = ap_common.output_mapping_from_params(params)
     assert_true(mapping["C1"]["function_id"] == 33 and mapping["C1"]["role"] == "motor1", "SERVO1 motor mapping should be detected")
+    assert_true(mapping["C1"]["category"] == "motor", "SERVO1 motor mapping should be categorized as motor")
     assert_true(mapping["C2"]["role"] == "motor2", "SERVO2 motor mapping should be detected")
     assert_true(mapping["C3"]["role"] == "rc_passthrough", "passthrough role should be detected")
     assert_true(mapping["C4"]["role"] == "disabled", "disabled role should be detected")
+
+
+def test_copter_output_mapping_handles_motor9_to_motor12_and_tilt_roles():
+    params = {
+        "SERVO1_FUNCTION": 41,
+        "SERVO2_FUNCTION": 45,
+        "SERVO9_FUNCTION": 82,
+        "SERVO10_FUNCTION": 83,
+        "SERVO11_FUNCTION": 84,
+        "SERVO12_FUNCTION": 85,
+    }
+    mapping = ap_common.output_mapping_from_params(params)
+    assert_true(mapping["C1"]["role"] == "motor_tilt" and mapping["C1"]["category"] == "tilt", "function 41 should be tilt, not motor9")
+    assert_true(mapping["C2"]["role"] == "tilt_motor_rear" and mapping["C2"]["category"] == "tilt", "function 45 should be tilt, not a normal motor")
+    assert_true(mapping["C9"]["role"] == "motor9", "function 82 should map to motor9")
+    assert_true(mapping["C10"]["role"] == "motor10", "function 83 should map to motor10")
+    assert_true(mapping["C11"]["role"] == "motor11", "function 84 should map to motor11")
+    assert_true(mapping["C12"]["role"] == "motor12", "function 85 should map to motor12")
+    assert_true(ap_common.motor_channels_from_mapping(mapping, ["C1", "C2"]) == ["C9", "C10", "C11", "C12"], "tilt outputs should not be treated as motor channels")
 
 
 def test_motor_output_metrics_are_mapping_aware():
@@ -87,6 +108,21 @@ def test_motor_output_metrics_are_mapping_aware():
     metrics = compute_metrics(tables)
     channels = metrics["health"]["motor_outputs"]["motor_channels"]
     assert_true(channels == ["C1", "C2"], "only mapped motor channels should be treated as motors")
+
+
+def test_motor_output_metrics_include_rco2_and_rco3_channels():
+    tables = {
+        "RCOU": pd.DataFrame({"TimeS": [0.0, 1.0], "C1": [1200, 1300]}),
+        "RCO2": pd.DataFrame({"TimeS": [0.0, 1.0], "C15": [1900, 1950]}),
+        "RCO3": pd.DataFrame({"TimeS": [0.0, 1.0], "C19": [1000, 1050]}),
+        "PARM": pd.DataFrame({"Name": ["SERVO15_FUNCTION", "SERVO19_FUNCTION"], "Value": [82, 83]}),
+    }
+    metrics = compute_metrics(tables)
+    motor_outputs = metrics["health"]["motor_outputs"]
+    assert_true("C15" in motor_outputs["channels"] and "C19" in motor_outputs["channels"], "RCO2/RCO3 channels should be included")
+    assert_true(motor_outputs["motor_channels"] == ["C15", "C19"], "mapped high-numbered motor outputs should be motor channels")
+    assert_true(motor_outputs["saturation"]["C15"]["pct_high_ge_1900"] == 100.0, "RCO2 saturation should be summarized")
+    assert_true(motor_outputs["saturation"]["C19"]["pct_low_le_1100"] == 100.0, "RCO3 saturation should be summarized")
 
 
 def test_event_markers_collect_mode_err_ev_msg():
@@ -369,6 +405,18 @@ def test_custom_plot_rejects_secondary_series_not_in_plot():
             raise AssertionError("custom plot should reject secondary fields that are not plotted")
 
 
+def test_custom_plot_missing_message_suggests_extracting_all_messages():
+    tables = {"GPS": pd.DataFrame({"TimeS": [0.0, 1.0], "Alt": [83.5, 84.0]})}
+    with tempfile.TemporaryDirectory() as tmp:
+        try:
+            make_custom_plot(tables, ["CUSTOM.Value"], Path(tmp) / "plot.html")
+        except ap_common.AnalysisError as exc:
+            msg = str(exc)
+            assert_true("--messages ALL" in msg and "--messages CUSTOM" in msg, "missing custom plot messages should explain how to re-extract")
+        else:
+            raise AssertionError("custom plot should reject messages that were not extracted")
+
+
 def test_custom_plot_supports_simple_derived_expression():
     tables = {
         "GPS": pd.DataFrame({"TimeS": [0.0, 1.0], "Alt": [100.0, 102.0]}),
@@ -384,13 +432,65 @@ def test_custom_plot_supports_simple_derived_expression():
         assert_true("GPS minus baro" in labels, "derived expression should appear as a plotted series")
 
 
+def test_custom_plot_expression_alignment_tolerance_drops_unmatched_rows():
+    tables = {
+        "GPS": pd.DataFrame({"TimeS": [0.0, 1.0, 2.0], "Alt": [100.0, 102.0, 104.0]}),
+        "BARO": pd.DataFrame({"TimeS": [0.02, 4.0], "Alt": [98.0, 99.0]}),
+    }
+    with tempfile.TemporaryDirectory() as tmp:
+        manifest = make_custom_plot(
+            tables,
+            ["GPS.Alt-BARO.Alt=GPS minus baro"],
+            Path(tmp) / "aligned.html",
+            align_tolerance=0.05,
+        )
+        alignment = manifest["series"][0]["alignment"]
+        assert_true(alignment["align_tolerance_s"] == 0.05, "alignment tolerance should be recorded")
+        assert_true(alignment["rows_before_alignment"] == 3, "base GPS rows should be counted")
+        assert_true(alignment["rows_after_alignment"] == 1, "only one GPS row should align within tolerance")
+        assert_true(alignment["rows_dropped_for_alignment"] == 2, "unmatched rows should be reported")
+
+
+def test_plot_manifest_uses_metrics_argument():
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_path = Path(tmp)
+        tables_dir = tmp_path / "tables"
+        tables_dir.mkdir()
+        pd.DataFrame({"TimeS": [0.0, 1.0], "C1": [1200, 1300]}).to_csv(tables_dir / "RCOU.csv", index=False)
+        metrics_path = tmp_path / "metrics.json"
+        metrics_path.write_text(
+            '{"analysis_window":{"start_s":1.0,"end_s":2.0},"health":{"motor_outputs":{"mapping_available":true}}}',
+            encoding="utf-8",
+        )
+        manifest_path = tmp_path / "manifest.json"
+        argv = sys.argv
+        try:
+            sys.argv = [
+                "ap_log_plots.py",
+                "--tables", str(tables_dir),
+                "--metrics", str(metrics_path),
+                "--out", str(tmp_path / "plots"),
+                "--manifest", str(manifest_path),
+            ]
+            rc = plots_main()
+        finally:
+            sys.argv = argv
+        assert_true(rc == 0, "plot generation should succeed")
+        manifest = ap_common.read_json(manifest_path)
+        assert_true(manifest["metrics_file"] == str(metrics_path), "manifest should record metrics file")
+        assert_true(manifest["metrics_analysis_window"] == {"start_s": 1.0, "end_s": 2.0}, "manifest should include metrics window")
+        assert_true(manifest["motor_mapping_available"] is True, "manifest should include motor mapping availability")
+
+
 def main():
     test_load_tables_fails_on_unreadable_table()
     test_time_window_filters_tables_inclusively()
     test_parse_time_window_accepts_start_end_and_around()
     test_metrics_can_be_computed_from_filtered_window()
     test_output_mapping_reads_servo_function_parameters()
+    test_copter_output_mapping_handles_motor9_to_motor12_and_tilt_roles()
     test_motor_output_metrics_are_mapping_aware()
+    test_motor_output_metrics_include_rco2_and_rco3_channels()
     test_event_markers_collect_mode_err_ev_msg()
     test_mode_segments_are_derived_from_mode_rows()
     test_validate_marks_non_copter_scope_as_partial()
@@ -410,7 +510,10 @@ def main():
     test_non_yaw_symptom_plots_are_generated_when_data_exists()
     test_custom_plot_supports_arbitrary_fields_and_secondary_axis()
     test_custom_plot_rejects_secondary_series_not_in_plot()
+    test_custom_plot_missing_message_suggests_extracting_all_messages()
     test_custom_plot_supports_simple_derived_expression()
+    test_custom_plot_expression_alignment_tolerance_drops_unmatched_rows()
+    test_plot_manifest_uses_metrics_argument()
     print("regression tests passed")
 
 

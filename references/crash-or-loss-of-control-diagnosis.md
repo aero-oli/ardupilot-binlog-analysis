@@ -7,7 +7,7 @@ Prioritise timeline and safety-critical evidence over tuning.
 1. Build timeline from MSG, EV, ERR, ARM and MODE.
 2. Determine if loss of control was preceded by failsafe, EKF/GPS/compass error, battery/power event, motor output saturation, vibration/clipping or RC loss.
 3. Compare ATT desired vs achieved and RATE desired vs achieved.
-4. Check RCOU and ESC telemetry for actuator failure/saturation.
+4. Check mapped RCOU/RCO2/RCO3 outputs and ESC telemetry for actuator failure/saturation.
 5. Check BAT/POWR and VIBE.
 6. State what cannot be concluded.
 
