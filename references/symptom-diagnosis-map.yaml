@@ -1,0 +1,59 @@
+yaw_misbehaviour:
+  aliases:
+    - yaw bad
+    - yaw twitching
+    - yaw oscillating
+    - yaw drifting
+    - yaw toilet bowling
+    - heading not holding
+    - spin
+    - pirouette
+  primary_messages: [ATT, RATE, PIDY, RCOU, MODE, MSG, EV, ERR]
+  secondary_messages: [MAG, XKF3, XKF4, GPS, VIBE, BAT, ESC, ESCX, EDT2, RCIN, POWR]
+  parameters:
+    - FRAME_CLASS
+    - FRAME_TYPE
+    - MOT_SPIN_ARM
+    - MOT_SPIN_MIN
+    - MOT_THST_EXPO
+    - ATC_RAT_YAW_P
+    - ATC_RAT_YAW_I
+    - ATC_RAT_YAW_D
+    - ATC_RAT_YAW_FF
+    - ATC_ANG_YAW_P
+    - ATC_ACCEL_Y_MAX
+    - INS_HNTCH_ENABLE
+    - INS_LOG_BAT_MASK
+    - COMPASS_USE
+    - COMPASS_ORIENT
+    - EK3_SRC1_YAW
+
+attitude_rate_issue:
+  aliases: [wobble, oscillation, roll wobble, pitch wobble, twitching, shaking]
+  primary_messages: [ATT, RATE, PIDR, PIDP, RCOU, MODE]
+  secondary_messages: [VIBE, IMU, BAT, ESC, XKF4]
+
+ekf_gps_issue:
+  aliases: [loiter drift, gps glitch, ekf error, toilet bowling, position jump, flyaway]
+  primary_messages: [GPS, XKF1, XKF3, XKF4, MODE, MSG, EV, ERR]
+  secondary_messages: [MAG, ATT, RATE, VIBE, BAT]
+
+motor_esc_issue:
+  aliases: [motor pulsing, esc desync, motor stopped, motor hot, rpm mismatch]
+  primary_messages: [RCOU, RATE, PIDR, PIDP, PIDY, BAT]
+  secondary_messages: [ESC, ESCX, EDT2, VIBE, MSG, EV, ERR]
+
+vibration_issue:
+  aliases: [vibration, vibes, clipping, noisy gyro, resonance]
+  primary_messages: [VIBE, IMU, ACC, GYR]
+  secondary_messages: [RATE, PIDR, PIDP, PIDY, INS, BAT]
+
+battery_power_issue:
+  aliases: [battery sag, brownout, low voltage, power problem, voltage drop]
+  primary_messages: [BAT, POWR, RCOU, CTUN]
+  secondary_messages: [ESC, RATE, ERR, EV, MSG]
+
+crash_or_loss_of_control:
+  aliases: [crash, fell, dropped, loss of control, flyaway, flipped]
+  primary_messages: [ATT, RATE, RCOU, EV, ERR, MODE, MSG, BAT, GPS, XKF4, VIBE]
+  secondary_messages: [ESC, PIDR, PIDP, PIDY, RCIN, CTUN, POWR]

@@ -1,0 +1,5 @@
+pymavlink>=2.4.42
+pandas>=2.0
+numpy>=1.24
+plotly>=5.18
+pyarrow>=14.0
