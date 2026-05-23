@@ -22,7 +22,6 @@ out_dir="$(mktemp -d "${TMPDIR:-/tmp}/ardupilot-real-log-check.XXXXXX")"
 "$python_bin" scripts/ap_log_segments.py --tables "$out_dir/tables" --json "$out_dir/segments.json" --summary "$out_dir/segments.md"
 "$python_bin" scripts/ap_log_metrics.py --tables "$out_dir/tables" --window 0:120 --json "$out_dir/metrics-window.json" --summary "$out_dir/metrics-window.md"
 "$python_bin" scripts/ap_log_plots.py --tables "$out_dir/tables" --out "$out_dir/plots" --manifest "$out_dir/plots/manifest.json" --events
-"$python_bin" scripts/ap_report_pack.py --index "$out_dir/index.json" --metrics "$out_dir/metrics.json" --out "$out_dir/report.md"
 
 if [[ -f "$out_dir/tables/GPS.csv" && -f "$out_dir/tables/BARO.csv" ]]; then
   "$python_bin" scripts/ap_log_custom_plot.py \

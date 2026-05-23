@@ -19,7 +19,6 @@ from ap_log_fft import fft_from_isb_rows
 from ap_log_metrics import compute_metrics
 from ap_log_plots import health_plots
 from ap_log_plots import main as plots_main
-from ap_report_pack import render as render_report
 from ap_log_validate import module_availability
 
 
@@ -271,9 +270,6 @@ def test_escx_generates_plots_and_avoids_missing_telemetry_caveat():
         assert_true((Path(tmp) / "06b_escx_extended_telemetry.html").exists(), "standard plot pack should include ESCX plot")
         targeted = make_targeted_plots_from_tables(tables, "motor_esc_issue", Path(tmp) / "targeted")
         assert_true(any("esc_escx_edt2" in p for p in targeted), "targeted motor/ESC plots should include ESCX")
-    metrics = {"messages_present": ["ESCX"], "health": {}, "tuning": {}, "confidence": {"overall": "medium", "reasons": []}}
-    report = render_report(metrics=metrics)
-    assert_true("ESC/ESCX/EDT2 telemetry is missing" not in report, "report should not claim telemetry is missing when ESCX exists")
 
 
 def test_validate_module_availability_separates_required_and_optional_messages():

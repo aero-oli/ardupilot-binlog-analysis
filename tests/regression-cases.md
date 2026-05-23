@@ -1,11 +1,11 @@
 # Regression cases
 
-Run these against representative real logs before relying on the skill operationally. Use `tests/real_log_fixture_check.sh /path/to/log.bin` for a non-committed local fixture run; it validates, indexes, extracts, derives segments, generates whole-log and windowed metrics, standard plots with events, a report, and a GPS-altitude/barometric-pressure custom plot when the log contains `GPS` and `BARO`.
+Run these against representative real logs before relying on the skill operationally. Use `tests/real_log_fixture_check.sh /path/to/log.bin` for a non-committed local fixture run; it validates, indexes, extracts, derives segments, generates whole-log and windowed metrics, standard plots with events, and a GPS-altitude/barometric-pressure custom plot when the log contains `GPS` and `BARO`.
 
 | Case | Expected behaviour |
 |---|---|
 | Good hover | No safety-critical issue from deterministic heuristics; standard plots generated. |
-| Missing RATE | Tuning confidence low; report says rate tracking cannot be assessed. |
+| Missing RATE | Tuning confidence low; final conclusions should say rate tracking cannot be assessed. |
 | Missing ESC/ESCX/EDT2 | Report says ESC-level confirmation is impossible. |
 | ESCX present | Metrics summarize `inpct`, `outpct`, `flags`, and `Pwr`; diagnosis/plots do not treat ESC telemetry as missing. |
 | High vibration | VIBE finding raised; tuning confidence reduced. |
@@ -18,5 +18,5 @@ Run these against representative real logs before relying on the skill operation
 | AutoTune | ATUN summary produced. |
 | Raw IMU or ISBH/ISBD present | FFT plot produced. |
 | Tlog supplied | Validation warns that skill is optimized for DataFlash. |
-| Bench-only log | Report says flight conclusions are not supported. |
+| Bench-only log | Final conclusions should say flight conclusions are not supported. |
 | Corrupt/truncated log | Parser exits non-zero with partial/parse warning rather than inventing results. |

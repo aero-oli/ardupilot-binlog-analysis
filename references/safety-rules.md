@@ -1,6 +1,6 @@
 # Safety rules for ArduPilot log analysis
 
-1. A log report must never be treated as flight clearance.
+1. A log analysis must never be treated as flight clearance.
 2. Safety-critical issues come before tuning optimisation.
 3. Separate evidence from interpretation.
 4. Use confidence levels: high, medium, low.

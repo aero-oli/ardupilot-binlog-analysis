@@ -2,14 +2,14 @@
 
 A Codex/agent skill for inspecting ArduPilot onboard DataFlash `.bin` and `.log` files. It gives an agent a structured workflow, reference material, and deterministic Python scripts for ArduCopter-focused log review, diagnosis, plotting, tuning triage, and before/after comparison.
 
-The skill is strongest for Copter and multirotor logs. Generic parsing, extraction, plotting, segmentation, and reports work across ArduPilot DataFlash logs, but Copter tuning and motor-output diagnosis are the main target. It is not intended for PX4 `.ulg` logs unless they have been converted to ArduPilot-style tables.
+The skill is strongest for Copter and multirotor logs. Generic parsing, extraction, plotting, and segmentation work across ArduPilot DataFlash logs, but Copter tuning and motor-output diagnosis are the main target. It is not intended for PX4 `.ulg` logs unless they have been converted to ArduPilot-style tables.
 
 ## What It Can Do
 
 - Validate and index DataFlash logs.
 - Extract log messages to CSV or Parquet tables.
-- Generate health metrics, tuning summaries, FFT/noise plots, and interactive Plotly graph packs.
-- Run symptom-led diagnosis for yaw, attitude, GPS/EKF, vibration, battery/power, motor/ESC, altitude/throttle, and crash/loss-of-control reports.
+- Generate health metrics, tuning summaries, FFT/noise plots, and interactive Plotly graph packs for the agent to interpret.
+- Run symptom-led investigations for yaw, attitude, GPS/EKF, vibration, battery/power, motor/ESC, altitude/throttle, and crash/loss-of-control events.
 - Compare before/after logs with optional segment-specific time windows.
 - Create custom plots from any extracted `MESSAGE.FIELD`, including derived expressions such as `GPS.Alt-BARO.Alt`.
 - Interpret Copter output channels using `SERVOx_FUNCTION`, including `RCOU`, `RCO2`, and `RCO3`.
@@ -54,11 +54,11 @@ Compare these two logs and tell me whether the tuning change improved things.
 Plot GPS altitude and barometric pressure, and include mode/error markers.
 ```
 
-The agent reads `SKILL.md`, follows the safety rules, runs the bundled scripts where useful, and returns a concise evidence-backed report with links to generated artifacts.
+The agent reads `SKILL.md`, follows the safety rules, chooses the relevant investigations, runs the bundled scripts where useful, and writes its own concise evidence-backed conclusions with links to generated artifacts.
 
 ## Bundled Tools
 
-The `scripts/` directory is mainly for the agent. It provides deterministic helpers for validation, indexing, extraction, metrics, plotting, tuning review, symptom diagnosis, FFT, comparison, segment discovery, and report assembly.
+The `scripts/` directory is mainly for the agent. It provides deterministic helpers for validation, indexing, extraction, metrics, plotting, tuning review, symptom diagnosis, FFT, comparison, and segment discovery.
 
 You can run the scripts manually while developing or debugging the skill, but normal use is to ask the agent for the analysis you want and let it choose the workflow.
 
@@ -85,9 +85,9 @@ bash tests/real_log_fixture_check.sh /path/to/log.bin
 ## Repository Layout
 
 - `SKILL.md` - agent instructions and workflow.
-- `scripts/` - deterministic parsing, metrics, plotting, diagnosis, comparison, FFT, and report tools.
+- `scripts/` - deterministic parsing, metrics, plotting, diagnosis, comparison, FFT, and segment discovery tools.
 - `references/` - diagnosis guides, caveats, message map, and plot catalog.
-- `assets/` - reusable report/example prompt material.
+- `assets/` - reusable example prompt material.
 - `tests/` - smoke, regression, and real-log fixture checks.
 - `agents/openai.yaml` - agent metadata.
 

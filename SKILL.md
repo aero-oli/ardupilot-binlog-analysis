@@ -5,9 +5,9 @@ description: Analyze ArduPilot DataFlash .bin/.log files for ArduCopter tuning, 
 
 # ArduPilot Bin Log Analysis Skill
 
-Use this skill for ArduPilot onboard DataFlash `.bin` or `.log` analysis. Default to ArduCopter unless the log clearly identifies another vehicle type or the user asks for Plane/Rover/Sub. Generic parsing, extraction, plotting, segmenting, and reports work across ArduPilot DataFlash logs; tuning and motor-mix diagnosis are strongest for Copter/multirotor logs.
+Use this skill for ArduPilot onboard DataFlash `.bin` or `.log` analysis. Default to ArduCopter unless the log clearly identifies another vehicle type or the user asks for Plane/Rover/Sub. Generic parsing, extraction, plotting, and segmenting work across ArduPilot DataFlash logs; tuning and motor-mix diagnosis are strongest for Copter/multirotor logs.
 
-The goal is to produce evidence-backed diagnostic reports and plots. Use bundled scripts for deterministic parsing, metrics, plotting, FFT, comparison, and report assembly. Use reasoning to interpret those results conservatively.
+The goal is to produce evidence-backed conclusions and plots. Use bundled scripts for deterministic parsing, metrics, plotting, FFT, comparison, and diagnosis evidence. Codex must choose the relevant investigations, inspect the generated evidence, and write the final conclusions itself.
 
 ## Safety rules
 
@@ -35,7 +35,7 @@ If the file is a telemetry `.tlog`, not a DataFlash `.bin/.log`, state that this
 
 ## Analysis modes
 
-Choose the mode from the user's request. If the user reports a symptom, symptom-led diagnosis has priority over a generic report.
+Choose the mode from the user's request. If the user reports a symptom, symptom-led diagnosis has priority over a general review.
 
 ### Mode 1: symptom-led diagnosis
 
@@ -54,14 +54,13 @@ Use when the user says something like:
 - “crashed”
 - “loss of control”
 
-Run:
+Run deterministic evidence gathering:
 
 ```bash
 python scripts/ap_log_diagnose.py LOG.BIN --symptom "USER SYMPTOM" --out out/diagnosis.json --plots out/plots/diagnosis
-python scripts/ap_report_pack.py --index out/index.json --diagnosis out/diagnosis.json --out out/report.md
 ```
 
-The report must include:
+Then inspect `out/diagnosis.json`, generated plots, validation/index summaries, and any relevant extracted tables before writing conclusions. The final answer must include:
 
 - user-reported symptom;
 - likely causes ranked by confidence;
@@ -72,7 +71,7 @@ The report must include:
 - generated plots;
 - what cannot be concluded.
 
-### Mode 2: full health and tuning report
+### Mode 2: full health and tuning review
 
 Use when the user asks generally to analyse, review, or summarize a log.
 
@@ -83,8 +82,9 @@ python scripts/ap_log_metrics.py --tables out/tables --json out/metrics.json --s
 python scripts/ap_log_plots.py --tables out/tables --metrics out/metrics.json --out out/plots --events
 python scripts/ap_log_tuning.py --tables out/tables --out out/tuning.json --plots out/plots/tuning
 python scripts/ap_log_fft.py LOG.BIN --out out/fft --json out/fft.json
-python scripts/ap_report_pack.py --index out/index.json --metrics out/metrics.json --tuning out/tuning.json --fft out/fft.json --out out/report.md
 ```
+
+Then inspect the JSON outputs, generated plots, extracted message tables, and relevant reference notes. Write the final health/tuning conclusions directly.
 
 ### Mode 3: before/after comparison
 
@@ -182,7 +182,7 @@ Required yaw evidence sources, if present:
 
 ## Output standard
 
-The final answer to the user should be concise but technical. Include links to generated artifacts if files are created. For serious issues, use this order:
+The final answer to the user should be concise but technical. It must be written by Codex from the evidence gathered. Include links to generated artifacts if files are created. For serious issues, use this order:
 
 1. Most likely issue.
 2. Why.
