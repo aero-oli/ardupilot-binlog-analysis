@@ -60,6 +60,13 @@ Run deterministic evidence gathering:
 python scripts/ap_log_diagnose.py LOG.BIN --symptom "USER SYMPTOM" --out out/diagnosis.json --plots out/plots/diagnosis
 ```
 
+`out/diagnosis.json` separates abnormal evidence from ordinary telemetry summaries:
+
+- `findings`: thresholded or event-backed issues such as PID limiting, ESC errors, output saturation, EKF/GPS test-ratio failures, vibration clipping, failsafes, or altitude/rate tracking errors.
+- `context`: useful ranges and summaries that exist but are not fault evidence by themselves, such as normal BAT voltage/current ranges, ESC RPM/current/temperature ranges, CTUN/BARO ranges, or ESCX duty/power ranges.
+- `checked_but_not_supported`: checks that ran but did not cross the diagnostic threshold.
+- `missing_required` and `missing_optional`: unavailable messages separated by diagnostic importance.
+
 Then inspect `out/diagnosis.json`, generated plots, validation/index summaries, and any relevant extracted tables before writing conclusions. The final answer must include:
 
 - user-reported symptom;

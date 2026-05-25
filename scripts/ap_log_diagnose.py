@@ -224,6 +224,32 @@ SYMPTOM_REQUIRED = {
 }
 
 
+SYMPTOM_OPTIONAL = {
+    "yaw_misbehaviour": ["MAG", "XKF3", "XKF4", "VIBE", "BAT", "POWR", "ESC", "ESCX", "EDT2", "RCIN"],
+    "attitude_rate_issue": ["PIDY", "VIBE", "BAT", "POWR", "ESC", "ESCX", "EDT2"],
+    "ekf_gps_issue": ["GPA", "GPS2", "MAG", "VIBE", "BAT", "POWR"],
+    "vibration_issue": ["IMU", "GYR", "ACC", "ISBH", "ISBD", "BAT", "POWR"],
+    "battery_power_issue": ["ESC", "ESCX", "EDT2", "VIBE"],
+    "motor_esc_issue": ["ESC", "ESCX", "EDT2", "VIBE", "POWR"],
+    "crash_or_loss_of_control": ["PIDR", "PIDP", "PIDY", "ESC", "ESCX", "EDT2", "POWR", "MAG"],
+    "altitude_throttle_issue": ["RNGF", "GPS", "XKF4", "ESC", "ESCX", "EDT2"],
+    "general_diagnosis": ["PIDR", "PIDP", "PIDY", "VIBE", "BAT", "POWR", "GPS", "XKF4", "ESC", "ESCX", "EDT2"],
+}
+
+
+def diagnosis_missing(index, symptom_class):
+    required = missing_messages(index, SYMPTOM_REQUIRED.get(symptom_class, SYMPTOM_REQUIRED["general_diagnosis"]))
+    optional = missing_messages(index, SYMPTOM_OPTIONAL.get(symptom_class, SYMPTOM_OPTIONAL["general_diagnosis"]))
+    if any(msg in index.get("messages", {}) for msg in ["ESC", "ESCX", "EDT2"]):
+        optional = [msg for msg in optional if msg not in {"ESC", "ESCX", "EDT2"}]
+    return required, optional
+
+
+def add_context(context, source, detail):
+    if detail:
+        context.append({"source": source, "detail": detail})
+
+
 def add_finding(findings, rank, possible_cause, severity, confidence, evidence, interpretation, recommended_checks):
     evidence = [e for e in evidence if e]
     if not evidence:
@@ -395,7 +421,9 @@ def add_attitude_rate_findings(tables, findings, checked, axes=("roll", "pitch",
         checked.append({"check": "Attitude/rate tracking", "result": "No ATT/RATE tracking issue detected by heuristic for requested axes"})
 
 
-def add_altitude_findings(tables, findings, checked, rank=2):
+def add_altitude_findings(tables, findings, checked, context=None, rank=2):
+    if context is None:
+        context = []
     evidence = []
     if "CTUN" in tables:
         ctun = tables["CTUN"]
@@ -403,7 +431,7 @@ def add_altitude_findings(tables, findings, checked, rank=2):
             if col in ctun.columns:
                 s = numeric_series(ctun, [col])
                 if s is not None and len(s.dropna()) > 0:
-                    evidence.append(f"CTUN.{col}: min={float(s.min()):.2f}, max={float(s.max()):.2f}")
+                    add_context(context, "CTUN", f"CTUN.{col}: min={float(s.min()):.2f}, max={float(s.max()):.2f}")
         if "Alt" in ctun.columns and "DAlt" in ctun.columns:
             err = numeric_series(ctun, ["DAlt"]) - numeric_series(ctun, ["Alt"])
             p95 = percentile([abs(v) for v in vals(err)], 95)
@@ -415,7 +443,7 @@ def add_altitude_findings(tables, findings, checked, rank=2):
             if col in baro.columns:
                 s = numeric_series(baro, [col])
                 if s is not None and len(s.dropna()) > 0:
-                    evidence.append(f"BARO.{col}: min={float(s.min()):.2f}, max={float(s.max()):.2f}")
+                    add_context(context, "BARO", f"BARO.{col}: min={float(s.min()):.2f}, max={float(s.max()):.2f}")
     if evidence:
         add_finding(
             findings, rank, "Altitude/throttle evidence requires vibration, power and estimator correlation", "likely-issue", "medium", evidence[:14],
@@ -428,8 +456,9 @@ def add_altitude_findings(tables, findings, checked, rank=2):
 
 def diagnose_yaw(tables, index):
     findings = []
+    context = []
     checked = []
-    missing = missing_messages(index, ["ATT", "RATE", "PIDY", "RCOU", "MODE", "MSG", "EV", "ERR"])
+    missing_required, missing_optional = diagnosis_missing(index, "yaw_misbehaviour")
 
     # Commanded vs uncommanded yaw
     if "ATT" in tables and all(c in tables["ATT"].columns for c in ["DesYaw", "Yaw"]):
@@ -505,7 +534,11 @@ def diagnose_yaw(tables, index):
                 evidence.append(f"PIDY limit flag count={limit_count}, PD-sum-limit count={pd_limit_count}")
         err = numeric_series(pid, ["Err"])
         if err is not None and len(err.dropna()) > 0:
-            evidence.append(f"PIDY.Err p95 abs={percentile([abs(v) for v in vals(err)], 95):.2f}")
+            err_p95 = percentile([abs(v) for v in vals(err)], 95)
+            if err_p95 is not None and err_p95 > 30:
+                evidence.append(f"PIDY.Err p95 abs={err_p95:.2f}")
+            else:
+                checked.append({"check": "PIDY.Err magnitude", "result": f"PIDY.Err p95 abs={err_p95:.2f} below heuristic threshold"})
         dmod = numeric_series(pid, ["Dmod"])
         if dmod is not None and len(dmod.dropna()) > 0 and float(dmod.min()) < 0.8:
             evidence.append(f"PIDY.Dmod minimum={float(dmod.min()):.2f}")
@@ -522,7 +555,7 @@ def diagnose_yaw(tables, index):
         else:
             checked.append({"check": "PIDY flags/limits", "result": "No PIDY limit/Dmod issue detected by heuristic"})
 
-    add_motor_esc_findings(tables, findings, checked, rank=1)
+    add_motor_esc_findings(tables, findings, checked, context, rank=1)
 
     # EKF/MAG yaw source
     ekf = tables.get("XKF4") if "XKF4" in tables else tables.get("NKF4")
@@ -547,63 +580,64 @@ def diagnose_yaw(tables, index):
             checked.append({"check": "XKF4/NKF4 test ratios", "result": "No >1 test-ratio exceedance detected by heuristic"})
 
     add_vibration_findings(tables, findings, checked, rank=4)
-    add_power_findings(tables, findings, checked, rank=3)
+    add_power_findings(tables, findings, checked, context, rank=3)
 
     findings = sorted(findings, key=lambda f: (f.get("rank", 99), 0 if f.get("severity") == "safety-critical" else 1))
-    return findings, checked, missing
+    return findings, context, checked, missing_required, missing_optional
 
 
 def diagnose_by_class(symptom_class, tables, index):
     findings = []
+    context = []
     checked = []
-    missing = missing_messages(index, SYMPTOM_REQUIRED.get(symptom_class, SYMPTOM_REQUIRED["general_diagnosis"]))
+    missing_required, missing_optional = diagnosis_missing(index, symptom_class)
     add_event_findings(index, findings, checked)
 
     if symptom_class == "attitude_rate_issue":
         add_attitude_rate_findings(tables, findings, checked, axes=("roll", "pitch"), rank=2)
-        add_motor_esc_findings(tables, findings, checked, rank=3)
+        add_motor_esc_findings(tables, findings, checked, context, rank=3)
         add_vibration_findings(tables, findings, checked, rank=3)
-        add_power_findings(tables, findings, checked, rank=4)
+        add_power_findings(tables, findings, checked, context, rank=4)
     elif symptom_class == "ekf_gps_issue":
         add_ekf_gps_findings(tables, index, findings, checked, rank=1)
         add_vibration_findings(tables, findings, checked, rank=2)
-        add_power_findings(tables, findings, checked, rank=3)
+        add_power_findings(tables, findings, checked, context, rank=3)
         add_attitude_rate_findings(tables, findings, checked, axes=("roll", "pitch", "yaw"), rank=4)
     elif symptom_class == "vibration_issue":
         add_vibration_findings(tables, findings, checked, rank=1)
         add_attitude_rate_findings(tables, findings, checked, axes=("roll", "pitch", "yaw"), rank=2)
         add_ekf_gps_findings(tables, index, findings, checked, rank=3)
     elif symptom_class == "battery_power_issue":
-        add_power_findings(tables, findings, checked, rank=1)
-        add_motor_esc_findings(tables, findings, checked, rank=2)
+        add_power_findings(tables, findings, checked, context, rank=1)
+        add_motor_esc_findings(tables, findings, checked, context, rank=2)
         add_attitude_rate_findings(tables, findings, checked, axes=("roll", "pitch", "yaw"), rank=3)
     elif symptom_class == "motor_esc_issue":
-        add_motor_esc_findings(tables, findings, checked, rank=1)
+        add_motor_esc_findings(tables, findings, checked, context, rank=1)
         add_attitude_rate_findings(tables, findings, checked, axes=("roll", "pitch", "yaw"), rank=2)
-        add_power_findings(tables, findings, checked, rank=3)
+        add_power_findings(tables, findings, checked, context, rank=3)
         add_vibration_findings(tables, findings, checked, rank=4)
     elif symptom_class == "crash_or_loss_of_control":
-        add_motor_esc_findings(tables, findings, checked, rank=1)
+        add_motor_esc_findings(tables, findings, checked, context, rank=1)
         add_attitude_rate_findings(tables, findings, checked, axes=("roll", "pitch", "yaw"), rank=1)
-        add_power_findings(tables, findings, checked, rank=2)
+        add_power_findings(tables, findings, checked, context, rank=2)
         add_ekf_gps_findings(tables, index, findings, checked, rank=2)
         add_vibration_findings(tables, findings, checked, rank=3)
-        add_altitude_findings(tables, findings, checked, rank=3)
+        add_altitude_findings(tables, findings, checked, context, rank=3)
     elif symptom_class == "altitude_throttle_issue":
-        add_altitude_findings(tables, findings, checked, rank=1)
+        add_altitude_findings(tables, findings, checked, context, rank=1)
         add_vibration_findings(tables, findings, checked, rank=2)
-        add_power_findings(tables, findings, checked, rank=2)
-        add_motor_esc_findings(tables, findings, checked, rank=3)
+        add_power_findings(tables, findings, checked, context, rank=2)
+        add_motor_esc_findings(tables, findings, checked, context, rank=3)
         add_ekf_gps_findings(tables, index, findings, checked, rank=3)
     else:
         add_attitude_rate_findings(tables, findings, checked, axes=("roll", "pitch", "yaw"), rank=2)
-        add_motor_esc_findings(tables, findings, checked, rank=2)
+        add_motor_esc_findings(tables, findings, checked, context, rank=2)
         add_ekf_gps_findings(tables, index, findings, checked, rank=3)
         add_vibration_findings(tables, findings, checked, rank=3)
-        add_power_findings(tables, findings, checked, rank=4)
+        add_power_findings(tables, findings, checked, context, rank=4)
 
     findings = sorted(findings, key=lambda f: (f.get("rank", 99), severity_rank(f.get("severity", ""))))
-    return findings, checked, missing
+    return findings, context, checked, missing_required, missing_optional
 
 
 def main() -> int:
@@ -624,21 +658,23 @@ def main() -> int:
         tables = {typ: rows_to_dataframe(data) for typ, data in rows.items() if data and typ not in {"FMT", "FMTU"}}
         tables = filter_tables_by_time(tables, **window)
         if symptom_class == "yaw_misbehaviour":
-            findings, checked, missing = diagnose_yaw(tables, index)
+            findings, context, checked, missing_required, missing_optional = diagnose_yaw(tables, index)
         else:
-            findings, checked, missing = diagnose_by_class(symptom_class, tables, index)
+            findings, context, checked, missing_required, missing_optional = diagnose_by_class(symptom_class, tables, index)
         plots = make_targeted_plots_from_tables(tables, symptom_class, args.plots, events=args.events) if args.plots else []
         result = {
             "symptom_text": args.symptom,
             "symptom_class": symptom_class,
             "analysis_window": window,
             "log": {"file": args.log, "vehicle": index.get("vehicle"), "firmware": index.get("firmware"), "duration_s": index.get("duration_s")},
-            "primary_findings": findings,
+            "findings": findings,
+            "context": context,
             "checked_but_not_supported": checked,
-            "missing_data": missing,
+            "missing_required": missing_required,
+            "missing_optional": missing_optional,
             "plots": plots,
             "safety_note": "Do not treat this diagnosis as clearance to fly. Bench and ground checks are required after any configuration, mechanical, power, or tuning changes.",
-            "what_cannot_be_concluded": build_cannot_conclude(symptom_class, missing, tables),
+            "what_cannot_be_concluded": build_cannot_conclude(symptom_class, missing_required + missing_optional, tables),
         }
         write_json(args.out, result)
         print(f"Diagnosis class={symptom_class}; findings={len(findings)}; plots={len(plots)}")

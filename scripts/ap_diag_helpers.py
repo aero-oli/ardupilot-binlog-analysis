@@ -35,7 +35,14 @@ def _add_finding(findings, rank, possible_cause, severity, confidence, evidence,
     })
 
 
-def add_motor_esc_findings(tables, findings, checked, rank=1):
+def _add_context(context, source, detail):
+    if detail:
+        context.append({"source": source, "detail": detail})
+
+
+def add_motor_esc_findings(tables, findings, checked, context=None, rank=1):
+    if context is None:
+        context = []
     evidence = []
     rcou = combined_rcout_dataframe(tables)
     if rcou is not None:
@@ -71,7 +78,7 @@ def add_motor_esc_findings(tables, findings, checked, rank=1):
             if col in esc.columns:
                 s = numeric_series(esc, [col])
                 if s is not None and len(s.dropna()) > 0:
-                    evidence.append(f"ESC {col}: min={float(s.min()):.2f}, max={float(s.max()):.2f}")
+                    _add_context(context, "ESC", f"ESC {col}: min={float(s.min()):.2f}, max={float(s.max()):.2f}")
     if "EDT2" in tables:
         edt2 = tables["EDT2"]
         status_col = get_col(edt2, ["Status"])
@@ -88,7 +95,10 @@ def add_motor_esc_findings(tables, findings, checked, rank=1):
             if col in edt2.columns:
                 s = numeric_series(edt2, [col])
                 if s is not None and len(s.dropna()) > 0:
-                    evidence.append(f"EDT2 {col}: min={float(s.min()):.2f}, max={float(s.max()):.2f}")
+                    if col == "ErrCnt" and float(s.max()) > 0:
+                        evidence.append(f"EDT2 {col}: min={float(s.min()):.2f}, max={float(s.max()):.2f}")
+                    else:
+                        _add_context(context, "EDT2", f"EDT2 {col}: min={float(s.min()):.2f}, max={float(s.max()):.2f}")
     if "ESCX" in tables:
         escx = tables["ESCX"]
         flags = numeric_series(escx, ["flags"])
@@ -100,7 +110,7 @@ def add_motor_esc_findings(tables, findings, checked, rank=1):
             if col in escx.columns:
                 s = numeric_series(escx, [col])
                 if s is not None and len(s.dropna()) > 0:
-                    evidence.append(f"ESCX {col}: min={float(s.min()):.2f}, max={float(s.max()):.2f}")
+                    _add_context(context, "ESCX", f"ESCX {col}: min={float(s.min()):.2f}, max={float(s.max()):.2f}")
     if evidence:
         _add_finding(
             findings, rank, "Motor output saturation or ESC telemetry abnormality", "safety-critical", "high" if any("RCOUT" in e or "status" in e for e in evidence) else "medium",
@@ -112,7 +122,9 @@ def add_motor_esc_findings(tables, findings, checked, rank=1):
         checked.append({"check": "Motor outputs / ESC telemetry", "result": "No RCOU/RCO2/RCO3 saturation or ESC error/status issue detected by heuristic"})
 
 
-def add_power_findings(tables, findings, checked, rank=3):
+def add_power_findings(tables, findings, checked, context=None, rank=3):
+    if context is None:
+        context = []
     evidence = []
     if "BAT" in tables:
         bat = tables["BAT"]
@@ -120,16 +132,16 @@ def add_power_findings(tables, findings, checked, rank=3):
         curr = numeric_series(bat, ["Curr", "I"])
         if volt is not None and len(volt.dropna()) > 0:
             vmin, vmax = float(volt.min()), float(volt.max())
-            evidence.append(f"BAT voltage min={vmin:.2f} V, max={vmax:.2f} V")
+            _add_context(context, "BAT", f"BAT voltage min={vmin:.2f} V, max={vmax:.2f} V")
             if vmax > 0 and (vmax - vmin) / vmax > 0.15:
                 evidence.append(f"BAT voltage span is {(vmax - vmin) / vmax * 100:.1f}% of max")
         if curr is not None and len(curr.dropna()) > 0:
-            evidence.append(f"BAT current max={float(curr.max()):.1f} A")
+            _add_context(context, "BAT", f"BAT current max={float(curr.max()):.1f} A")
     if "POWR" in tables:
         powr = tables["POWR"]
         vcc = numeric_series(powr, ["Vcc", "VCC"])
         if vcc is not None and len(vcc.dropna()) > 0:
-            evidence.append(f"POWR.Vcc min={float(vcc.min()):.2f} V, max={float(vcc.max()):.2f} V")
+            _add_context(context, "POWR", f"POWR.Vcc min={float(vcc.min()):.2f} V, max={float(vcc.max()):.2f} V")
         flags = numeric_series(powr, ["Flags", "AccFlags"])
         if flags is not None and len(flags.dropna()) > 0 and int(flags.fillna(0).astype(int).max()) != 0:
             evidence.append(f"POWR flags max={int(flags.fillna(0).astype(int).max())}")

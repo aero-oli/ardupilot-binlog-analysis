@@ -14,6 +14,7 @@ import ap_common
 from ap_log_compare import metric_differences
 from ap_log_custom_plot import make_custom_plot
 from ap_log_diagnose import diagnose_by_class
+from ap_log_diagnose import diagnose_yaw
 from ap_log_diagnose import make_targeted_plots_from_tables
 from ap_log_fft import fft_from_isb_rows
 from ap_log_metrics import compute_metrics
@@ -169,7 +170,7 @@ def test_vibe_clip_variants_are_detected():
     assert_true(vibration["clip_delta"]["Clip0"] == 3.0, "metrics should report Clip0 delta")
 
     index = {"messages": {"VIBE": {}}, "errors": [], "events": [], "modes": []}
-    findings, _checked, missing = diagnose_by_class("vibration_issue", tables, index)
+    findings, _context, _checked, missing, _missing_optional = diagnose_by_class("vibration_issue", tables, index)
     evidence = "\n".join("\n".join(f.get("evidence", [])) for f in findings)
     assert_true("VIBE.Clip0 increased by 3" in evidence, "diagnosis should include Clip0 clipping evidence")
     assert_true("RATE" in missing, "diagnosis should still report missing symptom-relevant messages")
@@ -197,7 +198,7 @@ def test_non_yaw_symptoms_get_targeted_findings():
             "SM": [0.2, 0.4, 1.3],
         }),
     }
-    findings, checked, missing = diagnose_by_class("ekf_gps_issue", tables, index)
+    findings, _context, checked, missing, _missing_optional = diagnose_by_class("ekf_gps_issue", tables, index)
     causes = "\n".join(f.get("possible_cause", "") for f in findings)
     evidence = "\n".join("\n".join(f.get("evidence", [])) for f in findings)
     assert_true("GPS/EKF" in causes, "EKF/GPS symptom should produce a targeted GPS/EKF finding")
@@ -223,10 +224,10 @@ def test_edt2_status_is_used_for_motor_esc_findings():
             "MaxStress": [1, 3, 4],
         })
     }
-    findings, _checked, missing = diagnose_by_class("motor_esc_issue", tables, index)
+    findings, _context, _checked, _missing_required, missing_optional = diagnose_by_class("motor_esc_issue", tables, index)
     evidence = "\n".join("\n".join(f.get("evidence", [])) for f in findings)
     assert_true("EDT2 status alert/warning/error counts=0/1/1" in evidence, "EDT2 status bits should be diagnosed")
-    assert_true("ESC" not in missing, "EDT2 should satisfy ESC-status confirmation for motor diagnostics")
+    assert_true("ESC" not in missing_optional, "EDT2 should satisfy ESC-status confirmation for motor diagnostics")
 
 
 def test_escx_is_used_for_motor_esc_metrics_and_findings():
@@ -247,11 +248,12 @@ def test_escx_is_used_for_motor_esc_metrics_and_findings():
     assert_true(escx["nonzero_flags_count"] == 1, "ESCX nonzero flags should be counted")
     assert_true("ESC/ESCX/EDT2 telemetry missing" not in "\n".join(metrics["confidence"]["reasons"]), "ESCX should satisfy ESC telemetry confidence")
 
-    findings, _checked, missing = diagnose_by_class("motor_esc_issue", tables, index)
+    findings, context, _checked, _missing_required, missing_optional = diagnose_by_class("motor_esc_issue", tables, index)
     evidence = "\n".join("\n".join(f.get("evidence", [])) for f in findings)
+    context_text = "\n".join(c.get("detail", "") for c in context)
     assert_true("ESCX flags nonzero samples=1" in evidence, "ESCX flags should be diagnostic evidence")
-    assert_true("ESCX inpct: min=15.00, max=60.00" in evidence, "ESCX duty cycle should be diagnostic evidence")
-    assert_true("ESC" not in missing, "ESCX should satisfy ESC-status confirmation for motor diagnostics")
+    assert_true("ESCX inpct: min=15.00, max=60.00" in context_text, "ESCX duty cycle should be retained as context")
+    assert_true("ESC" not in missing_optional, "ESCX should satisfy ESC-status confirmation for motor diagnostics")
 
 
 def test_escx_generates_plots_and_avoids_missing_telemetry_caveat():
@@ -270,6 +272,65 @@ def test_escx_generates_plots_and_avoids_missing_telemetry_caveat():
         assert_true((Path(tmp) / "06b_escx_extended_telemetry.html").exists(), "standard plot pack should include ESCX plot")
         targeted = make_targeted_plots_from_tables(tables, "motor_esc_issue", Path(tmp) / "targeted")
         assert_true(any("esc_escx_edt2" in p for p in targeted), "targeted motor/ESC plots should include ESCX")
+
+
+def test_normal_telemetry_is_context_not_findings():
+    index = {"messages": {"BAT": {}, "ESC": {}, "CTUN": {}, "BARO": {}}, "errors": [], "events": [], "modes": []}
+    tables = {
+        "BAT": pd.DataFrame({
+            "TimeS": [0.0, 1.0, 2.0],
+            "Volt": [16.8, 16.5, 16.4],
+            "Curr": [5.0, 8.0, 6.0],
+        }),
+        "ESC": pd.DataFrame({
+            "TimeS": [0.0, 1.0, 2.0],
+            "Instance": [0, 0, 0],
+            "RPM": [4100, 4300, 4200],
+            "Curr": [3.0, 3.5, 3.2],
+            "Temp": [32.0, 34.0, 33.0],
+            "Err": [0, 0, 0],
+        }),
+        "CTUN": pd.DataFrame({
+            "TimeS": [0.0, 1.0, 2.0],
+            "Alt": [10.0, 10.2, 10.1],
+            "DAlt": [10.1, 10.1, 10.0],
+            "ThO": [0.35, 0.37, 0.36],
+        }),
+        "BARO": pd.DataFrame({
+            "TimeS": [0.0, 1.0, 2.0],
+            "Alt": [10.0, 10.1, 10.1],
+            "Press": [101325, 101320, 101318],
+        }),
+    }
+
+    findings, context, checked, _missing_required, _missing_optional = diagnose_by_class("altitude_throttle_issue", tables, index)
+    evidence = "\n".join("\n".join(f.get("evidence", [])) for f in findings)
+    context_text = "\n".join(c.get("detail", "") for c in context)
+    assert_true("BAT voltage min" not in evidence, "normal battery ranges should not be findings")
+    assert_true("ESC RPM" not in evidence, "normal ESC ranges should not be findings")
+    assert_true("CTUN.Alt" not in evidence, "normal CTUN ranges should not be findings")
+    assert_true("BAT voltage min=16.40 V, max=16.80 V" in context_text, "battery range should be retained as context")
+    assert_true("ESC RPM: min=4100.00, max=4300.00" in context_text, "ESC range should be retained as context")
+    assert_true("CTUN.Alt: min=10.00, max=10.20" in context_text, "altitude range should be retained as context")
+    assert_true(checked, "normal telemetry checks should still be recorded as checked")
+
+
+def test_yaw_pid_error_below_threshold_is_checked_not_finding():
+    index = {"messages": {"ATT": {}, "RATE": {}, "PIDY": {}, "RCOU": {}, "MODE": {}, "MSG": {}, "EV": {}, "ERR": {}}, "errors": [], "events": [], "modes": []}
+    tables = {
+        "PIDY": pd.DataFrame({
+            "TimeS": [0.0, 1.0, 2.0],
+            "Err": [1.0, -2.0, 1.5],
+            "Flags": [0, 0, 0],
+            "Dmod": [1.0, 0.95, 0.9],
+        })
+    }
+
+    findings, _context, checked, _missing_required, _missing_optional = diagnose_yaw(tables, index)
+    evidence = "\n".join("\n".join(f.get("evidence", [])) for f in findings)
+    checked_text = "\n".join(c.get("result", "") for c in checked)
+    assert_true("PIDY.Err p95" not in evidence, "low PIDY.Err should not create finding evidence")
+    assert_true("PIDY.Err p95 abs=" in checked_text, "low PIDY.Err should be recorded as checked context")
 
 
 def test_validate_module_availability_separates_required_and_optional_messages():
@@ -496,6 +557,8 @@ def main():
     test_edt2_status_is_used_for_motor_esc_findings()
     test_escx_is_used_for_motor_esc_metrics_and_findings()
     test_escx_generates_plots_and_avoids_missing_telemetry_caveat()
+    test_normal_telemetry_is_context_not_findings()
+    test_yaw_pid_error_below_threshold_is_checked_not_finding()
     test_validate_module_availability_separates_required_and_optional_messages()
     test_compare_summarizes_metric_deltas()
     test_metric_differences_can_ignore_unrequested_sections()
