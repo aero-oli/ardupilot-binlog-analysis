@@ -12,6 +12,7 @@ from ap_common import (
     parse_time_window, percentile, rms, rows_to_dataframe, safe_float, severity_rank, write_json
 )
 from ap_diag_helpers import add_motor_esc_findings, add_power_findings, vals
+from ap_diag_requirements import missing_by_tier
 
 
 def add_event_markers(fig, markers):
@@ -211,38 +212,8 @@ def make_targeted_plots_from_tables(tables, symptom_class, plots_dir, events=Fal
     return generated
 
 
-SYMPTOM_REQUIRED = {
-    "yaw_misbehaviour": ["ATT", "RATE", "PIDY", "RCOU", "MODE", "MSG", "EV", "ERR"],
-    "attitude_rate_issue": ["ATT", "RATE", "PIDR", "PIDP", "RCOU", "MODE"],
-    "ekf_gps_issue": ["GPS", "XKF1", "XKF3", "XKF4", "MODE", "MSG", "EV", "ERR"],
-    "vibration_issue": ["VIBE", "RATE", "PIDR", "PIDP", "PIDY"],
-    "battery_power_issue": ["BAT", "POWR", "RCOU", "CTUN"],
-    "motor_esc_issue": ["RCOU", "RATE", "PIDR", "PIDP", "PIDY", "BAT"],
-    "crash_or_loss_of_control": ["ATT", "RATE", "RCOU", "EV", "ERR", "MODE", "MSG", "BAT", "GPS", "XKF4", "VIBE"],
-    "altitude_throttle_issue": ["CTUN", "ATT", "RATE", "BAT", "POWR", "VIBE", "BARO"],
-    "general_diagnosis": ["ATT", "RATE", "RCOU", "MODE", "MSG", "EV", "ERR"],
-}
-
-
-SYMPTOM_OPTIONAL = {
-    "yaw_misbehaviour": ["MAG", "XKF3", "XKF4", "VIBE", "BAT", "POWR", "ESC", "ESCX", "EDT2", "RCIN"],
-    "attitude_rate_issue": ["PIDY", "VIBE", "BAT", "POWR", "ESC", "ESCX", "EDT2"],
-    "ekf_gps_issue": ["GPA", "GPS2", "MAG", "VIBE", "BAT", "POWR"],
-    "vibration_issue": ["IMU", "GYR", "ACC", "ISBH", "ISBD", "BAT", "POWR"],
-    "battery_power_issue": ["ESC", "ESCX", "EDT2", "VIBE"],
-    "motor_esc_issue": ["ESC", "ESCX", "EDT2", "VIBE", "POWR"],
-    "crash_or_loss_of_control": ["PIDR", "PIDP", "PIDY", "ESC", "ESCX", "EDT2", "POWR", "MAG"],
-    "altitude_throttle_issue": ["RNGF", "GPS", "XKF4", "ESC", "ESCX", "EDT2"],
-    "general_diagnosis": ["PIDR", "PIDP", "PIDY", "VIBE", "BAT", "POWR", "GPS", "XKF4", "ESC", "ESCX", "EDT2"],
-}
-
-
 def diagnosis_missing(index, symptom_class):
-    required = missing_messages(index, SYMPTOM_REQUIRED.get(symptom_class, SYMPTOM_REQUIRED["general_diagnosis"]))
-    optional = missing_messages(index, SYMPTOM_OPTIONAL.get(symptom_class, SYMPTOM_OPTIONAL["general_diagnosis"]))
-    if any(msg in index.get("messages", {}) for msg in ["ESC", "ESCX", "EDT2"]):
-        optional = [msg for msg in optional if msg not in {"ESC", "ESCX", "EDT2"}]
-    return required, optional
+    return missing_by_tier(index, symptom_class, missing_messages)
 
 
 def add_context(context, source, detail):
@@ -263,6 +234,22 @@ def add_finding(findings, rank, possible_cause, severity, confidence, evidence, 
         "interpretation": interpretation,
         "recommended_checks": recommended_checks,
     })
+
+
+def limit_confidence_for_missing_strong_evidence(findings, checked, missing_strongly):
+    if not missing_strongly:
+        return
+    changed = False
+    for finding in findings:
+        if finding.get("confidence") == "high":
+            finding["confidence"] = "medium"
+            finding["confidence_limited_by_missing_strongly_recommended"] = list(missing_strongly)
+            changed = True
+    if changed:
+        checked.append({
+            "check": "Strongly recommended evidence",
+            "result": "High confidence limited because these strongly recommended messages are missing: " + ", ".join(missing_strongly),
+        })
 
 
 def add_event_findings(index, findings, checked):
@@ -458,7 +445,7 @@ def diagnose_yaw(tables, index):
     findings = []
     context = []
     checked = []
-    missing_required, missing_optional = diagnosis_missing(index, "yaw_misbehaviour")
+    missing_required, missing_strongly, missing_optional = diagnosis_missing(index, "yaw_misbehaviour")
 
     # Commanded vs uncommanded yaw
     if "ATT" in tables and all(c in tables["ATT"].columns for c in ["DesYaw", "Yaw"]):
@@ -582,15 +569,16 @@ def diagnose_yaw(tables, index):
     add_vibration_findings(tables, findings, checked, rank=4)
     add_power_findings(tables, findings, checked, context, rank=3)
 
+    limit_confidence_for_missing_strong_evidence(findings, checked, missing_strongly)
     findings = sorted(findings, key=lambda f: (f.get("rank", 99), 0 if f.get("severity") == "safety-critical" else 1))
-    return findings, context, checked, missing_required, missing_optional
+    return findings, context, checked, missing_required, missing_strongly, missing_optional
 
 
 def diagnose_by_class(symptom_class, tables, index):
     findings = []
     context = []
     checked = []
-    missing_required, missing_optional = diagnosis_missing(index, symptom_class)
+    missing_required, missing_strongly, missing_optional = diagnosis_missing(index, symptom_class)
     add_event_findings(index, findings, checked)
 
     if symptom_class == "attitude_rate_issue":
@@ -636,8 +624,9 @@ def diagnose_by_class(symptom_class, tables, index):
         add_vibration_findings(tables, findings, checked, rank=3)
         add_power_findings(tables, findings, checked, context, rank=4)
 
+    limit_confidence_for_missing_strong_evidence(findings, checked, missing_strongly)
     findings = sorted(findings, key=lambda f: (f.get("rank", 99), severity_rank(f.get("severity", ""))))
-    return findings, context, checked, missing_required, missing_optional
+    return findings, context, checked, missing_required, missing_strongly, missing_optional
 
 
 def main() -> int:
@@ -658,9 +647,9 @@ def main() -> int:
         tables = {typ: rows_to_dataframe(data) for typ, data in rows.items() if data and typ not in {"FMT", "FMTU"}}
         tables = filter_tables_by_time(tables, **window)
         if symptom_class == "yaw_misbehaviour":
-            findings, context, checked, missing_required, missing_optional = diagnose_yaw(tables, index)
+            findings, context, checked, missing_required, missing_strongly, missing_optional = diagnose_yaw(tables, index)
         else:
-            findings, context, checked, missing_required, missing_optional = diagnose_by_class(symptom_class, tables, index)
+            findings, context, checked, missing_required, missing_strongly, missing_optional = diagnose_by_class(symptom_class, tables, index)
         plots = make_targeted_plots_from_tables(tables, symptom_class, args.plots, events=args.events) if args.plots else []
         result = {
             "symptom_text": args.symptom,
@@ -671,10 +660,11 @@ def main() -> int:
             "context": context,
             "checked_but_not_supported": checked,
             "missing_required": missing_required,
+            "missing_strongly_recommended": missing_strongly,
             "missing_optional": missing_optional,
             "plots": plots,
             "safety_note": "Do not treat this diagnosis as clearance to fly. Bench and ground checks are required after any configuration, mechanical, power, or tuning changes.",
-            "what_cannot_be_concluded": build_cannot_conclude(symptom_class, missing_required + missing_optional, tables),
+            "what_cannot_be_concluded": build_cannot_conclude(symptom_class, missing_required + missing_strongly + missing_optional, tables),
         }
         write_json(args.out, result)
         print(f"Diagnosis class={symptom_class}; findings={len(findings)}; plots={len(plots)}")

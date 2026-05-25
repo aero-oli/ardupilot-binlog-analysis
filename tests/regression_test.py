@@ -13,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 import ap_common
 from ap_log_compare import metric_differences
 from ap_log_custom_plot import make_custom_plot
+from ap_log_diagnose import diagnosis_missing
 from ap_log_diagnose import diagnose_by_class
 from ap_log_diagnose import diagnose_yaw
 from ap_log_diagnose import make_targeted_plots_from_tables
@@ -170,10 +171,10 @@ def test_vibe_clip_variants_are_detected():
     assert_true(vibration["clip_delta"]["Clip0"] == 3.0, "metrics should report Clip0 delta")
 
     index = {"messages": {"VIBE": {}}, "errors": [], "events": [], "modes": []}
-    findings, _context, _checked, missing, _missing_optional = diagnose_by_class("vibration_issue", tables, index)
+    findings, _context, _checked, missing, missing_strongly, _missing_optional = diagnose_by_class("vibration_issue", tables, index)
     evidence = "\n".join("\n".join(f.get("evidence", [])) for f in findings)
     assert_true("VIBE.Clip0 increased by 3" in evidence, "diagnosis should include Clip0 clipping evidence")
-    assert_true("RATE" in missing, "diagnosis should still report missing symptom-relevant messages")
+    assert_true("RATE" in missing_strongly, "diagnosis should still report missing strongly recommended symptom messages")
 
 
 def test_non_yaw_symptoms_get_targeted_findings():
@@ -198,13 +199,13 @@ def test_non_yaw_symptoms_get_targeted_findings():
             "SM": [0.2, 0.4, 1.3],
         }),
     }
-    findings, _context, checked, missing, _missing_optional = diagnose_by_class("ekf_gps_issue", tables, index)
+    findings, _context, checked, missing, missing_strongly, _missing_optional = diagnose_by_class("ekf_gps_issue", tables, index)
     causes = "\n".join(f.get("possible_cause", "") for f in findings)
     evidence = "\n".join("\n".join(f.get("evidence", [])) for f in findings)
     assert_true("GPS/EKF" in causes, "EKF/GPS symptom should produce a targeted GPS/EKF finding")
     assert_true("GPS.Status minimum=2" in evidence, "GPS fix status should be used as evidence")
     assert_true("SV max=1.20" in evidence and "SM max=1.30" in evidence, "EKF test ratios should be used as evidence")
-    assert_true("XKF1" in missing and "XKF3" in missing, "missing data should reflect the selected symptom class")
+    assert_true("XKF1" in missing_strongly and "XKF3" in missing_strongly, "missing data should reflect the selected symptom class")
     assert_true(checked, "diagnosis should record checks that were not supported")
 
 
@@ -224,7 +225,7 @@ def test_edt2_status_is_used_for_motor_esc_findings():
             "MaxStress": [1, 3, 4],
         })
     }
-    findings, _context, _checked, _missing_required, missing_optional = diagnose_by_class("motor_esc_issue", tables, index)
+    findings, _context, _checked, _missing_required, _missing_strongly, missing_optional = diagnose_by_class("motor_esc_issue", tables, index)
     evidence = "\n".join("\n".join(f.get("evidence", [])) for f in findings)
     assert_true("EDT2 status alert/warning/error counts=0/1/1" in evidence, "EDT2 status bits should be diagnosed")
     assert_true("ESC" not in missing_optional, "EDT2 should satisfy ESC-status confirmation for motor diagnostics")
@@ -248,7 +249,7 @@ def test_escx_is_used_for_motor_esc_metrics_and_findings():
     assert_true(escx["nonzero_flags_count"] == 1, "ESCX nonzero flags should be counted")
     assert_true("ESC/ESCX/EDT2 telemetry missing" not in "\n".join(metrics["confidence"]["reasons"]), "ESCX should satisfy ESC telemetry confidence")
 
-    findings, context, _checked, _missing_required, missing_optional = diagnose_by_class("motor_esc_issue", tables, index)
+    findings, context, _checked, _missing_required, _missing_strongly, missing_optional = diagnose_by_class("motor_esc_issue", tables, index)
     evidence = "\n".join("\n".join(f.get("evidence", [])) for f in findings)
     context_text = "\n".join(c.get("detail", "") for c in context)
     assert_true("ESCX flags nonzero samples=1" in evidence, "ESCX flags should be diagnostic evidence")
@@ -303,7 +304,7 @@ def test_normal_telemetry_is_context_not_findings():
         }),
     }
 
-    findings, context, checked, _missing_required, _missing_optional = diagnose_by_class("altitude_throttle_issue", tables, index)
+    findings, context, checked, _missing_required, _missing_strongly, _missing_optional = diagnose_by_class("altitude_throttle_issue", tables, index)
     evidence = "\n".join("\n".join(f.get("evidence", [])) for f in findings)
     context_text = "\n".join(c.get("detail", "") for c in context)
     assert_true("BAT voltage min" not in evidence, "normal battery ranges should not be findings")
@@ -326,18 +327,80 @@ def test_yaw_pid_error_below_threshold_is_checked_not_finding():
         })
     }
 
-    findings, _context, checked, _missing_required, _missing_optional = diagnose_yaw(tables, index)
+    findings, _context, checked, _missing_required, _missing_strongly, _missing_optional = diagnose_yaw(tables, index)
     evidence = "\n".join("\n".join(f.get("evidence", [])) for f in findings)
     checked_text = "\n".join(c.get("result", "") for c in checked)
     assert_true("PIDY.Err p95" not in evidence, "low PIDY.Err should not create finding evidence")
     assert_true("PIDY.Err p95 abs=" in checked_text, "low PIDY.Err should be recorded as checked context")
 
 
+def test_yaw_diagnosis_requires_only_att_and_rate():
+    index = {"messages": {"ATT": {}, "RATE": {}}, "errors": [], "events": [], "modes": []}
+    tables = {
+        "ATT": pd.DataFrame({
+            "TimeS": [0.0, 1.0, 2.0],
+            "DesYaw": [10.0, 12.0, 14.0],
+            "Yaw": [10.5, 11.5, 14.5],
+        }),
+        "RATE": pd.DataFrame({
+            "TimeS": [0.0, 1.0, 2.0],
+            "YDes": [0.0, 5.0, -5.0],
+            "Y": [0.0, 4.0, -4.0],
+            "YOut": [0.1, 0.2, -0.2],
+        }),
+    }
+
+    findings, _context, checked, missing_required, missing_strongly, missing_optional = diagnose_yaw(tables, index)
+    assert_true(missing_required == [], f"ATT/RATE-only yaw should not miss required data, got {missing_required}")
+    assert_true(missing_strongly == ["PIDY", "RCOU", "MODE"], f"PIDY/RCOU/MODE should be strongly recommended, got {missing_strongly}")
+    assert_true("MSG" in missing_optional and "ERR" in missing_optional, "timeline messages should be optional yaw context")
+    assert_true(findings == [], "normal ATT/RATE-only yaw data should not create findings")
+    assert_true(checked, "ATT/RATE-only yaw should still run checks")
+
+
+def test_yaw_with_pidy_missing_other_strong_data_downgrades_confidence():
+    index = {"messages": {"ATT": {}, "RATE": {}, "PIDY": {}}, "errors": [], "events": [], "modes": []}
+    tables = {
+        "ATT": pd.DataFrame({
+            "TimeS": [0.0, 1.0, 2.0],
+            "DesYaw": [0.0, 0.0, 0.0],
+            "Yaw": [0.0, 0.0, 0.0],
+        }),
+        "RATE": pd.DataFrame({
+            "TimeS": [0.0, 1.0, 2.0],
+            "YDes": [0.0, 0.0, 0.0],
+            "Y": [0.0, 0.0, 0.0],
+            "YOut": [0.1, 0.1, 0.1],
+        }),
+        "PIDY": pd.DataFrame({
+            "TimeS": [0.0, 1.0, 2.0],
+            "Err": [35.0, 40.0, 45.0],
+            "Flags": [1, 1, 1],
+            "Dmod": [0.75, 0.7, 0.72],
+        }),
+    }
+
+    findings, _context, _checked, missing_required, missing_strongly, _missing_optional = diagnose_yaw(tables, index)
+    assert_true(missing_required == [], "ATT/RATE/PIDY yaw should have core required data")
+    assert_true(missing_strongly == ["RCOU", "MODE"], f"RCOU/MODE should remain strongly recommended, got {missing_strongly}")
+    assert_true(findings, "PIDY limits should still create a finding")
+    assert_true(all(f.get("confidence") != "high" for f in findings), "missing strongly recommended yaw data should prevent high-confidence findings")
+
+
+def test_yaw_full_evidence_has_no_missing_evidence_tiers():
+    messages = {name: {} for name in ["ATT", "RATE", "PIDY", "RCOU", "MODE", "MSG", "EV", "ERR", "RCIN", "MAG", "XKF3", "XKF4", "VIBE", "BAT", "POWR", "ESC", "ESCX", "EDT2"]}
+    required, strongly, optional = diagnosis_missing({"messages": messages}, "yaw_misbehaviour")
+    assert_true(required == [], f"full yaw evidence should satisfy required messages, got {required}")
+    assert_true(strongly == [], f"full yaw evidence should satisfy strongly recommended messages, got {strongly}")
+    assert_true(optional == [], f"full yaw evidence should satisfy optional context messages, got {optional}")
+
+
 def test_validate_module_availability_separates_required_and_optional_messages():
     modules = module_availability({"messages": {"ATT": {}, "RATE": {}, "PIDY": {}, "RCOU": {}, "MODE": {}, "MSG": {}, "EV": {}, "ERR": {}}})
     yaw = modules["yaw_diagnosis"]
     assert_true(yaw["status"] == "available", f"yaw should be available from primary messages, got {yaw}")
-    assert_true("MAG" in yaw["missing_optional"], "missing optional yaw context should be reported separately")
+    assert_true(yaw["missing_strongly_recommended"] == [], "yaw strong recommendations should be satisfied")
+    assert_true("MAG" in yaw["missing_optional_context"], "missing optional yaw context should be reported separately")
 
 
 def test_compare_summarizes_metric_deltas():
@@ -559,6 +622,9 @@ def main():
     test_escx_generates_plots_and_avoids_missing_telemetry_caveat()
     test_normal_telemetry_is_context_not_findings()
     test_yaw_pid_error_below_threshold_is_checked_not_finding()
+    test_yaw_diagnosis_requires_only_att_and_rate()
+    test_yaw_with_pidy_missing_other_strong_data_downgrades_confidence()
+    test_yaw_full_evidence_has_no_missing_evidence_tiers()
     test_validate_module_availability_separates_required_and_optional_messages()
     test_compare_summarizes_metric_deltas()
     test_metric_differences_can_ignore_unrequested_sections()

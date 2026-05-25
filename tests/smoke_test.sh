@@ -24,7 +24,8 @@ assert mapping["C2"]["category"] == "tilt"
 assert ap_common.classify_symptom("toilet bowling in loiter after a GPS glitch") == "ekf_gps_issue"
 modules = module_availability({"messages": {"ATT": {}, "RATE": {}, "PIDY": {}, "RCOU": {}, "MODE": {}, "MSG": {}, "EV": {}, "ERR": {}}})
 assert modules["yaw_diagnosis"]["status"] == "available"
-assert "MAG" in modules["yaw_diagnosis"]["missing_optional"]
+assert modules["yaw_diagnosis"]["missing_strongly_recommended"] == []
+assert "MAG" in modules["yaw_diagnosis"]["missing_optional_context"]
 diffs = metric_differences({"health": {"battery": {"min_voltage": 15.0}}}, {"health": {"battery": {"min_voltage": 14.5}}})
 assert diffs and diffs[0]["metric"] == "health.battery.min_voltage"
 PY

@@ -5,16 +5,25 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from ap_common import AnalysisError, build_index, missing_messages, parse_dataflash, vehicle_scope, write_json
+from ap_diag_requirements import DIAGNOSIS_REQUIREMENTS, missing_by_tier
 
 MODULES = {
     "core": {"required": ["ATT", "RATE", "RCOU", "MODE", "MSG", "EV", "ERR"], "optional": ["PARM", "ARM"]},
     "tuning": {"required": ["ATT", "RATE"], "optional": ["PIDR", "PIDP", "PIDY", "RCOU", "VIBE"]},
-    "yaw_diagnosis": {"required": ["ATT", "RATE", "PIDY", "RCOU", "MODE", "MSG", "EV", "ERR"], "optional": ["MAG", "XKF3", "XKF4", "VIBE", "BAT", "ESC", "ESCX", "EDT2", "RCIN", "POWR"]},
-    "vibration": {"required": ["VIBE"], "optional": ["IMU", "GYR", "ACC", "ISBH", "ISBD", "RATE", "PIDR", "PIDP", "PIDY"]},
-    "ekf_gps": {"required": ["GPS"], "optional": ["GPA", "GPS2", "XKF1", "XKF3", "XKF4", "NKF1", "NKF3", "NKF4", "MAG", "VIBE", "BAT"]},
-    "power": {"required": ["BAT"], "optional": ["POWR", "RCOU", "ESC", "ESCX", "EDT2"]},
-    "motor_esc": {"required": ["RCOU"], "optional": ["ESC", "ESCX", "EDT2", "RATE", "PIDR", "PIDP", "PIDY", "BAT", "VIBE"]},
+    "yaw_diagnosis": DIAGNOSIS_REQUIREMENTS["yaw_misbehaviour"],
+    "vibration": DIAGNOSIS_REQUIREMENTS["vibration_issue"],
+    "ekf_gps": DIAGNOSIS_REQUIREMENTS["ekf_gps_issue"],
+    "power": DIAGNOSIS_REQUIREMENTS["battery_power_issue"],
+    "motor_esc": DIAGNOSIS_REQUIREMENTS["motor_esc_issue"],
     "system_id": {"required": [], "optional": ["SID", "SIDD", "SIDS"]},
+}
+
+MODULE_SYMPTOM_CLASS = {
+    "yaw_diagnosis": "yaw_misbehaviour",
+    "vibration": "vibration_issue",
+    "ekf_gps": "ekf_gps_issue",
+    "power": "battery_power_issue",
+    "motor_esc": "motor_esc_issue",
 }
 
 
@@ -22,10 +31,17 @@ def module_availability(index):
     modules = {}
     for name, spec in MODULES.items():
         required = spec["required"]
-        optional = spec["optional"]
-        missing_required = missing_messages(index, required)
-        missing_optional = missing_messages(index, optional)
-        if not missing_required and (required or len(missing_optional) < len(optional)):
+        strongly = spec.get("strongly_recommended", [])
+        optional = spec.get("optional_context", spec.get("optional", []))
+        if "strongly_recommended" in spec or "optional_context" in spec:
+            missing_required, missing_strongly, missing_optional = missing_by_tier(index, MODULE_SYMPTOM_CLASS[name], missing_messages)
+        else:
+            missing_required = missing_messages(index, required)
+            missing_strongly = missing_messages(index, strongly)
+            missing_optional = missing_messages(index, optional)
+        supporting = strongly + optional
+        has_supporting_data = len(missing_messages(index, supporting)) < len(supporting) if supporting else False
+        if not missing_required and (required or has_supporting_data):
             status = "available"
         elif len(missing_required) < len(required):
             status = "partial"
@@ -33,9 +49,11 @@ def module_availability(index):
             status = "not_possible"
         modules[name] = {
             "required": required,
-            "optional": optional,
+            "strongly_recommended": strongly,
+            "optional_context": optional,
             "missing_required": missing_required,
-            "missing_optional": missing_optional,
+            "missing_strongly_recommended": missing_strongly,
+            "missing_optional_context": missing_optional,
             "status": status,
         }
     return modules
@@ -65,6 +83,8 @@ def main() -> int:
             warnings.append("Tuning analysis is incomplete without required ATT and RATE messages.")
         if modules["yaw_diagnosis"]["status"] != "available":
             warnings.append("Yaw diagnosis may be partial; missing required messages are listed in yaw_diagnosis.missing_required.")
+        elif modules["yaw_diagnosis"]["missing_strongly_recommended"]:
+            warnings.append("Yaw diagnosis is available from ATT/RATE but confidence is reduced without yaw_diagnosis.missing_strongly_recommended messages.")
         warnings.extend(scope.get("notes", []))
         result = {"file": str(path), "warnings": warnings, "vehicle_scope": scope, "modules": modules, "index": index}
         write_json(args.json, result)
@@ -80,8 +100,9 @@ def main() -> int:
             lines.append("|---|---|---|")
             for name, m in modules.items():
                 missing = ", ".join(m["missing_required"]) or "-"
-                optional = ", ".join(m["missing_optional"]) or "-"
-                lines.append(f"| {name} | {m['status']} | required: {missing}; optional: {optional} |")
+                strongly = ", ".join(m["missing_strongly_recommended"]) or "-"
+                optional = ", ".join(m["missing_optional_context"]) or "-"
+                lines.append(f"| {name} | {m['status']} | required: {missing}; strongly recommended: {strongly}; optional context: {optional} |")
             Path(args.summary).parent.mkdir(parents=True, exist_ok=True)
             Path(args.summary).write_text("\n".join(lines)+"\n", encoding="utf-8")
         print(f"Validated {path}: {len(warnings)} warnings")

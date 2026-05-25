@@ -16,7 +16,7 @@ The skill is strongest for Copter and multirotor logs. Generic parsing, extracti
 
 ## Safety Boundary
 
-This skill cannot declare an aircraft safe to fly. It is designed to separate abnormal evidence from normal telemetry context, with diagnosis output shaped as `findings`, `context`, `checked_but_not_supported`, `missing_required`, and `missing_optional`. Mechanical inspection, bench testing, configuration review, and controlled ground checks are still required after any serious log finding.
+This skill cannot declare an aircraft safe to fly. It is designed to separate abnormal evidence from normal telemetry context, with diagnosis output shaped as `findings`, `context`, `checked_but_not_supported`, `missing_required`, `missing_strongly_recommended`, and `missing_optional`. Mechanical inspection, bench testing, configuration review, and controlled ground checks are still required after any serious log finding.
 
 ## Install
 
