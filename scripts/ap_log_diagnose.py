@@ -14,6 +14,7 @@ from ap_common import (
 )
 from ap_diag_helpers import add_motor_esc_findings, add_power_findings, vals
 from ap_diag_requirements import missing_by_tier
+from ap_next_step_helpers import build_diagnosis_action_plan
 from ap_symptom_map import requirement_spec
 from ap_window_select import select_analysis_window
 from ap_compass_yaw import build_compass_yaw_investigation, write_compass_yaw_plots
@@ -22,6 +23,7 @@ from ap_parameters import select_relevant_parameters
 from ap_rcin import build_command_response_investigation, rcin_channel_col, rc_channel_mapping, summarize_rcin
 from ap_units import value_with_unit
 from ap_vibration import add_vibration_assessment_findings, build_vibration_assessment
+from ap_log_investigation_manifest import _next_evidence_gathering
 
 
 ACTUATOR_OUTPUT_MESSAGES = ("RCOU", "RCO2", "RCO3")
@@ -993,6 +995,31 @@ def main() -> int:
             warnings.append("Possible logging dropout context was found; inspect logging_health.possible_dropouts.")
         if logging_health.get("limits_diagnosis"):
             warnings.append("Logging health limits diagnosis confidence: " + logging_health.get("confidence_impact", "inspect logging_health"))
+        missing_for_plan = {
+            "required": list(missing_required or []),
+            "strongly_recommended": list(missing_strongly or []),
+            "optional": list(missing_optional or []),
+        }
+        present_for_plan = set((parameter_index.get("messages") or {}).keys())
+        next_evidence_gathering = _next_evidence_gathering(
+            symptom_class,
+            args.symptom,
+            requirement_spec(symptom_class),
+            present_for_plan,
+            missing_for_plan,
+            [],
+            index=parameter_index,
+        )
+        action_plan = build_diagnosis_action_plan(
+            symptom_class=symptom_class,
+            symptom_text=args.symptom,
+            findings=findings,
+            missing_required=missing_required,
+            missing_strongly_recommended=missing_strongly,
+            missing_optional=missing_optional,
+            next_evidence_gathering=next_evidence_gathering,
+            logging_health=logging_health,
+        )
         result = {
             "symptom_text": args.symptom,
             "symptom_class": symptom_class,
@@ -1018,6 +1045,9 @@ def main() -> int:
             "missing_required": missing_required,
             "missing_strongly_recommended": missing_strongly,
             "missing_optional": missing_optional,
+            "next_evidence_gathering": next_evidence_gathering,
+            "flight_status": action_plan["flight_status"],
+            "recommended_next_steps": action_plan["recommended_next_steps"],
             "plots": plots,
             "logging_dropouts": index.get("logging_dropouts", []),
             "possible_logging_dropouts": index.get("possible_logging_dropouts", []),

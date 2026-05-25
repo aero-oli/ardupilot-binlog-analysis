@@ -85,6 +85,7 @@ python scripts/ap_log_diagnose.py LOG.BIN --symptom "USER SYMPTOM" --out out/dia
 - `checked_but_not_supported`: checks that ran but did not cross the diagnostic threshold.
 - `missing_required`, `missing_strongly_recommended`, and `missing_optional`: unavailable messages separated by diagnostic importance. For yaw, only `ATT` and `RATE` are required; `PIDY`, `RCOU`, and `MODE` strengthen confidence, while timeline/context messages such as `MSG`, `EV`, and `ERR` are optional evidence.
 - `next_evidence_gathering`: structured planning guidance for what to collect next when evidence is missing. Read this before recommending a parameter review, bench check, ground test, restrained test, controlled flight, or no-fly-until-checked path. It is a safety planning aid, not a diagnosis.
+- `flight_status` and `recommended_next_steps`: structured planning aids for the final user answer. Read them, verify they match the findings and missing evidence, and surface the relevant ordered next steps in your own words. Do not treat them as an automatically generated final answer.
 
 When required or strongly recommended evidence is missing, load `references/logging-configuration-for-investigation.md` and `references/evidence-gathering-flights.md` before writing the missing-data section. Explain the confidence limit and, when appropriate, give conservative guidance for a future diagnostic capture. Do not turn missing evidence into automatic parameter changes or a recommendation to repeat unsafe flight.
 

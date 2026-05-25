@@ -29,6 +29,7 @@ from ap_log_fft import fft_from_isb_rows, fft_from_tables
 from ap_log_investigation_manifest import build_manifest_from_index, validate_recommended_plot_groups
 from ap_log_metrics import compute_metrics
 from ap_log_mode_compare import compare_modes
+from ap_next_step_helpers import build_diagnosis_action_plan
 from ap_param_context import merge_external_parameters, parse_param_file
 from ap_param_lookup import lookup_parameters
 from ap_log_plots import health_plots
@@ -2020,6 +2021,96 @@ def test_manifest_next_evidence_prearm_boot_uses_log_disarmed_without_flight():
     assert_true(any("bypass arming checks" in item for item in plan["do_not_attempt"]), "pre-arm plan should not bypass arming checks")
 
 
+def test_next_steps_yaw_auto_worse_with_vibration_limits_missions():
+    plan = build_diagnosis_action_plan(
+        symptom_class="yaw_misbehaviour",
+        symptom_text="yaw wobble is worse in AUTO mission than POSHOLD",
+        findings=[
+            {"possible_cause": "Yaw rate tracking error", "severity": "likely-issue", "evidence": ["RATE yaw error p95 is 55 deg/s"]},
+            {"possible_cause": "Vibration/clipping is relevant to symptom", "severity": "likely-issue", "evidence": ["VIBE high within analysis window"]},
+        ],
+        missing_strongly_recommended=["PIDY"],
+        missing_optional=["ESC"],
+        next_evidence_gathering={
+            "suggested_safe_capture": ["Use a short stable hover capture after checks."],
+            "hardware_support_dependent_evidence": ["Enable ESC telemetry if hardware and firmware support it."],
+        },
+    )
+    assert_true(plan["flight_status"]["classification"] in {"no_auto_missions", "controlled_hover_only"}, f"unexpected yaw mission status: {plan['flight_status']}")
+    actions = "\n".join(step["action"] for step in plan["recommended_next_steps"])
+    assert_true("Pause AUTO/mission flying" in actions, "yaw mission next steps should pause AUTO/mission flying")
+    assert_true("PIDY" in actions and "ESC telemetry" in actions, "yaw mission next steps should request PIDY and ESC telemetry")
+    assert_true("Re-run mode comparison and diagnosis before tuning" in actions, "yaw mission next steps should require reanalysis before tuning")
+    assert_true("safe to fly" not in actions.lower(), "next steps must not overclaim safety")
+
+
+def test_next_steps_crash_loss_of_control_do_not_fly():
+    plan = build_diagnosis_action_plan(
+        symptom_class="crash_or_loss_of_control",
+        symptom_text="crash loss of control",
+        findings=[{"possible_cause": "Motor output saturation", "severity": "safety-critical", "evidence": ["RCOU.C1 >=1900us"]}],
+    )
+    assert_true(plan["flight_status"]["classification"] == "do_not_fly_until_checked", f"unexpected crash status: {plan['flight_status']}")
+    actions = "\n".join(step["action"] for step in plan["recommended_next_steps"])
+    assert_true("Do not fly until checked" in actions, "crash plan should start with no-fly gate")
+    assert_true("Do not repeat the mission" in actions or "Do not repeat the flight" in actions, "crash plan should forbid repeating the flight")
+
+
+def test_next_steps_motor_esc_missing_outputs_prefers_bench():
+    plan = build_diagnosis_action_plan(
+        symptom_class="motor_esc_issue",
+        symptom_text="motor pulsing",
+        findings=[],
+        missing_strongly_recommended=["RCOU"],
+        missing_optional=["ESC"],
+    )
+    assert_true(plan["flight_status"]["classification"] == "bench_only", f"unexpected motor/ESC status: {plan['flight_status']}")
+    actions = "\n".join(step["action"] for step in plan["recommended_next_steps"])
+    assert_true("bench" in actions.lower(), "motor/ESC next steps should start with bench checks")
+    assert_true("RCOU" in actions and "ESC telemetry" in actions, "motor/ESC missing evidence should produce logging/capture steps")
+
+
+def test_next_steps_rc_failsafe_prearm_ground_only():
+    plan = build_diagnosis_action_plan(
+        symptom_class="rc_failsafe_prearm_issue",
+        symptom_text="radio failsafe prearm",
+        findings=[{"possible_cause": "Pre-arm, arming, or failsafe timeline evidence", "severity": "safety-critical", "evidence": ["PreArm: Hardware safety switch"]}],
+    )
+    assert_true(plan["flight_status"]["classification"] == "ground_test_only", f"unexpected rc/prearm status: {plan['flight_status']}")
+    actions = "\n".join(step["action"] for step in plan["recommended_next_steps"])
+    assert_true("ground" in actions.lower(), "rc/prearm next steps should be ground-test first")
+    assert_true("arming checks" in actions.lower() or "failsafe" in actions.lower(), "rc/prearm next steps should check safety warnings/failsafes")
+
+
+def test_next_steps_missing_pid_esc_evidence_adds_logging_capture_steps():
+    plan = build_diagnosis_action_plan(
+        symptom_class="yaw_misbehaviour",
+        symptom_text="yaw wobble",
+        findings=[{"possible_cause": "Yaw rate tracking error", "severity": "likely-issue", "evidence": ["RATE yaw error p95 is 45 deg/s"]}],
+        missing_strongly_recommended=["PIDY"],
+        missing_optional=["ESC"],
+    )
+    steps = plan["recommended_next_steps"]
+    actions = "\n".join(step["action"] for step in steps)
+    priorities = [step["priority"] for step in steps]
+    assert_true(priorities == sorted(priorities), f"next steps should be ordered by priority: {priorities}")
+    assert_true("PIDY" in actions, "missing PIDY should produce logging/check next step")
+    assert_true("ESC telemetry" in actions, "missing ESC evidence should produce hardware-support-dependent next step")
+    assert_true(any(step["type"] == "controlled_evidence_capture" for step in steps), "missing evidence should produce controlled capture step")
+    assert_true(any(step["type"] == "what_not_to_do" for step in steps), "next steps should include what-not-to-do")
+
+
+def test_next_steps_use_mode_comparison_when_auto_ranks_worse():
+    plan = build_diagnosis_action_plan(
+        symptom_class="yaw_misbehaviour",
+        symptom_text="yaw issue",
+        findings=[{"possible_cause": "Yaw rate tracking error", "severity": "likely-issue", "evidence": ["RATE yaw error"]}],
+        mode_comparison={"ranking": [{"decoded_mode": "AUTO", "ranking_score": 10}, {"decoded_mode": "POSHOLD", "ranking_score": 2}]},
+    )
+    assert_true(plan["flight_status"]["classification"] == "no_auto_missions", f"mode comparison should gate AUTO missions: {plan['flight_status']}")
+    assert_true(any("mode_comparison" in step["source_evidence"] for step in plan["recommended_next_steps"]), "mode comparison should be recorded as source evidence")
+
+
 def test_manifest_next_evidence_field_shape_for_all_symptom_classes():
     required_keys = {
         "safe_to_request_flight",
@@ -2482,6 +2573,12 @@ def main():
     test_manifest_next_evidence_crash_is_do_not_fly()
     test_manifest_next_evidence_vibration_missing_raw_imu_short_controlled_capture()
     test_manifest_next_evidence_prearm_boot_uses_log_disarmed_without_flight()
+    test_next_steps_yaw_auto_worse_with_vibration_limits_missions()
+    test_next_steps_crash_loss_of_control_do_not_fly()
+    test_next_steps_motor_esc_missing_outputs_prefers_bench()
+    test_next_steps_rc_failsafe_prearm_ground_only()
+    test_next_steps_missing_pid_esc_evidence_adds_logging_capture_steps()
+    test_next_steps_use_mode_comparison_when_auto_ranks_worse()
     test_manifest_next_evidence_field_shape_for_all_symptom_classes()
     test_validate_module_availability_separates_required_and_optional_messages()
     test_compare_summarizes_metric_deltas()

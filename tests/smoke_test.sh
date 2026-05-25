@@ -65,6 +65,8 @@ for required in [
     "missing_optional",
     "what_cannot_be_concluded",
     "next_evidence_gathering",
+    "flight_status",
+    "recommended_next_steps",
     "python scripts/ap_log_investigation_manifest.py LOG.BIN --symptom \"USER SYMPTOM\" --out out/investigation.json",
     "Do not automatically recommend another flight",
     "bench inspection and ground checks first",
