@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from ap_common import AnalysisError, build_index, classify_symptom, missing_messages, parse_dataflash, write_json
+from ap_common import AnalysisError, classify_symptom, collect_dataflash, missing_messages, write_json
 from ap_symptom_map import requirement_spec
 
 
@@ -140,9 +140,18 @@ def build_manifest_from_index(index, symptom_text, log_path):
     present = _present_messages(index)
     missing = _missing_evidence(index, spec)
     plot_groups = _available_plot_groups(spec, present)
+    warnings = []
+    stats = index.get("parser_stats", {})
+    if stats.get("max_messages_reached"):
+        warnings.append("Manifest stopped at --max-messages; evidence inventory may be partial.")
+    if stats.get("armed_only") and not stats.get("armed_filter_supported"):
+        warnings.append("--armed-only was requested, but ARM state could not be confirmed from ARM messages.")
+    if index.get("logging_dropouts"):
+        warnings.append("Possible logging dropout/drop count evidence was found; inspect index.logging_dropouts.")
     return {
         "symptom_text": symptom_text,
         "symptom_class": symptom_class,
+        "warnings": warnings,
         "available_evidence": _available_evidence(index),
         "missing_evidence": missing,
         "recommended_next_commands": _recommended_commands(log_path, symptom_text, spec, present, missing),
@@ -158,10 +167,21 @@ def main() -> int:
     p.add_argument("--symptom", required=True, help="User-reported symptom text")
     p.add_argument("--out", default="investigation.json", help="Output JSON path")
     p.add_argument("--max-messages", type=int, default=None, help="Optional parse limit for quick inspection")
+    p.add_argument("--start-time", type=float, default=None, help="Optional start TimeS")
+    p.add_argument("--end-time", type=float, default=None, help="Optional end TimeS")
+    p.add_argument("--armed-only", action="store_true", help="Index rows only while ARM messages indicate armed state when available")
     args = p.parse_args()
     try:
-        rows = parse_dataflash(args.log, include=None, max_messages=args.max_messages)
-        index = build_index(args.log, rows)
+        if args.start_time is not None and args.end_time is not None and args.end_time < args.start_time:
+            raise AnalysisError("--end-time must be greater than or equal to --start-time")
+        _rows, index, _stats = collect_dataflash(
+            args.log,
+            include=[],
+            max_messages=args.max_messages,
+            start_s=args.start_time,
+            end_s=args.end_time,
+            armed_only=args.armed_only,
+        )
         manifest = build_manifest_from_index(index, args.symptom, args.log)
         write_json(args.out, manifest)
         print(f"Investigation manifest class={manifest['symptom_class']}; commands={len(manifest['recommended_next_commands'])}")

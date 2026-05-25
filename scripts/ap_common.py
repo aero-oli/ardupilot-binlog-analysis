@@ -153,27 +153,27 @@ def message_type(msg: Any) -> str:
         return msg.get_type()
     return getattr(msg, "_type", type(msg).__name__)
 
-def parse_dataflash(path: os.PathLike | str, include: Optional[Sequence[str]] = None, max_messages: Optional[int] = None) -> Dict[str, List[Dict[str, Any]]]:
-    """Parse a DataFlash binary/text log into message rows keyed by message type."""
+def open_dataflash(path: os.PathLike | str):
     DFReader = require_package("pymavlink", "pymavlink.DFReader")
     path = str(path)
     if not os.path.exists(path):
         raise AnalysisError(f"Log file not found: {path}")
-    include_set = {m.strip().upper() for m in include} if include else None
     lower = path.lower()
     try:
         if lower.endswith(".bin"):
-            mlog = DFReader.DFReader_binary(path)
+            return DFReader.DFReader_binary(path)
         else:
             # DFReader_text handles many .log text dataflash logs. Binary reader may also work for some .log files.
             try:
-                mlog = DFReader.DFReader_text(path)
+                return DFReader.DFReader_text(path)
             except Exception:
-                mlog = DFReader.DFReader_binary(path)
+                return DFReader.DFReader_binary(path)
     except Exception as exc:
         raise AnalysisError(f"Could not open '{path}' as an ArduPilot DataFlash log: {exc}") from exc
 
-    rows: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+
+def iter_dataflash_messages(path: os.PathLike | str, max_messages: Optional[int] = None):
+    mlog = open_dataflash(path)
     count = 0
     while True:
         try:
@@ -182,24 +182,203 @@ def parse_dataflash(path: os.PathLike | str, include: Optional[Sequence[str]] = 
             raise AnalysisError(f"Error while reading log near message {count}: {exc}") from exc
         if msg is None:
             break
-        typ = message_type(msg)
-        if typ in {"FMT", "FMTU", "UNIT", "MULT"}:
-            # FMT can be helpful, but the reader resolves field names. Keep FMT if explicitly requested.
-            if include_set and typ not in include_set:
-                count += 1
-                continue
-        if include_set is None or typ.upper() in include_set or typ in {"FMT", "FMTU"}:
-            d = message_to_dict(msg)
-            d["_type"] = typ
-            rows[typ].append(d)
+        yield msg
         count += 1
         if max_messages and count >= max_messages:
             break
-    return dict(rows)
+
+
+def _message_iter(source: Any, max_messages: Optional[int] = None):
+    if isinstance(source, (str, os.PathLike)):
+        yield from iter_dataflash_messages(source, max_messages=max_messages)
+        return
+    count = 0
+    for msg in source:
+        yield msg
+        count += 1
+        if max_messages and count >= max_messages:
+            break
+
+
+def _row_in_time_window(row: Dict[str, Any], start_s: Optional[float] = None, end_s: Optional[float] = None) -> bool:
+    if start_s is None and end_s is None:
+        return True
+    _, ts = time_column(row)
+    if ts is None:
+        return True
+    if start_s is not None and ts < start_s:
+        return False
+    if end_s is not None and ts > end_s:
+        return False
+    return True
+
+
+def _armed_value(row: Dict[str, Any]) -> Optional[bool]:
+    for key in ["Armed", "ArmState", "ARM", "State"]:
+        if key not in row:
+            continue
+        value = row.get(key)
+        if isinstance(value, str):
+            text = value.strip().lower()
+            if text in {"armed", "arm", "true", "yes", "1"}:
+                return True
+            if text in {"disarmed", "disarm", "false", "no", "0"}:
+                return False
+        n = safe_int(value)
+        if n is not None:
+            return n != 0
+    return None
+
+
+def _detect_dropout(typ: str, row: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    dropout_fields = {}
+    for key, value in row.items():
+        lower = str(key).lower()
+        if lower in {"dp", "drop", "drops", "dropped", "dropout", "dropouts", "lost", "skipped"} or "drop" in lower:
+            numeric = safe_float(value)
+            if numeric is not None and numeric > 0:
+                dropout_fields[key] = numeric
+    if not dropout_fields and typ.upper() not in {"DSF", "DRO", "DROP"}:
+        return None
+    _, ts = time_column(row)
+    return {"time_s": ts, "message": typ, "fields": dropout_fields or strip_private(row)}
+
+
+class StreamingIndexBuilder:
+    def __init__(self, path: os.PathLike | str):
+        self.path = path
+        self.messages: Dict[str, Dict[str, Any]] = {}
+        self.parameters: Dict[str, Any] = {}
+        self.firmware_messages: List[str] = []
+        self.modes: List[Dict[str, Any]] = []
+        self.events: List[Dict[str, Any]] = []
+        self.errors: List[Dict[str, Any]] = []
+        self.logging_dropouts: List[Dict[str, Any]] = []
+        self.start_s: Optional[float] = None
+        self.end_s: Optional[float] = None
+
+    def add_row(self, typ: str, row: Dict[str, Any]) -> None:
+        entry = self.messages.setdefault(typ, {"count": 0, "fields": []})
+        entry["count"] += 1
+        if entry["count"] <= 200:
+            fields = set(entry["fields"])
+            fields.update(k for k in row.keys() if not k.startswith("_"))
+            entry["fields"] = sorted(fields)
+        _, ts = time_column(row)
+        if ts is not None:
+            self.start_s = ts if self.start_s is None else min(self.start_s, ts)
+            self.end_s = ts if self.end_s is None else max(self.end_s, ts)
+        if typ == "PARM":
+            name = str(row.get("Name") or row.get("name") or "").strip()
+            val = row.get("Value", row.get("value"))
+            if name:
+                self.parameters[name] = val
+        elif typ == "MSG" and len(self.firmware_messages) < 200:
+            msg_text = str(row.get("Message") or row.get("Msg") or row.get("message") or "").strip()
+            if msg_text:
+                self.firmware_messages.append(msg_text)
+        elif typ == "MODE" and len(self.modes) < 500:
+            self.modes.append({"time_s": ts, "mode": row.get("Mode") or row.get("ModeNum") or row.get("Name"), "raw": strip_private(row)})
+        elif typ == "EV" and len(self.events) < 500:
+            self.events.append({"time_s": ts, "id": row.get("Id"), "raw": strip_private(row)})
+        elif typ == "ERR" and len(self.errors) < 500:
+            self.errors.append({"time_s": ts, "subsys": row.get("Subsys"), "ecode": row.get("ECode"), "raw": strip_private(row)})
+        dropout = _detect_dropout(typ, row)
+        if dropout and len(self.logging_dropouts) < 200:
+            self.logging_dropouts.append(dropout)
+
+    def to_index(self, stats: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        vehicle = infer_vehicle(self.firmware_messages, self.parameters)
+        firmware = infer_firmware(self.firmware_messages)
+        path = Path(self.path)
+        return {
+            "file": str(self.path),
+            "file_name": path.name,
+            "file_size_bytes": path.stat().st_size if path.exists() else None,
+            "vehicle": vehicle,
+            "firmware": firmware,
+            "duration_s": None if self.start_s is None or self.end_s is None else round(float(self.end_s - self.start_s), 3),
+            "start_time_s": self.start_s,
+            "end_time_s": self.end_s,
+            "messages": self.messages,
+            "message_names": sorted(self.messages.keys()),
+            "parameters": self.parameters,
+            "parameter_count": len(self.parameters),
+            "firmware_messages": self.firmware_messages[:100],
+            "modes": self.modes[:500],
+            "events": self.events[:500],
+            "errors": self.errors[:500],
+            "logging_dropouts": self.logging_dropouts[:200],
+            "parser_stats": stats or {},
+        }
+
+
+def collect_dataflash(
+    data_source: Any,
+    include: Optional[Sequence[str]] = None,
+    max_messages: Optional[int] = None,
+    start_s: Optional[float] = None,
+    end_s: Optional[float] = None,
+    armed_only: bool = False,
+    source: Optional[str] = None,
+) -> Tuple[Dict[str, List[Dict[str, Any]]], Dict[str, Any], Dict[str, Any]]:
+    """Stream a log/source once, counting all messages while storing only selected rows."""
+    display = source or (str(data_source) if isinstance(data_source, (str, os.PathLike)) else "stream")
+    include_set = {m.strip().upper() for m in include} if include is not None else None
+    rows: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+    builder = StreamingIndexBuilder(display)
+    total = 0
+    collected = 0
+    armed_state = not armed_only
+    armed_filter_supported = not armed_only
+    for msg in _message_iter(data_source, max_messages=max_messages):
+        total += 1
+        typ = message_type(msg)
+        row = message_to_dict(msg)
+        row["_type"] = typ
+        if typ == "ARM":
+            arm = _armed_value(row)
+            if arm is not None:
+                armed_state = arm
+                armed_filter_supported = True
+        builder.add_row(typ, row)
+        if include_set is not None and typ.upper() not in include_set:
+            continue
+        if not _row_in_time_window(row, start_s=start_s, end_s=end_s):
+            continue
+        if armed_only and not armed_state:
+            continue
+        rows[typ].append(row)
+        collected += 1
+    stats = {
+        "total_messages_read": total,
+        "collected_rows": collected,
+        "message_filter": sorted(include_set) if include_set is not None else None,
+        "start_time_s": start_s,
+        "end_time_s": end_s,
+        "armed_only": armed_only,
+        "armed_filter_supported": armed_filter_supported,
+        "max_messages": max_messages,
+        "max_messages_reached": bool(max_messages and total >= max_messages),
+    }
+    return dict(rows), builder.to_index(stats=stats), stats
+
+
+def parse_dataflash(
+    path: os.PathLike | str,
+    include: Optional[Sequence[str]] = None,
+    max_messages: Optional[int] = None,
+    start_s: Optional[float] = None,
+    end_s: Optional[float] = None,
+    armed_only: bool = False,
+) -> Dict[str, List[Dict[str, Any]]]:
+    """Parse selected DataFlash rows keyed by message type."""
+    rows, _index, _stats = collect_dataflash(path, include=include, max_messages=max_messages, start_s=start_s, end_s=end_s, armed_only=armed_only)
+    return rows
 
 def parse_index_only(path: os.PathLike | str, max_messages: Optional[int] = None) -> Dict[str, Any]:
-    rows = parse_dataflash(path, include=None, max_messages=max_messages)
-    return build_index(path, rows)
+    _rows, index, _stats = collect_dataflash(path, include=[], max_messages=max_messages)
+    return index
 
 def time_column(row: Dict[str, Any]) -> Tuple[Optional[str], Optional[float]]:
     for key, scale in [("TimeUS", 1e-6), ("TimeMS", 1e-3), ("Time", 1.0), ("SampleUS", 1e-6), ("TS", 1.0)]:
@@ -433,72 +612,11 @@ def numeric_series(df: Any, candidates: Sequence[str]):
         return s
 
 def build_index(path: os.PathLike | str, rows_by_type: Dict[str, List[Dict[str, Any]]]) -> Dict[str, Any]:
-    messages = {}
-    parameters = {}
-    firmware_messages = []
-    modes = []
-    events = []
-    errors = []
-    start_s = None
-    end_s = None
-
+    builder = StreamingIndexBuilder(path)
     for typ, rows in rows_by_type.items():
-        fields = sorted({k for r in rows[:200] for k in r.keys() if not k.startswith("_")})
-        time_values = []
-        for r in rows[:5000]:
-            _, t = time_column(r)
-            if t is not None:
-                time_values.append(t)
-        if time_values:
-            mt_min, mt_max = min(time_values), max(time_values)
-            start_s = mt_min if start_s is None else min(start_s, mt_min)
-            end_s = mt_max if end_s is None else max(end_s, mt_max)
-        messages[typ] = {"count": len(rows), "fields": fields}
-
-        if typ == "PARM":
-            for r in rows:
-                name = str(r.get("Name") or r.get("name") or "").strip()
-                val = r.get("Value", r.get("value"))
-                if name:
-                    parameters[name] = val
-        elif typ == "MSG":
-            for r in rows[:200]:
-                msg_text = str(r.get("Message") or r.get("Msg") or r.get("message") or "").strip()
-                if msg_text:
-                    firmware_messages.append(msg_text)
-        elif typ == "MODE":
-            for r in rows:
-                _, ts = time_column(r)
-                modes.append({"time_s": ts, "mode": r.get("Mode") or r.get("ModeNum") or r.get("Name"), "raw": strip_private(r)})
-        elif typ == "EV":
-            for r in rows:
-                _, ts = time_column(r)
-                events.append({"time_s": ts, "id": r.get("Id"), "raw": strip_private(r)})
-        elif typ == "ERR":
-            for r in rows:
-                _, ts = time_column(r)
-                errors.append({"time_s": ts, "subsys": r.get("Subsys"), "ecode": r.get("ECode"), "raw": strip_private(r)})
-
-    vehicle = infer_vehicle(firmware_messages, parameters)
-    firmware = infer_firmware(firmware_messages)
-    return {
-        "file": str(path),
-        "file_name": Path(path).name,
-        "file_size_bytes": Path(path).stat().st_size if Path(path).exists() else None,
-        "vehicle": vehicle,
-        "firmware": firmware,
-        "duration_s": None if start_s is None or end_s is None else round(float(end_s - start_s), 3),
-        "start_time_s": start_s,
-        "end_time_s": end_s,
-        "messages": messages,
-        "message_names": sorted(messages.keys()),
-        "parameters": parameters,
-        "parameter_count": len(parameters),
-        "firmware_messages": firmware_messages[:100],
-        "modes": modes[:500],
-        "events": events[:500],
-        "errors": errors[:500],
-    }
+        for row in rows:
+            builder.add_row(typ, row)
+    return builder.to_index(stats={"source": "rows_by_type", "stored_rows": sum(len(rows) for rows in rows_by_type.values())})
 
 def strip_private(d: Dict[str, Any]) -> Dict[str, Any]:
     return {k: v for k, v in d.items() if not k.startswith("_")}

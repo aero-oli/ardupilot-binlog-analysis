@@ -149,9 +149,20 @@ def main() -> int:
     p.add_argument("--out", default="fft")
     p.add_argument("--json", default="fft.json")
     p.add_argument("--max-points", type=int, default=200000)
+    p.add_argument("--max-messages", type=int, default=None)
+    p.add_argument("--start-time", type=float, default=None)
+    p.add_argument("--end-time", type=float, default=None)
     args = p.parse_args()
     try:
-        rows = parse_dataflash(args.log, include=["GYR", "ACC", "IMU", "IMU_FAST", "RAW_IMU", "VIBE", "ISBH", "ISBD"])
+        if args.start_time is not None and args.end_time is not None and args.end_time < args.start_time:
+            raise AnalysisError("--end-time must be greater than or equal to --start-time")
+        rows = parse_dataflash(
+            args.log,
+            include=["GYR", "ACC", "IMU", "IMU_FAST", "RAW_IMU", "VIBE", "ISBH", "ISBD"],
+            max_messages=args.max_messages,
+            start_s=args.start_time,
+            end_s=args.end_time,
+        )
         if rows.get("ISBH") or rows.get("ISBD"):
             result = fft_from_isb_rows(rows, max_points=args.max_points)
             if result.get("available"):

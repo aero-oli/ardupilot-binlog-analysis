@@ -33,13 +33,34 @@ def main() -> int:
     p.add_argument("--format", choices=["csv", "parquet"], default="csv")
     p.add_argument("--manifest", default=None)
     p.add_argument("--window", default=None, help="Optional TimeS window as START:END or around:CENTER:RADIUS")
+    p.add_argument("--start-time", type=float, default=None, help="Optional start TimeS")
+    p.add_argument("--end-time", type=float, default=None, help="Optional end TimeS")
+    p.add_argument("--max-messages", type=int, default=None, help="Optional parse limit")
+    p.add_argument("--armed-only", action="store_true", help="Extract rows only while ARM messages indicate armed state when available")
     args = p.parse_args()
     include = None if args.messages.strip().upper() == "ALL" else [m.strip().upper() for m in args.messages.split(",") if m.strip()]
     out = ensure_dir(args.out)
     window = parse_time_window(args.window)
+    if args.start_time is not None:
+        window["start_s"] = args.start_time
+    if args.end_time is not None:
+        window["end_s"] = args.end_time
+    if window["start_s"] is not None and window["end_s"] is not None and window["end_s"] < window["start_s"]:
+        raise AnalysisError("--end-time must be greater than or equal to --start-time")
     manifest = {"log": args.log, "format_requested": args.format, "analysis_window": window, "tables": {}, "warnings": []}
     try:
-        rows = filter_rows_by_time(parse_dataflash(args.log, include=include), **window)
+        rows = parse_dataflash(
+            args.log,
+            include=include,
+            max_messages=args.max_messages,
+            start_s=window["start_s"],
+            end_s=window["end_s"],
+            armed_only=args.armed_only,
+        )
+        if args.max_messages:
+            manifest["warnings"].append("Extraction used --max-messages; output tables may be partial.")
+        if args.armed_only:
+            manifest["warnings"].append("Extraction used --armed-only; rows before ARM state could be excluded if ARM messages were available.")
         for typ, data in sorted(rows.items()):
             if not data or typ in {"FMT", "FMTU"}:
                 continue

@@ -33,6 +33,50 @@ def assert_true(condition, message):
         raise AssertionError(message)
 
 
+class FakeMsg:
+    def __init__(self, typ, **fields):
+        self.typ = typ
+        self.fields = fields
+
+    def get_type(self):
+        return self.typ
+
+    def to_dict(self):
+        return dict(self.fields)
+
+
+def test_stream_dataflash_counts_without_storing_unselected_rows():
+    messages = [FakeMsg("RATE", TimeUS=i * 100000, R=i) for i in range(5000)]
+    messages.extend(FakeMsg("ATT", TimeUS=i * 100000, Roll=i) for i in range(5))
+
+    rows, index, stats = ap_common.collect_dataflash(messages, include=["ATT"], source="synthetic")
+
+    assert_true(len(rows["ATT"]) == 5, "selected ATT rows should be collected")
+    assert_true("RATE" not in rows, "unselected RATE rows should not be stored")
+    assert_true(index["messages"]["RATE"]["count"] == 5000, "stream index should still count unselected RATE rows")
+    assert_true(index["messages"]["ATT"]["count"] == 5, "stream index should count selected ATT rows")
+    assert_true(stats["total_messages_read"] == 5005, "stream stats should count all messages read")
+
+
+def test_stream_dataflash_respects_time_window_and_max_messages():
+    messages = [FakeMsg("ATT", TimeUS=i * 1000000, Roll=i) for i in range(10)]
+
+    rows, index, stats = ap_common.collect_dataflash(messages, include=["ATT"], source="synthetic", start_s=3.0, end_s=5.0, max_messages=7)
+
+    assert_true([row["Roll"] for row in rows["ATT"]] == [3, 4, 5], "time window should limit collected rows")
+    assert_true(index["messages"]["ATT"]["count"] == 7, "max_messages should stop stream after seven messages")
+    assert_true(stats["max_messages_reached"] is True, "stream stats should report max message truncation")
+
+
+def test_stream_index_reports_logging_dropouts():
+    messages = [FakeMsg("DSF", TimeUS=1000000, Dp=3), FakeMsg("ATT", TimeUS=2000000, Roll=1)]
+
+    _rows, index, _stats = ap_common.collect_dataflash(messages, include=[], source="synthetic")
+
+    assert_true(index["logging_dropouts"], "DSF dropout evidence should be reported in the index")
+    assert_true(index["logging_dropouts"][0]["fields"]["Dp"] == 3.0, "drop count field should be retained")
+
+
 def test_load_tables_fails_on_unreadable_table():
     with tempfile.TemporaryDirectory() as tmp:
         table = Path(tmp) / "RATE.csv"
@@ -675,6 +719,9 @@ def test_plot_manifest_uses_metrics_argument():
 
 
 def main():
+    test_stream_dataflash_counts_without_storing_unselected_rows()
+    test_stream_dataflash_respects_time_window_and_max_messages()
+    test_stream_index_reports_logging_dropouts()
     test_load_tables_fails_on_unreadable_table()
     test_time_window_filters_tables_inclusively()
     test_parse_time_window_accepts_start_end_and_around()

@@ -6,13 +6,14 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from ap_common import (
-    AnalysisError, AXIS_MAP, build_index, classify_symptom, clip_columns, combined_rcout_dataframe, ensure_dir,
+    AnalysisError, AXIS_MAP, classify_symptom, clip_columns, collect_dataflash, combined_rcout_dataframe, ensure_dir,
     event_markers_from_tables, filter_tables_by_time, get_col, missing_messages, motor_channels_from_mapping,
-    numeric_series, output_channel_columns, output_channel_label, output_mapping_from_tables, parse_dataflash,
+    numeric_series, output_channel_columns, output_channel_label, output_mapping_from_tables,
     parse_time_window, percentile, rms, rows_to_dataframe, safe_float, severity_rank, write_json
 )
 from ap_diag_helpers import add_motor_esc_findings, add_power_findings, vals
 from ap_diag_requirements import missing_by_tier
+from ap_symptom_map import requirement_spec
 
 
 def add_event_markers(fig, markers):
@@ -636,14 +637,38 @@ def main() -> int:
     p.add_argument("--out", default="diagnosis.json")
     p.add_argument("--plots", default=None)
     p.add_argument("--window", default=None, help="Optional TimeS window as START:END or around:CENTER:RADIUS")
+    p.add_argument("--start-time", type=float, default=None, help="Optional start TimeS for row collection")
+    p.add_argument("--end-time", type=float, default=None, help="Optional end TimeS for row collection")
+    p.add_argument("--messages", default=None, help="Comma-separated message names to parse, or ALL. Defaults to symptom-relevant messages.")
+    p.add_argument("--max-messages", type=int, default=None, help="Optional parse limit for quick diagnosis")
+    p.add_argument("--armed-only", action="store_true", help="Collect rows only while ARM messages indicate armed state when available")
     p.add_argument("--events", action="store_true", help="Overlay MODE/ERR/EV/MSG markers on generated plots")
     args = p.parse_args()
     try:
         symptom_class = classify_symptom(args.symptom)
-        # Parse all relevant/default messages and build both index and dataframes directly.
-        rows = parse_dataflash(args.log)
-        index = build_index(args.log, rows)
         window = parse_time_window(args.window)
+        if args.start_time is not None:
+            window["start_s"] = args.start_time
+        if args.end_time is not None:
+            window["end_s"] = args.end_time
+        if window["start_s"] is not None and window["end_s"] is not None and window["end_s"] < window["start_s"]:
+            raise AnalysisError("--end-time must be greater than or equal to --start-time")
+        if args.messages:
+            include = None if args.messages.strip().upper() == "ALL" else [m.strip().upper() for m in args.messages.split(",") if m.strip()]
+        else:
+            spec = requirement_spec(symptom_class)
+            include = []
+            for msg in spec["required_messages"] + spec["strongly_recommended_messages"] + spec["optional_context_messages"] + ["PARM"]:
+                if msg not in include:
+                    include.append(msg)
+        rows, index, stats = collect_dataflash(
+            args.log,
+            include=include,
+            max_messages=args.max_messages,
+            start_s=window["start_s"],
+            end_s=window["end_s"],
+            armed_only=args.armed_only,
+        )
         tables = {typ: rows_to_dataframe(data) for typ, data in rows.items() if data and typ not in {"FMT", "FMTU"}}
         tables = filter_tables_by_time(tables, **window)
         if symptom_class == "yaw_misbehaviour":
@@ -651,11 +676,22 @@ def main() -> int:
         else:
             findings, context, checked, missing_required, missing_strongly, missing_optional = diagnose_by_class(symptom_class, tables, index)
         plots = make_targeted_plots_from_tables(tables, symptom_class, args.plots, events=args.events) if args.plots else []
+        warnings = []
+        if stats.get("max_messages_reached"):
+            warnings.append("Diagnosis stopped at --max-messages; evidence may be partial.")
+        if args.messages and args.messages.strip().upper() != "ALL":
+            warnings.append("Diagnosis used an explicit --messages filter; unavailable evidence may be due to filtering.")
+        if args.armed_only and not stats.get("armed_filter_supported"):
+            warnings.append("--armed-only was requested, but ARM state could not be confirmed from ARM messages.")
+        if index.get("logging_dropouts"):
+            warnings.append("Possible logging dropout/drop count evidence was found; inspect logging_dropouts.")
         result = {
             "symptom_text": args.symptom,
             "symptom_class": symptom_class,
             "analysis_window": window,
             "log": {"file": args.log, "vehicle": index.get("vehicle"), "firmware": index.get("firmware"), "duration_s": index.get("duration_s")},
+            "parser": stats,
+            "warnings": warnings,
             "findings": findings,
             "context": context,
             "checked_but_not_supported": checked,
@@ -663,6 +699,7 @@ def main() -> int:
             "missing_strongly_recommended": missing_strongly,
             "missing_optional": missing_optional,
             "plots": plots,
+            "logging_dropouts": index.get("logging_dropouts", []),
             "safety_note": "Do not treat this diagnosis as clearance to fly. Bench and ground checks are required after any configuration, mechanical, power, or tuning changes.",
             "what_cannot_be_concluded": build_cannot_conclude(symptom_class, missing_required + missing_strongly + missing_optional, tables),
         }

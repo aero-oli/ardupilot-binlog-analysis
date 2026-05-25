@@ -4,16 +4,17 @@ import argparse
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from ap_common import build_index, ensure_dir, filter_tables_by_time, parse_dataflash, parse_time_window, write_json
+from ap_common import DEFAULT_MESSAGES, build_index, ensure_dir, filter_tables_by_time, parse_dataflash, parse_time_window, write_json
 from ap_log_metrics import compute_metrics
 from ap_common import rows_to_dataframe
 
 
-def metrics_for(log, window=None):
-    rows = parse_dataflash(log)
+def metrics_for(log, window=None, max_messages=None):
+    window = window or {"start_s": None, "end_s": None}
+    include = list(dict.fromkeys([*DEFAULT_MESSAGES, "PARM"]))
+    rows = parse_dataflash(log, include=include, max_messages=max_messages, start_s=window["start_s"], end_s=window["end_s"])
     index = build_index(log, rows)
     tables = {typ: rows_to_dataframe(data) for typ, data in rows.items() if data and typ not in {"FMT", "FMTU"}}
-    window = window or {"start_s": None, "end_s": None}
     tables = filter_tables_by_time(tables, **window)
     metrics = compute_metrics(tables, analysis_window=window)
     return index, metrics
@@ -63,14 +64,15 @@ def main() -> int:
     p.add_argument("--window", default=None, help="Same TimeS window for both logs")
     p.add_argument("--before-window", default=None)
     p.add_argument("--after-window", default=None)
+    p.add_argument("--max-messages", type=int, default=None)
     args = p.parse_args()
     out = ensure_dir(args.out)
     try:
         shared_window = parse_time_window(args.window)
         before_window = parse_time_window(args.before_window) if args.before_window else shared_window
         after_window = parse_time_window(args.after_window) if args.after_window else shared_window
-        b_index, b_metrics = metrics_for(args.before, before_window)
-        a_index, a_metrics = metrics_for(args.after, after_window)
+        b_index, b_metrics = metrics_for(args.before, before_window, max_messages=args.max_messages)
+        a_index, a_metrics = metrics_for(args.after, after_window, max_messages=args.max_messages)
         result = {
             "before": {"file": args.before, "index": b_index, "metrics": b_metrics},
             "after": {"file": args.after, "index": a_index, "metrics": a_metrics},

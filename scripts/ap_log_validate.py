@@ -4,7 +4,7 @@ import argparse
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from ap_common import AnalysisError, build_index, missing_messages, parse_dataflash, vehicle_scope, write_json
+from ap_common import AnalysisError, collect_dataflash, missing_messages, vehicle_scope, write_json
 from ap_diag_requirements import DIAGNOSIS_REQUIREMENTS, missing_by_tier
 
 MODULES = {
@@ -63,6 +63,7 @@ def main() -> int:
     p.add_argument("log")
     p.add_argument("--json", default="validate.json")
     p.add_argument("--summary", default=None)
+    p.add_argument("--max-messages", type=int, default=None, help="Optional parse limit for quick validation")
     args = p.parse_args()
     path = Path(args.log)
     warnings = []
@@ -71,12 +72,15 @@ def main() -> int:
     if path.suffix.lower() not in {".bin", ".log", ".tlog"}:
         warnings.append(f"Unexpected extension '{path.suffix}'. Attempting DataFlash parse anyway.")
     try:
-        rows = parse_dataflash(path)
-        index = build_index(path, rows)
+        _rows, index, _stats = collect_dataflash(path, include=[], max_messages=args.max_messages)
         modules = module_availability(index)
         scope = vehicle_scope(index)
         if not index["messages"]:
             warnings.append("No DataFlash messages parsed.")
+        if index.get("parser_stats", {}).get("max_messages_reached"):
+            warnings.append("Validation stopped at --max-messages; message counts and module availability may be partial.")
+        if index.get("logging_dropouts"):
+            warnings.append("Possible logging dropout/drop count evidence was found; inspect index.logging_dropouts.")
         if index.get("duration_s") is None:
             warnings.append("No usable time base found; segmenting and time plots may be limited.")
         if modules["tuning"]["status"] != "available":
