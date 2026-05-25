@@ -353,6 +353,58 @@ def test_window_selector_takeoff_hover_and_high_throttle():
     assert_true(high["start_s"] == 10.0 and high["end_s"] == 15.0, f"unexpected high-throttle window {high}")
 
 
+def test_hover_selector_uses_duration_based_window_on_high_rate_data():
+    times = [i * 0.5 for i in range(25)]
+    tables = {
+        "CTUN": pd.DataFrame({
+            "TimeS": times,
+            "Alt": [2.0 + (0.05 if i % 2 else 0.0) for i in range(25)],
+            "ThO": [0.45 for _ in times],
+        }),
+        "GPS": pd.DataFrame({"TimeS": times, "Spd": [0.25 for _ in times]}),
+        "ATT": pd.DataFrame({"TimeS": times, "Roll": [1.5 for _ in times], "Pitch": [-1.0 for _ in times]}),
+    }
+
+    hover = select_analysis_window(tables, hover_candidates=True, hover_min_duration_s=5.0)
+
+    assert_true(hover["end_s"] - hover["start_s"] >= 5.0, f"hover window should last at least min duration: {hover}")
+    assert_true(hover["criteria"]["min_duration_s"] == 5.0, "hover criteria should record minimum duration")
+    assert_true(hover["criteria"]["alt_span_max_m"] == 0.75, "hover criteria should record altitude span limit")
+    assert_true(hover["intervals_found"], "hover selector should record candidate intervals")
+
+
+def test_hover_selector_rejects_unstable_altitude():
+    tables = {
+        "CTUN": pd.DataFrame({
+            "TimeS": [0, 1, 2, 3, 4, 5, 6],
+            "Alt": [0.0, 0.4, 0.9, 1.4, 2.0, 2.5, 3.0],
+            "ThO": [0.45, 0.45, 0.45, 0.45, 0.45, 0.45, 0.45],
+        }),
+    }
+    try:
+        select_analysis_window(tables, hover_candidates=True, hover_min_duration_s=5.0, hover_alt_span_max_m=0.75)
+    except AnalysisError as exc:
+        assert_true("no stable-altitude moderate-throttle window" in str(exc), f"unexpected hover rejection error: {exc}")
+    else:
+        raise AssertionError("unstable altitude should not produce a hover candidate")
+
+
+def test_hover_selector_rejects_throttle_outside_hover_band():
+    tables = {
+        "CTUN": pd.DataFrame({
+            "TimeS": [0, 1, 2, 3, 4, 5, 6],
+            "Alt": [2.0, 2.05, 2.0, 2.05, 2.0, 2.05, 2.0],
+            "ThO": [0.82, 0.83, 0.84, 0.82, 0.83, 0.84, 0.82],
+        }),
+    }
+    try:
+        select_analysis_window(tables, hover_candidates=True, hover_min_duration_s=5.0, hover_throttle_min=0.25, hover_throttle_max=0.75)
+    except AnalysisError as exc:
+        assert_true("no stable-altitude moderate-throttle window" in str(exc), f"unexpected throttle rejection error: {exc}")
+    else:
+        raise AssertionError("throttle outside hover band should not produce a hover candidate")
+
+
 def test_window_selector_fails_requested_missing_selector():
     try:
         select_analysis_window({}, mode="LOITER")
@@ -360,6 +412,12 @@ def test_window_selector_fails_requested_missing_selector():
         assert_true("MODE" in str(exc), f"unexpected mode selector error: {exc}")
     else:
         raise AssertionError("requested mode selector should fail when MODE is missing")
+    try:
+        select_analysis_window({}, hover_candidates=True)
+    except AnalysisError as exc:
+        assert_true("CTUN" in str(exc), f"unexpected hover selector error: {exc}")
+    else:
+        raise AssertionError("requested hover selector should fail when CTUN is missing")
 
 
 def test_parse_time_window_accepts_start_end_and_around():
@@ -1485,6 +1543,9 @@ def main():
     test_custom_plot_manifest_records_split_mode_intervals()
     test_window_selector_around_msg_event_and_error()
     test_window_selector_takeoff_hover_and_high_throttle()
+    test_hover_selector_uses_duration_based_window_on_high_rate_data()
+    test_hover_selector_rejects_unstable_altitude()
+    test_hover_selector_rejects_throttle_outside_hover_band()
     test_window_selector_fails_requested_missing_selector()
     test_parse_time_window_accepts_start_end_and_around()
     test_metrics_can_be_computed_from_filtered_window()

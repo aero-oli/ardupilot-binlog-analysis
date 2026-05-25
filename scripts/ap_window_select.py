@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections import deque
+
 from ap_common import AnalysisError, get_col, parse_time_window, safe_float
 
 
@@ -147,33 +149,143 @@ def _takeoff_window(tables):
     raise AnalysisError("--takeoff-only requested but no takeoff-like altitude rise was detected")
 
 
-def _hover_window(tables):
+def _interval_numeric_values(df, start_s, end_s, columns):
+    if df is None or not hasattr(df, "columns") or "TimeS" not in df.columns:
+        return []
+    col = get_col(df, columns)
+    if not col:
+        return []
+    data = df[["TimeS", col]].dropna().sort_values("TimeS")
+    values = []
+    for row in data.to_dict(orient="records"):
+        t = safe_float(row.get("TimeS"))
+        v = safe_float(row.get(col))
+        if t is None or v is None or t < start_s or t > end_s:
+            continue
+        values.append(v)
+    return values
+
+
+def _hover_window(
+    tables,
+    min_duration_s=5.0,
+    alt_span_max_m=0.75,
+    throttle_min=0.25,
+    throttle_max=0.75,
+):
     if "CTUN" not in tables:
         raise AnalysisError("--hover-candidates requested but CTUN data is missing")
+    min_duration_s = float(min_duration_s)
+    alt_span_max_m = float(alt_span_max_m)
+    throttle_min = float(throttle_min)
+    throttle_max = float(throttle_max)
+    if min_duration_s <= 0:
+        raise AnalysisError("--hover-min-duration must be greater than zero")
+    if alt_span_max_m < 0:
+        raise AnalysisError("--hover-alt-span-max must be non-negative")
+    if throttle_min > throttle_max:
+        raise AnalysisError("--hover-throttle-min must be less than or equal to --hover-throttle-max")
     df = tables["CTUN"]
     alt_col = get_col(df, ["Alt", "BAlt", "DAlt"])
     thr_col = get_col(df, ["ThO", "ThH"])
     if "TimeS" not in df.columns or not alt_col:
         raise AnalysisError("--hover-candidates requested but CTUN TimeS/Alt data is missing")
     data = df[["TimeS", alt_col] + ([thr_col] if thr_col else [])].dropna(subset=["TimeS", alt_col]).sort_values("TimeS")
-    if len(data) < 3:
+    if len(data) < 2:
         raise AnalysisError("--hover-candidates requested but too few CTUN rows are available")
+    gps_speed_max_m_s = 1.0
+    attitude_max_abs_deg = 10.0
+    criteria = {
+        "min_duration_s": min_duration_s,
+        "alt_span_max_m": alt_span_max_m,
+        "throttle_min": throttle_min,
+        "throttle_max": throttle_max,
+        "gps_speed_max_m_s": gps_speed_max_m_s,
+        "attitude_max_abs_deg": attitude_max_abs_deg,
+    }
     candidates = []
-    for i in range(len(data) - 2):
-        chunk = data.iloc[i:i + 3]
-        alt_span = float(chunk[alt_col].max() - chunk[alt_col].min())
-        duration = float(chunk["TimeS"].iloc[-1] - chunk["TimeS"].iloc[0])
-        if duration <= 0 or alt_span > 0.75:
+    records = data.to_dict(orient="records")
+    left = 0
+    alt_min = deque()
+    alt_max = deque()
+    throttle_min_q = deque()
+    throttle_max_q = deque()
+    for right, row in enumerate(records):
+        alt = safe_float(row.get(alt_col))
+        if alt is None:
+            left = right + 1
+            alt_min.clear(); alt_max.clear(); throttle_min_q.clear(); throttle_max_q.clear()
             continue
+        throttle = safe_float(row.get(thr_col)) if thr_col else None
+        if thr_col and (throttle is None or throttle < throttle_min or throttle > throttle_max):
+            left = right + 1
+            alt_min.clear(); alt_max.clear(); throttle_min_q.clear(); throttle_max_q.clear()
+            continue
+        while alt_min and alt_min[-1][1] > alt:
+            alt_min.pop()
+        alt_min.append((right, alt))
+        while alt_max and alt_max[-1][1] < alt:
+            alt_max.pop()
+        alt_max.append((right, alt))
         if thr_col:
-            throttle = chunk[thr_col].mean()
-            if throttle < 0.25 or throttle > 0.75:
-                continue
-        candidates.append({"start_s": float(chunk["TimeS"].iloc[0]), "end_s": float(chunk["TimeS"].iloc[-1])})
+            while throttle_min_q and throttle_min_q[-1][1] > throttle:
+                throttle_min_q.pop()
+            throttle_min_q.append((right, throttle))
+            while throttle_max_q and throttle_max_q[-1][1] < throttle:
+                throttle_max_q.pop()
+            throttle_max_q.append((right, throttle))
+        while alt_min and alt_max and (alt_max[0][1] - alt_min[0][1]) > alt_span_max_m:
+            left += 1
+            while alt_min and alt_min[0][0] < left:
+                alt_min.popleft()
+            while alt_max and alt_max[0][0] < left:
+                alt_max.popleft()
+            while throttle_min_q and throttle_min_q[0][0] < left:
+                throttle_min_q.popleft()
+            while throttle_max_q and throttle_max_q[0][0] < left:
+                throttle_max_q.popleft()
+        if left > right or not alt_min or not alt_max:
+            continue
+        start_s = safe_float(records[left].get("TimeS"))
+        end_s = safe_float(row.get("TimeS"))
+        if start_s is None or end_s is None:
+            continue
+        duration = end_s - start_s
+        if duration < min_duration_s:
+            continue
+        candidate = {
+            "start_s": start_s,
+            "end_s": end_s,
+            "duration_s": duration,
+            "alt_span_m": float(alt_max[0][1] - alt_min[0][1]),
+        }
+        if thr_col and throttle_min_q and throttle_max_q:
+            candidate["throttle_min"] = float(throttle_min_q[0][1])
+            candidate["throttle_max"] = float(throttle_max_q[0][1])
+        if "GPS" in tables:
+            speeds = _interval_numeric_values(tables["GPS"], start_s, end_s, ["Spd", "Speed", "GSpd"])
+            if speeds:
+                speed_max = max(speeds)
+                if speed_max > gps_speed_max_m_s:
+                    continue
+                candidate["gps_speed_max_m_s"] = speed_max
+        if "ATT" in tables:
+            rolls = _interval_numeric_values(tables["ATT"], start_s, end_s, ["Roll"])
+            pitches = _interval_numeric_values(tables["ATT"], start_s, end_s, ["Pitch"])
+            attitude_values = [abs(v) for v in rolls + pitches]
+            if attitude_values:
+                attitude_max = max(attitude_values)
+                if attitude_max > attitude_max_abs_deg:
+                    continue
+                candidate["attitude_max_abs_deg"] = attitude_max
+        candidates.append(candidate)
     if not candidates:
         raise AnalysisError("--hover-candidates requested but no stable-altitude moderate-throttle window was detected")
-    best = max(candidates, key=lambda item: item["end_s"] - item["start_s"])
-    return _window(best["start_s"], best["end_s"], "hover_candidates", source="CTUN", intervals=candidates[:10])
+    candidates = sorted(candidates, key=lambda item: (item["duration_s"], -item["alt_span_m"]), reverse=True)
+    best = candidates[0]
+    selection = _window(best["start_s"], best["end_s"], "hover_candidates", source="CTUN", intervals=candidates[:10])
+    selection["criteria"] = criteria
+    return selection
 
 
 def _longest_true_interval(times, mask):
@@ -233,6 +345,10 @@ def select_analysis_window(
     around_error=False,
     takeoff_only=False,
     hover_candidates=False,
+    hover_min_duration_s=5.0,
+    hover_alt_span_max_m=0.75,
+    hover_throttle_min=0.25,
+    hover_throttle_max=0.75,
     high_throttle_only=False,
     around_radius_s=10.0,
     high_throttle_percentile=90.0,
@@ -270,7 +386,13 @@ def select_analysis_window(
     if takeoff_only:
         return _takeoff_window(tables)
     if hover_candidates:
-        return _hover_window(tables)
+        return _hover_window(
+            tables,
+            min_duration_s=hover_min_duration_s,
+            alt_span_max_m=hover_alt_span_max_m,
+            throttle_min=hover_throttle_min,
+            throttle_max=hover_throttle_max,
+        )
     if high_throttle_only:
         return _high_throttle_window(tables, percentile=high_throttle_percentile, threshold=high_throttle_threshold)
     start, end = _table_time_bounds(tables)

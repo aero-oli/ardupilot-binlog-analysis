@@ -156,6 +156,8 @@ python scripts/ap_log_diagnose.py LOG.BIN --symptom "motor issue" --high-throttl
 
 Selectors include `--mode`, `--around-msg`, `--around-event`, `--around-error`, `--takeoff-only`, `--hover-candidates`, and `--high-throttle-only`. For diagnosis and custom plots, `--mode` uses all matching mode intervals and excludes intervening non-matching gaps; inspect `analysis_window.intervals_found`, `analysis_window.intervals_used`, and `analysis_window.non_matching_gaps_excluded` when reporting scope. If a requested selector cannot be resolved from available log messages, the script should fail with a clear error rather than silently using whole-log averages.
 
+`--hover-candidates` uses a conservative duration-based CTUN hover heuristic. Tune it with `--hover-min-duration`, `--hover-alt-span-max`, `--hover-throttle-min`, and `--hover-throttle-max`; report the selected `analysis_window.criteria` and candidate intervals when using it.
+
 ## Symptom diagnosis fault tree
 
 For symptom-led diagnosis, `references/symptom-diagnosis-map.yaml` is authoritative for symptom classification, diagnostic message tiers, relevant parameters, recommended plot groups, diagnostic questions, and likely fault branches. If no YAML alias confidently matches, use `general_investigation` rather than guessing. Then follow the relevant reference file:

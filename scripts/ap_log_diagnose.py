@@ -771,6 +771,10 @@ def main() -> int:
     p.add_argument("--around-error", action="store_true", help="Select a window around the first ERR message")
     p.add_argument("--takeoff-only", action="store_true", help="Select an approximate takeoff climb window")
     p.add_argument("--hover-candidates", action="store_true", help="Select an approximate stable hover candidate window")
+    p.add_argument("--hover-min-duration", type=float, default=5.0, help="Minimum duration in seconds for --hover-candidates")
+    p.add_argument("--hover-alt-span-max", type=float, default=0.75, help="Maximum altitude span in metres for --hover-candidates")
+    p.add_argument("--hover-throttle-min", type=float, default=0.25, help="Minimum CTUN throttle for --hover-candidates when throttle is available")
+    p.add_argument("--hover-throttle-max", type=float, default=0.75, help="Maximum CTUN throttle for --hover-candidates when throttle is available")
     p.add_argument("--high-throttle-only", action="store_true", help="Select a high-throttle output/demand window")
     p.add_argument("--around-radius", type=float, default=10.0, help="Seconds before/after around-msg/event/error selectors")
     p.add_argument("--high-throttle-percentile", type=float, default=90.0)
@@ -817,6 +821,10 @@ def main() -> int:
             around_error=args.around_error,
             takeoff_only=args.takeoff_only,
             hover_candidates=args.hover_candidates,
+            hover_min_duration_s=args.hover_min_duration,
+            hover_alt_span_max_m=args.hover_alt_span_max,
+            hover_throttle_min=args.hover_throttle_min,
+            hover_throttle_max=args.hover_throttle_max,
             high_throttle_only=args.high_throttle_only,
             around_radius_s=args.around_radius,
             high_throttle_percentile=args.high_throttle_percentile,
