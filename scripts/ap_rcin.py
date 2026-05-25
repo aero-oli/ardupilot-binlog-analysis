@@ -22,10 +22,12 @@ AXIS_FIELDS = {
 }
 
 
-def _combined_params(tables: Dict[str, Any], index: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+def _combined_params(tables: Dict[str, Any], index: Optional[Dict[str, Any]] = None, parameters: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     params = {}
     if index:
         params.update(index.get("parameters", {}) or {})
+    if parameters:
+        params.update(parameters)
     params.update(params_from_tables(tables))
     return params
 
@@ -42,8 +44,8 @@ def rcin_channel_col(rcin: Any, channel: int) -> Optional[str]:
     return get_col(rcin, candidates)
 
 
-def rc_channel_mapping(tables: Dict[str, Any], index: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-    params = _combined_params(tables, index)
+def rc_channel_mapping(tables: Dict[str, Any], index: Optional[Dict[str, Any]] = None, parameters: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    params = _combined_params(tables, index, parameters=parameters)
     axes = {}
     used_defaults = []
     for axis, (param, default) in AXIS_CHANNEL_PARAMS.items():
@@ -73,9 +75,9 @@ def rc_channel_mapping(tables: Dict[str, Any], index: Optional[Dict[str, Any]] =
     return {"axes": axes, "mapping_source": mapping_source, "limitation": limitation, "parameters_available": not used_defaults}
 
 
-def summarize_rcin(tables: Dict[str, Any], index: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+def summarize_rcin(tables: Dict[str, Any], index: Optional[Dict[str, Any]] = None, parameters: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     rcin = tables.get("RCIN")
-    mapping = rc_channel_mapping(tables, index)
+    mapping = rc_channel_mapping(tables, index, parameters=parameters)
     if rcin is None or len(rcin) == 0:
         return {"available": False, "mapping": mapping, "axes": {}, "limitation": "RCIN message is not available."}
     axes = {}

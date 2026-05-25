@@ -7,6 +7,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from ap_common import AnalysisError, classify_symptom, collect_dataflash, missing_messages, write_json
+from ap_param_context import merge_external_parameters, parse_param_file
 from ap_parameters import select_relevant_parameters
 from ap_rcin import rc_channel_mapping, rcin_channel_col
 from ap_symptom_map import diagnosis_requirements, requirement_spec
@@ -585,14 +586,16 @@ def _yaw_questions_first(symptom_class, questions, symptom_text=""):
     return merged
 
 
-def build_manifest_from_index(index, symptom_text, log_path):
+def build_manifest_from_index(index, symptom_text, log_path, external_parameter_context=None):
     validate_recommended_plot_groups()
+    merged_params = merge_external_parameters(index, external_parameter_context)
+    parameter_index = merged_params["index"]
     symptom_class = classify_symptom(symptom_text)
     spec = requirement_spec(symptom_class)
     present = _present_messages(index)
     missing = _missing_evidence(index, spec)
     plot_groups = _available_plot_groups(spec, present, index)
-    rcin_mapping_limitation = _rcin_mapping_limitation(spec, present, index)
+    rcin_mapping_limitation = _rcin_mapping_limitation(spec, present, parameter_index)
     confidence_limits = _confidence_limits(missing, rcin_mapping_limitation=rcin_mapping_limitation)
     warnings = []
     stats = index.get("parser_stats", {})
@@ -612,7 +615,10 @@ def build_manifest_from_index(index, symptom_text, log_path):
         "symptom_class": symptom_class,
         "warnings": warnings,
         "logging_health": logging_health,
-        "parameter_context": select_relevant_parameters(symptom_class, index=index),
+        "parameter_context": select_relevant_parameters(symptom_class, index=parameter_index),
+        "external_parameter_context": merged_params["external_parameter_context"],
+        "parameter_conflicts": merged_params["parameter_conflicts"],
+        "parameter_source_precedence": merged_params["parameter_source_precedence"],
         "available_evidence": _available_evidence(index),
         "missing_evidence": missing,
         "next_evidence_gathering": _next_evidence_gathering(symptom_class, symptom_text, spec, present, missing, confidence_limits),
@@ -632,6 +638,7 @@ def main() -> int:
     p.add_argument("--start-time", type=float, default=None, help="Optional start TimeS")
     p.add_argument("--end-time", type=float, default=None, help="Optional end TimeS")
     p.add_argument("--armed-only", action="store_true", help="Index rows only while ARM messages indicate armed state when available")
+    p.add_argument("--params", help="External Mission Planner/QGC/MAVProxy parameter export for configuration context")
     args = p.parse_args()
     try:
         if args.start_time is not None and args.end_time is not None and args.end_time < args.start_time:
@@ -644,7 +651,8 @@ def main() -> int:
             end_s=args.end_time,
             armed_only=args.armed_only,
         )
-        manifest = build_manifest_from_index(index, args.symptom, args.log)
+        external_parameter_context = parse_param_file(args.params) if args.params else None
+        manifest = build_manifest_from_index(index, args.symptom, args.log, external_parameter_context=external_parameter_context)
         write_json(args.out, manifest)
         print(f"Investigation manifest class={manifest['symptom_class']}; commands={len(manifest['recommended_next_commands'])}")
         return 0

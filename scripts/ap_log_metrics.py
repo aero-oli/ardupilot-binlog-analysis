@@ -9,9 +9,10 @@ from ap_common import (
     AnalysisError, AXIS_MAP, apply_active_flight_filter, battery_instance_groups, clip_columns, combined_rcout_dataframe, df_duration,
     ekf_instance_groups, esc_instance_groups, filter_tables_by_time, fmt, get_col,
     gps_instance_groups, imu_instance_groups, load_tables, md_table, motor_channels_from_mapping, numeric_series,
-    output_channel_columns, output_mapping_from_tables, parse_time_window,
+    output_channel_columns, output_mapping_from_tables, params_from_tables, parse_time_window,
     percentile, rms, summarise_numeric, write_json
 )
+from ap_param_context import merge_external_parameters, parse_param_file
 from ap_units import add_units, unit_for_name, units_for_keys, value_with_unit
 
 
@@ -138,7 +139,7 @@ def _imu_instance_summary(group):
     return out
 
 
-def compute_metrics(tables, analysis_window=None):
+def compute_metrics(tables, analysis_window=None, parameters=None):
     metrics = {
         "messages_present": sorted(tables.keys()),
         "analysis_window": analysis_window or {"start_s": None, "end_s": None},
@@ -267,7 +268,7 @@ def compute_metrics(tables, analysis_window=None):
     rcou = combined_rcout_dataframe(tables)
     if rcou is not None:
         channels = output_channel_columns(rcou)
-        output_mapping = output_mapping_from_tables(tables)
+        output_mapping = output_mapping_from_tables(tables, parameters=parameters)
         motor_channels = motor_channels_from_mapping(output_mapping, channels)
         sat = {}
         means = {}
@@ -424,6 +425,7 @@ def main() -> int:
     p.add_argument("--exclude-ground-spool", action="store_true", help="Remove obvious ground spool, landing, or disarmed rows from the selected window")
     p.add_argument("--min-alt", type=float, default=1.0, help="Minimum relative altitude in metres for active-flight filtering when altitude is available")
     p.add_argument("--min-throttle", type=float, default=0.15, help="Minimum normalized throttle/output for active-flight filtering when throttle is available")
+    p.add_argument("--params", help="External Mission Planner/QGC/MAVProxy parameter export for configuration context")
     args = p.parse_args()
     try:
         tables = load_tables(args.tables)
@@ -452,7 +454,12 @@ def main() -> int:
             intervals=selection.get("intervals_used"),
         )
         selection["window_quality"] = active_profile.get("quality", {})
-        metrics = compute_metrics(tables, analysis_window=selection)
+        external_parameter_context = parse_param_file(args.params) if args.params else None
+        merged_params = merge_external_parameters({"parameters": params_from_tables(tables)}, external_parameter_context)
+        metrics = compute_metrics(tables, analysis_window=selection, parameters=merged_params["parameters"])
+        metrics["external_parameter_context"] = merged_params["external_parameter_context"]
+        metrics["parameter_conflicts"] = merged_params["parameter_conflicts"]
+        metrics["parameter_source_precedence"] = merged_params["parameter_source_precedence"]
         if selection.get("warnings"):
             metrics["confidence"]["reasons"].extend(selection["warnings"])
         write_json(args.json, metrics)

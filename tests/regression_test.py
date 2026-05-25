@@ -29,6 +29,7 @@ from ap_log_fft import fft_from_isb_rows, fft_from_tables
 from ap_log_investigation_manifest import build_manifest_from_index, validate_recommended_plot_groups
 from ap_log_metrics import compute_metrics
 from ap_log_mode_compare import compare_modes
+from ap_param_context import merge_external_parameters, parse_param_file
 from ap_param_lookup import lookup_parameters
 from ap_log_plots import health_plots
 from update_parameter_metadata import compact_from_raw
@@ -844,6 +845,65 @@ def test_param_lookup_unknown_parameter_preserves_logged_value():
     assert_true(entry["logged_value"] == 42, "unknown parameter should preserve logged value")
     assert_true(entry["metadata_missing"] is True, "unknown parameter should be marked metadata_missing")
     assert_true(entry["metadata_caveat"], "unknown lookup should still include caveat")
+
+
+def test_mission_planner_style_param_file_is_parsed():
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "vehicle.param"
+        path.write_text("SERVO1_FUNCTION,33\nRCMAP_YAW,4\n", encoding="utf-8")
+        context = parse_param_file(path)
+    assert_true(context["format_detected"] == "comma_separated", f"unexpected param format: {context}")
+    assert_true(context["parameters"]["SERVO1_FUNCTION"] == 33.0, "Mission Planner comma params should parse numeric values")
+    assert_true(context["parameters"]["RCMAP_YAW"] == 4.0, "Mission Planner comma params should parse RCMAP")
+
+
+def test_qgc_style_param_file_is_parsed():
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "vehicle.params"
+        path.write_text("# Vehicle-Id Component-Id Name Value Type\n1 1 SERVO1_FUNCTION 33 6\n1\t1\tRCMAP_YAW\t2\t6\n", encoding="utf-8")
+        context = parse_param_file(path)
+    assert_true(context["format_detected"] == "qgroundcontrol", f"unexpected QGC format: {context}")
+    assert_true(context["parameters"]["SERVO1_FUNCTION"] == 33.0, "QGC params should parse SERVO function")
+    assert_true(context["parameters"]["RCMAP_YAW"] == 2.0, "QGC params should parse RCMAP")
+
+
+def test_mavproxy_name_value_param_file_is_parsed():
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "vehicle.param"
+        path.write_text("SERVO1_FUNCTION 33\nRCMAP_YAW 3\n", encoding="utf-8")
+        context = parse_param_file(path)
+    assert_true(context["format_detected"] == "name_value", f"unexpected MAVProxy format: {context}")
+    assert_true(context["parameters"]["SERVO1_FUNCTION"] == 33.0, "NAME VALUE params should parse numeric values")
+
+
+def test_external_param_conflict_preserves_logged_value_and_warns():
+    external = {"parameters": {"WP_YAW_BEHAVIOR": 3, "MOT_YAW_HEADROOM": 200}, "source_file": "vehicle.param", "format_detected": "name_value", "warnings": []}
+    merged = merge_external_parameters({"parameters": {"WP_YAW_BEHAVIOR": 1}}, external)
+    assert_true(merged["parameters"]["WP_YAW_BEHAVIOR"] == 1, "logged PARM should remain primary on conflict")
+    assert_true(merged["parameters"]["MOT_YAW_HEADROOM"] == 200, "external params should supplement missing log params")
+    assert_true(merged["parameter_conflicts"][0]["name"] == "WP_YAW_BEHAVIOR", "conflicts should be explicit")
+    manifest = build_manifest_from_index({"messages": {"ATT": {}, "RATE": {}}, "parameters": {"WP_YAW_BEHAVIOR": 1}, "errors": [], "events": [], "modes": []}, "yaw issue", "flight.bin", external_parameter_context=external)
+    assert_true(manifest["parameter_conflicts"][0]["external_value"] == 3, "manifest should report external/log parameter conflicts")
+    assert_true("Log PARM" in manifest["parameter_source_precedence"], "manifest should state logged parameter precedence")
+
+
+def test_external_servo_function_enables_motor_mapping_without_log_parm():
+    tables = {"RCOU": pd.DataFrame({"TimeS": [0.0, 1.0], "C1": [1200, 1300], "C2": [1300, 1400]})}
+    external = {"parameters": {"SERVO1_FUNCTION": 33, "SERVO2_FUNCTION": 34}, "source_file": "vehicle.param", "format_detected": "name_value", "warnings": []}
+    merged = merge_external_parameters({}, external)
+    mapping = ap_common.output_mapping_from_tables(tables, parameters=merged["parameters"])
+    metrics = compute_metrics(tables, parameters=merged["parameters"])
+    assert_true(ap_common.motor_channels_from_mapping(mapping, ["C1", "C2"]) == ["C1", "C2"], "external SERVOx_FUNCTION should enable motor mapping")
+    assert_true(metrics["health"]["motor_outputs"]["motor_channels"] == ["C1", "C2"], "metrics should use external motor mapping when log PARM is missing")
+
+
+def test_external_rcmap_yaw_enables_rcin_mapping_without_log_parm():
+    tables = {"RCIN": pd.DataFrame({"TimeS": [0.0, 1.0], "C2": [1500, 1600], "C4": [1500, 1500]})}
+    external = {"parameters": {"RCMAP_YAW": 2}, "source_file": "vehicle.param", "format_detected": "name_value", "warnings": []}
+    merged = merge_external_parameters({}, external)
+    summary = summarize_rcin(tables, merged["index"])
+    assert_true(summary["mapping"]["axes"]["yaw"]["channel"] == 2, "external RCMAP_YAW should set yaw channel")
+    assert_true(summary["axes"]["yaw"]["field"] == "C2", "RCIN summary should use external yaw mapping")
 
 
 def test_param_lookup_symptom_returns_enriched_relevant_parameters():
@@ -2263,6 +2323,12 @@ def main():
     test_manifest_includes_symptom_parameter_context()
     test_param_lookup_known_parameter_returns_metadata()
     test_param_lookup_unknown_parameter_preserves_logged_value()
+    test_mission_planner_style_param_file_is_parsed()
+    test_qgc_style_param_file_is_parsed()
+    test_mavproxy_name_value_param_file_is_parsed()
+    test_external_param_conflict_preserves_logged_value_and_warns()
+    test_external_servo_function_enables_motor_mapping_without_log_parm()
+    test_external_rcmap_yaw_enables_rcin_mapping_without_log_parm()
     test_param_lookup_symptom_returns_enriched_relevant_parameters()
     test_parameter_metadata_fetch_compactor_uses_machine_readable_shape()
     test_parameter_context_yaw_includes_mission_yaw_parameters()

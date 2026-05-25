@@ -8,7 +8,8 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from ap_common import read_json, safe_float, write_json
+from ap_common import read_json, write_json
+from ap_param_context import merge_external_parameters, parse_param_file
 from ap_parameters import (
     METADATA_CAVEAT,
     _numeric_flags,
@@ -31,43 +32,20 @@ def _parse_names(value):
     return list(value)
 
 
-def _load_param_file(path):
-    params = {}
-    defaults = {}
-    if not path:
-        return params, defaults
-    with Path(path).open("r", encoding="utf-8", errors="replace") as f:
-        for line in f:
-            line = line.strip()
-            if not line or line.startswith("#") or line.startswith(";"):
-                continue
-            if "," in line:
-                parts = [p.strip() for p in line.split(",")]
-            else:
-                parts = line.split()
-            if len(parts) < 2:
-                continue
-            name = parts[0]
-            value = safe_float(parts[1])
-            params[name] = parts[1] if value is None else value
-            if len(parts) >= 3:
-                default = safe_float(parts[2])
-                defaults[name] = parts[2] if default is None else default
-    return params, defaults
-
-
 def _index_params(index_path):
     if not index_path:
-        return {}, {}
+        return {}, {}, {}
     index = read_json(index_path)
-    return dict(index.get("parameters", {}) or {}), dict(index.get("parameter_defaults", {}) or {})
+    return dict(index.get("parameters", {}) or {}), dict(index.get("parameter_defaults", {}) or {}), index
 
 
 def lookup_parameters(index_path=None, params_path=None, names=None, symptom=None, vehicle="ArduCopter"):
-    index_params, index_defaults = _index_params(index_path)
-    file_params, file_defaults = _load_param_file(params_path)
-    params = {**index_params, **file_params}
-    defaults = {**index_defaults, **file_defaults}
+    index_params, index_defaults, source_index = _index_params(index_path)
+    source_index = {**source_index, "parameters": index_params, "parameter_defaults": index_defaults}
+    external_context = parse_param_file(params_path) if params_path else None
+    merged = merge_external_parameters(source_index, external_context)
+    params = merged["parameters"]
+    defaults = merged["parameter_defaults"]
     metadata = load_parameter_metadata(vehicle)
     requested_names = _parse_names(names)
     symptom_context = None
@@ -104,6 +82,9 @@ def lookup_parameters(index_path=None, params_path=None, names=None, symptom=Non
         "metadata_caveat": metadata.get("caveat") or METADATA_CAVEAT,
         "parameters": results,
         "symptom_context": symptom_context,
+        "external_parameter_context": merged["external_parameter_context"],
+        "parameter_conflicts": merged["parameter_conflicts"],
+        "parameter_source_precedence": merged["parameter_source_precedence"],
         "note": "Parameter metadata is explanatory context only. Do not recommend parameter changes automatically without matching log evidence and safe bench/ground verification.",
     }
     return output

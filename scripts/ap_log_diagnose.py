@@ -17,6 +17,7 @@ from ap_diag_requirements import missing_by_tier
 from ap_symptom_map import requirement_spec
 from ap_window_select import select_analysis_window
 from ap_compass_yaw import build_compass_yaw_investigation, write_compass_yaw_plots
+from ap_param_context import merge_external_parameters, parse_param_file
 from ap_parameters import select_relevant_parameters
 from ap_rcin import build_command_response_investigation, rcin_channel_col, rc_channel_mapping, summarize_rcin
 from ap_units import value_with_unit
@@ -78,7 +79,7 @@ def make_targeted_plots_from_tables(tables, symptom_class, plots_dir, events=Fal
     markers = event_markers_from_tables(tables) if events else []
     if symptom_class == "yaw_misbehaviour":
         if "RCIN" in tables and "RATE" in tables:
-            mapping = rc_channel_mapping(tables, index)
+            mapping = rc_channel_mapping(tables, index, parameters=parameters)
             yaw_info = mapping["axes"]["yaw"]
             yaw_col = rcin_channel_col(tables["RCIN"], yaw_info["channel"])
             rate = tables["RATE"]
@@ -142,7 +143,7 @@ def make_targeted_plots_from_tables(tables, symptom_class, plots_dir, events=Fal
         generated.extend(write_compass_yaw_plots(tables, out, events=events))
     if symptom_class in {"attitude_rate_issue", "crash_or_loss_of_control", "general_investigation", "rc_failsafe_prearm_issue"}:
         if "RCIN" in tables and "ATT" in tables:
-            mapping = rc_channel_mapping(tables, index)
+            mapping = rc_channel_mapping(tables, index, parameters=parameters)
             rcin = tables["RCIN"]
             att = tables["ATT"]
             for axis, des_col, actual_col in [("roll", "DesRoll", "Roll"), ("pitch", "DesPitch", "Pitch")]:
@@ -234,7 +235,7 @@ def make_targeted_plots_from_tables(tables, symptom_class, plots_dir, events=Fal
             add_event_markers(fig, markers)
             p = out / "battery_power_symptom.html"; fig.write_html(str(p), include_plotlyjs="cdn"); generated.append(str(p))
         if "RCIN" in tables and ("CTUN" in tables or "BAT" in tables):
-            mapping = rc_channel_mapping(tables, index)
+            mapping = rc_channel_mapping(tables, index, parameters=parameters)
             thr_info = mapping["axes"]["throttle"]
             thr_col = rcin_channel_col(tables["RCIN"], thr_info["channel"])
             if thr_col:
@@ -872,6 +873,7 @@ def main() -> int:
     p.add_argument("--high-throttle-percentile", type=float, default=90.0)
     p.add_argument("--high-throttle-threshold", type=float, default=None)
     p.add_argument("--events", action="store_true", help="Overlay MODE/ERR/EV/MSG markers on generated plots")
+    p.add_argument("--params", help="External Mission Planner/QGC/MAVProxy parameter export for configuration context")
     args = p.parse_args()
     try:
         symptom_class = classify_symptom(args.symptom)
@@ -902,6 +904,9 @@ def main() -> int:
             end_s=window["end_s"],
             armed_only=args.armed_only,
         )
+        external_parameter_context = parse_param_file(args.params) if args.params else None
+        merged_params = merge_external_parameters(index, external_parameter_context)
+        parameter_index = merged_params["index"]
         tables = {typ: rows_to_dataframe(data) for typ, data in rows.items() if data and typ not in {"FMT", "FMTU"}}
         selection = select_analysis_window(
             tables,
@@ -957,19 +962,19 @@ def main() -> int:
             window_tables=tables,
             analysis_window=selection,
         )
-        rcin_summary = summarize_rcin(tables, index)
-        parameter_context = select_relevant_parameters(symptom_class, index=index, tables=full_tables)
+        rcin_summary = summarize_rcin(tables, parameter_index)
+        parameter_context = select_relevant_parameters(symptom_class, index=parameter_index, tables=full_tables)
         if symptom_class == "yaw_misbehaviour":
-            findings, context, checked, missing_required, missing_strongly, missing_optional = diagnose_yaw(tables, index, vibration_assessment=vibration_assessment)
+            findings, context, checked, missing_required, missing_strongly, missing_optional = diagnose_yaw(tables, parameter_index, vibration_assessment=vibration_assessment)
         else:
-            findings, context, checked, missing_required, missing_strongly, missing_optional = diagnose_by_class(symptom_class, tables, index, vibration_assessment=vibration_assessment)
+            findings, context, checked, missing_required, missing_strongly, missing_optional = diagnose_by_class(symptom_class, tables, parameter_index, vibration_assessment=vibration_assessment)
         plots = make_targeted_plots_from_tables(
             tables,
             symptom_class,
             args.plots,
             events=args.events,
-            index=index,
-            parameters=index.get("parameters"),
+            index=parameter_index,
+            parameters=merged_params["parameters"],
         ) if args.plots else []
         warnings = []
         if stats.get("max_messages_reached"):
@@ -1003,6 +1008,9 @@ def main() -> int:
             "context": context,
             "checked_but_not_supported": checked,
             "parameter_context": parameter_context,
+            "external_parameter_context": merged_params["external_parameter_context"],
+            "parameter_conflicts": merged_params["parameter_conflicts"],
+            "parameter_source_precedence": merged_params["parameter_source_precedence"],
             "rcin_command_context": rcin_summary,
             "vibration_context": vibration_assessment.get("vibration_context", {}),
             "vibration_relevance_to_symptom": vibration_assessment.get("vibration_relevance_to_symptom", {}),
@@ -1020,7 +1028,7 @@ def main() -> int:
                 missing_strongly_recommended=missing_strongly,
                 missing_optional=missing_optional,
                 tables=tables,
-                index=index,
+                index=parameter_index,
             ),
         }
         write_json(args.out, result)
