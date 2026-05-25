@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import gzip
+import json
 import tempfile
 from pathlib import Path
 
@@ -19,6 +21,7 @@ from ap_log_custom_plot import make_custom_plot
 from ap_log_diagnose import diagnosis_missing
 from ap_log_diagnose import diagnose_by_class
 from ap_log_diagnose import diagnose_yaw
+from ap_log_extract import write_jsonl_stream
 from ap_log_diagnose import make_targeted_plots_from_tables
 from ap_log_fft import fft_from_isb_rows
 from ap_log_investigation_manifest import build_manifest_from_index
@@ -71,6 +74,59 @@ def test_stream_dataflash_respects_time_window_and_max_messages():
     assert_true([row["Roll"] for row in rows["ATT"]] == [3, 4, 5], "time window should limit collected rows")
     assert_true(index["messages"]["ATT"]["count"] == 7, "max_messages should stop stream after seven messages")
     assert_true(stats["max_messages_reached"] is True, "stream stats should report max message truncation")
+
+
+def test_extract_jsonl_stream_respects_message_and_time_filters():
+    messages = [
+        FakeMsg("ATT", TimeUS=0, Roll=0),
+        FakeMsg("RATE", TimeUS=500000, R=1),
+        FakeMsg("ATT", TimeUS=1000000, Roll=10),
+        FakeMsg("ATT", TimeUS=2000000, Roll=20),
+        FakeMsg("RATE", TimeUS=2500000, R=2),
+    ]
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tables, _index, stats = write_jsonl_stream(
+            messages,
+            Path(tmp),
+            include=["ATT"],
+            start_s=0.5,
+            end_s=1.5,
+            source="synthetic",
+        )
+        path = Path(tables["ATT"]["path"])
+        records = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+
+    assert_true(stats["total_messages_read"] == 5, "JSONL extraction should stream across every input message")
+    assert_true(tables["ATT"]["rows"] == 1, "JSONL row count should reflect filters")
+    assert_true(records[0]["message_type"] == "ATT", "JSONL should preserve message type")
+    assert_true(records[0]["timestamp_s"] == 1.0, "JSONL should preserve normalized timestamp")
+    assert_true(records[0]["fields"]["Roll"] == 10, "JSONL should preserve message fields")
+
+
+def test_extract_jsonl_stream_supports_gzip_and_armed_filter():
+    messages = [
+        FakeMsg("ATT", TimeUS=0, Roll=0),
+        FakeMsg("ARM", TimeUS=500000, Armed=1),
+        FakeMsg("ATT", TimeUS=1000000, Roll=10),
+    ]
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tables, _index, stats = write_jsonl_stream(
+            messages,
+            Path(tmp),
+            include=["ATT"],
+            armed_only=True,
+            gzip_output=True,
+            source="synthetic",
+        )
+        path = Path(tables["ATT"]["path"])
+        with gzip.open(path, "rt", encoding="utf-8") as fh:
+            records = [json.loads(line) for line in fh]
+
+    assert_true(path.name == "ATT.jsonl.gz", "gzip JSONL output should use .jsonl.gz suffix")
+    assert_true(stats["armed_filter_supported"] is True, "ARM messages should make armed filtering supported")
+    assert_true(len(records) == 1 and records[0]["fields"]["Roll"] == 10, "armed-only JSONL should keep only armed rows")
 
 
 def test_stream_index_reports_logging_dropouts():
@@ -1108,6 +1164,8 @@ def test_plot_manifest_uses_metrics_argument():
 def main():
     test_stream_dataflash_counts_without_storing_unselected_rows()
     test_stream_dataflash_respects_time_window_and_max_messages()
+    test_extract_jsonl_stream_respects_message_and_time_filters()
+    test_extract_jsonl_stream_supports_gzip_and_armed_filter()
     test_stream_index_reports_logging_dropouts()
     test_logging_health_clean_log_has_no_limits()
     test_logging_health_detects_timestamp_gap_and_reset()
