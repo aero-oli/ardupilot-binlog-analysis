@@ -5,6 +5,31 @@ from pathlib import Path
 for path in Path("scripts").glob("*.py"):
     compile(path.read_text(encoding="utf-8"), str(path), "exec")
 PY
+python - <<'PY'
+from pathlib import Path
+
+skill = Path("SKILL.md").read_text(encoding="utf-8")
+reference_path = Path("references/logging-configuration-for-investigation.md")
+
+assert reference_path.exists()
+reference = reference_path.read_text(encoding="utf-8")
+assert "references/logging-configuration-for-investigation.md" in skill
+for required in [
+    "LOG_BITMASK",
+    "LOG_BACKEND_TYPE",
+    "LOG_DISARMED",
+    "LOG_FILE_RATEMAX",
+    "LOG_DARM_RATEMAX",
+    "LOG_BLK_RATEMAX",
+    "INS_RAW_LOG_OPT",
+    "INS_LOG_BAT_MASK",
+    "INS_LOG_BAT_OPT",
+    "EK3_LOG_LEVEL",
+    "Do not disable arming checks",
+    "High-volume settings should normally be returned to normal",
+]:
+    assert required in reference, required
+PY
 python scripts/ap_symptom_classifier.py "the yaw seems to be misbehaving" | grep yaw_misbehaviour >/dev/null
 python scripts/ap_fault_tree.py yaw_misbehaviour | grep RATE.YDes >/dev/null
 python - <<'PY'

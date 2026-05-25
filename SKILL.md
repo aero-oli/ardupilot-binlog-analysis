@@ -33,7 +33,7 @@ python scripts/ap_log_index.py LOG.BIN --json out/index.json --summary out/index
 
 If the file is a telemetry `.tlog`, not a DataFlash `.bin/.log`, state that this skill is optimized for DataFlash logs and that telemetry logs may not include the same onboard messages.
 
-For the investigation sequence, use `references/how-to-investigate.md`: validate and inventory first, run the manifest before symptom diagnosis, select a relevant time window, plot desired-vs-actual signals, then treat script findings as hypotheses to verify against timing and missing evidence.
+For the investigation sequence, use `references/how-to-investigate.md`: validate and inventory first, run the manifest before symptom diagnosis, select a relevant time window, plot desired-vs-actual signals, then treat script findings as hypotheses to verify against timing and missing evidence. If validation, indexing, or the manifest shows missing required/strongly recommended messages, use `references/logging-configuration-for-investigation.md` to explain what should be logged on a future evidence-gathering flight or bench test.
 
 ## Analysis modes
 
@@ -74,6 +74,8 @@ python scripts/ap_log_diagnose.py LOG.BIN --symptom "USER SYMPTOM" --out out/dia
 - `context`: useful ranges and summaries that exist but are not fault evidence by themselves, such as normal BAT voltage/current ranges, ESC RPM/current/temperature ranges, CTUN/BARO ranges, or ESCX duty/power ranges.
 - `checked_but_not_supported`: checks that ran but did not cross the diagnostic threshold.
 - `missing_required`, `missing_strongly_recommended`, and `missing_optional`: unavailable messages separated by diagnostic importance. For yaw, only `ATT` and `RATE` are required; `PIDY`, `RCOU`, and `MODE` strengthen confidence, while timeline/context messages such as `MSG`, `EV`, and `ERR` are optional evidence.
+
+When required or strongly recommended evidence is missing, load `references/logging-configuration-for-investigation.md` before writing the missing-data section. Explain the confidence limit and, when appropriate, give conservative guidance for a future diagnostic capture. Do not turn missing evidence into automatic parameter changes or a recommendation to repeat unsafe flight.
 
 Then inspect `out/diagnosis.json`, generated plots, validation/index summaries, and any relevant extracted tables before writing conclusions. The final answer must include:
 
@@ -169,6 +171,7 @@ For symptom-led diagnosis, `references/symptom-diagnosis-map.yaml` is authoritat
 - vibration/noise issue: `references/vibration-diagnosis.md`
 - battery/power issue: `references/battery-power-diagnosis.md`
 - crash/loss of control: `references/crash-or-loss-of-control-diagnosis.md`
+- missing log evidence or future capture setup: `references/logging-configuration-for-investigation.md`
 
 For yaw complaints, specifically distinguish:
 
@@ -207,9 +210,14 @@ Required yaw evidence sources, if present:
 - Use `RCIN` with `RCMAP_ROLL`, `RCMAP_PITCH`, `RCMAP_THROTTLE`, and `RCMAP_YAW` when present to distinguish pilot-commanded motion from autopilot/mode, estimator, mechanical, or uncommanded behaviour. If RC mapping parameters are missing, state that default channel order was assumed.
 - Use `parameter_context` from manifest/diagnosis as investigation context only. Treat missing relevant parameters separately from values that are logged as zero or matching defaults, and do not turn parameter context into automatic tuning advice.
 - Treat `logging_health.confirmed_dropouts` as confidence-limiting logging evidence. Treat `logging_health.possible_dropouts` as context to inspect unless other logging-health fields also limit confidence.
+- If core evidence is absent, use `references/logging-configuration-for-investigation.md` to explain future logging setup. Keep the advice flight-safe: high-volume raw IMU, batch sampling, FFT, or disarmed logging should be targeted, checked for dropouts after capture, and normally disabled again afterward.
 - Preserve explicit units from script JSON. If a value reports unit `unknown`, do not infer one unless the log message documentation or field context confirms it.
 - Use `MODE`, `MSG`, `EV`, `ERR`, `ARM` to build the timeline.
 - When data conflicts, present competing hypotheses and explain what would confirm/refute them.
+
+## What to do when evidence is missing
+
+If required or strongly recommended messages are missing, state what cannot be concluded from the current log, then use `references/logging-configuration-for-investigation.md` to describe the minimum future capture needed for that symptom. Never treat absent evidence as proof that the issue did not happen, and never recommend disabling safety checks or intentionally reproducing dangerous loss of control to get better data.
 
 ## Output standard
 
