@@ -433,6 +433,66 @@ def test_metrics_can_be_computed_from_filtered_window():
     assert_true(metrics["analysis_window"] == {"start_s": 1.0, "end_s": 2.0}, "metrics should record analysis window")
 
 
+def test_nested_numeric_summary_units_use_message_and_field_context():
+    tables = {
+        "ESC": pd.DataFrame({
+            "TimeS": [0.0, 1.0],
+            "RPM": [4200.0, 4300.0],
+            "Curr": [3.2, 4.1],
+            "Temp": [34.0, 36.0],
+            "MotTemp": [39.0, 42.0],
+        }),
+        "ESCX": pd.DataFrame({
+            "TimeS": [0.0, 1.0],
+            "inpct": [20.0, 65.0],
+            "outpct": [18.0, 60.0],
+        }),
+        "RATE": pd.DataFrame({
+            "TimeS": [0.0, 1.0],
+            "YDes": [0.0, 90.0],
+            "Y": [0.0, 30.0],
+            "YOut": [0.0, 0.8],
+        }),
+        "PIDY": pd.DataFrame({
+            "TimeS": [0.0, 1.0],
+            "Err": [0.0, 60.0],
+        }),
+        "VIBE": pd.DataFrame({
+            "TimeS": [0.0, 1.0],
+            "VibeX": [4.0, 6.0],
+            "VibeY": [5.0, 7.0],
+        }),
+        "IMU": pd.DataFrame({
+            "TimeS": [0.0, 1.0],
+            "AccX": [0.1, 0.2],
+            "GyrX": [1.0, 2.0],
+        }),
+        "XUNK": pd.DataFrame({
+            "TimeS": [0.0, 1.0],
+            "Mystery": [1.0, 2.0],
+        }),
+    }
+
+    metrics = compute_metrics(tables)
+
+    esc_units = metrics["health"]["esc"]["numeric_units"]
+    assert_true(esc_units["RPM"]["min"] == "rpm", "ESC.RPM nested summary should use rpm")
+    assert_true(esc_units["Curr"]["max"] == "A", "ESC.Curr nested summary should use current units")
+    assert_true(esc_units["Temp"]["mean"] == "degC", "ESC.Temp nested summary should use temperature units")
+    assert_true(esc_units["MotTemp"]["p95"] == "degC", "ESC.MotTemp nested summary should use temperature units")
+
+    escx_units = metrics["health"]["escx"]["numeric_units"]
+    assert_true(escx_units["inpct"]["max"] == "%", "ESCX.inpct nested summary should use percent units")
+    assert_true(escx_units["outpct"]["p99"] == "%", "ESCX.outpct nested summary should use percent units")
+
+    assert_true(metrics["tuning"]["yaw"]["units"]["rate_error_rms"] == "deg/s", "RATE error metrics should use deg/s")
+    assert_true(metrics["tuning"]["yaw"]["pid"]["term_units"]["Err"]["max"] == "deg/s", "PID error summary should use deg/s")
+    assert_true(metrics["health"]["vibration"]["units"]["VibeX"]["max"] == "m/s/s", "VIBE nested summary should use acceleration units")
+    imu_units = metrics["health"]["instances"]["imu"]["IMU"]["numeric_units"]
+    assert_true(imu_units["AccX"]["mean"] == "m/s/s", "IMU acceleration summary should use acceleration units")
+    assert_true(metrics["generic_messages"]["XUNK"]["numeric_units"]["Mystery"]["max"] == "unknown", "unknown nested fields should remain unknown")
+
+
 def test_output_mapping_reads_servo_function_parameters():
     params = {"SERVO1_FUNCTION": 33, "SERVO2_FUNCTION": 34, "SERVO3_FUNCTION": 1, "SERVO4_FUNCTION": 0}
     mapping = ap_common.output_mapping_from_params(params)
@@ -1549,6 +1609,7 @@ def main():
     test_window_selector_fails_requested_missing_selector()
     test_parse_time_window_accepts_start_end_and_around()
     test_metrics_can_be_computed_from_filtered_window()
+    test_nested_numeric_summary_units_use_message_and_field_context()
     test_output_mapping_reads_servo_function_parameters()
     test_copter_output_mapping_handles_motor9_to_motor12_and_tilt_roles()
     test_motor_output_metrics_are_mapping_aware()

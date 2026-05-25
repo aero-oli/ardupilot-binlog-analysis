@@ -11,6 +11,15 @@ from ap_common import (
 )
 from ap_units import units_for_keys
 
+
+def units_for_numeric_summary(summary, *, message):
+    return {
+        field: units_for_keys(values.keys(), message=message, field=field)
+        for field, values in summary.items()
+        if isinstance(values, dict)
+    }
+
+
 def vals(s):
     if s is None:
         return []
@@ -90,7 +99,7 @@ def analyze_tuning(tables, analysis_window=None):
                 if col in pid.columns:
                     s = numeric_series(pid, [col])
                     pid_m["terms"][col] = {"min": float(s.min()), "max": float(s.max()), "mean": float(s.mean()), "p95_abs": percentile([abs(x) for x in vals(s)], 95)}
-            pid_m["term_units"] = {field: units_for_keys(values.keys(), message=pid_name) for field, values in pid_m["terms"].items()}
+            pid_m["term_units"] = units_for_numeric_summary(pid_m["terms"], message=pid_name)
             axis_m["pid"] = pid_m
         out["axis"][axis] = axis_m
         for finding in classify_axis(axis, axis_m):

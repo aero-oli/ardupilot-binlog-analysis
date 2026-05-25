@@ -54,8 +54,11 @@ def unit_for_name(name: str, *, message: Optional[str] = None, field: Optional[s
     return UNKNOWN
 
 
-def units_for_keys(keys, *, message: Optional[str] = None) -> Dict[str, str]:
-    return {str(key): unit_for_name(str(key), message=message, field=str(key)) for key in keys}
+def units_for_keys(keys, *, message: Optional[str] = None, field: Optional[str] = None) -> Dict[str, str]:
+    return {
+        str(key): unit_for_name(str(key), message=message, field=field or str(key))
+        for key in keys
+    }
 
 
 def add_units(summary: Dict[str, Any], *, message: Optional[str] = None) -> Dict[str, Any]:

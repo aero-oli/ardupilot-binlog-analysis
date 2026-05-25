@@ -15,6 +15,14 @@ from ap_common import (
 from ap_units import add_units, unit_for_name, units_for_keys, value_with_unit
 
 
+def units_for_numeric_summary(summary, *, message):
+    return {
+        field: units_for_keys(values.keys(), message=message, field=field)
+        for field, values in summary.items()
+        if isinstance(values, dict)
+    }
+
+
 def series_values(s):
     if s is None:
         return []
@@ -82,7 +90,7 @@ def _esc_instance_summary(group):
     df = group["df"]
     out = _instance_base(group)
     out["numeric"] = summarise_numeric(df, ["RPM", "RawRPM", "Volt", "Curr", "Temp", "MotTemp", "Err", "Status", "ErrCnt", "Stress", "MaxStress", "inpct", "outpct", "flags", "Pwr"])
-    out["numeric_units"] = {field: units_for_keys(values.keys(), message=field) for field, values in out["numeric"].items()}
+    out["numeric_units"] = units_for_numeric_summary(out["numeric"], message=group["message"])
     for name, fields in {
         "rpm": ["RPM", "RawRPM"],
         "current": ["Curr"],
@@ -126,7 +134,7 @@ def _imu_instance_summary(group):
     df = group["df"]
     out = _instance_base(group)
     out["numeric"] = summarise_numeric(df, [c for c in ["GyrX", "GyrY", "GyrZ", "AccX", "AccY", "AccZ", "T", "Temp"] if c in df.columns])
-    out["numeric_units"] = {field: units_for_keys(values.keys(), message="IMU",) for field, values in out["numeric"].items()}
+    out["numeric_units"] = units_for_numeric_summary(out["numeric"], message=group["message"])
     return out
 
 
@@ -251,7 +259,7 @@ def compute_metrics(tables, analysis_window=None):
         if clip_delta:
             d["clip_delta"] = clip_delta
             d["clip_delta_units"] = units_for_keys(clip_delta.keys(), message="VIBE")
-        d["units"] = {field: units_for_keys(values.keys(), message="VIBE") for field, values in d.items() if isinstance(values, dict) and field != "clip_delta"}
+        d["units"] = {field: units_for_keys(values.keys(), message="VIBE", field=field) for field, values in d.items() if isinstance(values, dict) and field != "clip_delta"}
         metrics["health"]["vibration"] = d
 
     # Motor outputs saturation/asymmetry
@@ -294,13 +302,13 @@ def compute_metrics(tables, analysis_window=None):
         if inst_col:
             esc_summary["instances"] = sorted([int(x) for x in esc[inst_col].dropna().unique().tolist() if str(x) != "nan"])
         esc_summary["numeric"] = summarise_numeric(esc, ["RPM", "RawRPM", "Volt", "Curr", "Temp", "MotTemp", "Err"])
-        esc_summary["numeric_units"] = {field: units_for_keys(values.keys(), message=field) for field, values in esc_summary["numeric"].items()}
+        esc_summary["numeric_units"] = units_for_numeric_summary(esc_summary["numeric"], message="ESC")
         metrics["health"]["esc"] = esc_summary
     if "EDT2" in tables:
         edt2 = tables["EDT2"]
         status = numeric_series(edt2, ["Status"])
         edt2_summary = {"rows": int(len(edt2)), "numeric": summarise_numeric(edt2, ["Status", "ErrCnt", "Stress", "MaxStress"])}
-        edt2_summary["numeric_units"] = {field: units_for_keys(values.keys(), message=field) for field, values in edt2_summary["numeric"].items()}
+        edt2_summary["numeric_units"] = units_for_numeric_summary(edt2_summary["numeric"], message="EDT2")
         if status is not None and len(status.dropna()) > 0:
             s_i = status.fillna(0).astype(int)
             edt2_summary["status_alert_count"] = int(((s_i & 4) != 0).sum())
@@ -314,7 +322,7 @@ def compute_metrics(tables, analysis_window=None):
         if inst_col:
             escx_summary["instances"] = sorted([int(x) for x in escx[inst_col].dropna().unique().tolist() if str(x) != "nan"])
         escx_summary["numeric"] = summarise_numeric(escx, ["inpct", "outpct", "flags", "Pwr"])
-        escx_summary["numeric_units"] = {field: units_for_keys(values.keys(), message=field) for field, values in escx_summary["numeric"].items()}
+        escx_summary["numeric_units"] = units_for_numeric_summary(escx_summary["numeric"], message="ESCX")
         flags = numeric_series(escx, ["flags"])
         if flags is not None and len(flags.dropna()) > 0:
             escx_summary["nonzero_flags_count"] = int((flags.fillna(0).astype(int) != 0).sum())
@@ -326,7 +334,7 @@ def compute_metrics(tables, analysis_window=None):
         if name in tables:
             df = tables[name]
             sysid[name] = {"rows": int(len(df)), "fields": [str(c) for c in df.columns if c != "TimeS"], "numeric": summarise_numeric(df, [c for c in df.columns if c != "TimeS"])}
-            sysid[name]["numeric_units"] = {field: units_for_keys(values.keys(), message=name) for field, values in sysid[name]["numeric"].items()}
+            sysid[name]["numeric_units"] = units_for_numeric_summary(sysid[name]["numeric"], message=name)
     if sysid:
         metrics["system_id"] = {"present": True, **sysid}
     else:
@@ -357,7 +365,7 @@ def compute_metrics(tables, analysis_window=None):
         if pid_name in tables:
             pid = tables[pid_name]
             pid_m = {"message": pid_name, "terms": summarise_numeric(pid, ["Err", "P", "I", "D", "FF", "DFF", "Dmod", "SRate"])}
-            pid_m["term_units"] = {field: units_for_keys(values.keys(), message=pid_name, ) for field, values in pid_m["terms"].items()}
+            pid_m["term_units"] = units_for_numeric_summary(pid_m["terms"], message=pid_name)
             flags = numeric_series(pid, ["Flags"])
             if flags is not None and len(flags.dropna()) > 0:
                 pid_m["flag_limit_count"] = int(((flags.astype(int) & 1) != 0).sum())
@@ -376,7 +384,7 @@ def compute_metrics(tables, analysis_window=None):
         numeric_cols = [c for c in df.columns if c not in {"TimeS", "TimeUS", "_type"}]
         summary = summarise_numeric(df, numeric_cols[:20])
         if summary:
-            metrics["generic_messages"][name] = {"rows": int(len(df)), "numeric": summary, "numeric_units": {field: units_for_keys(values.keys(), message=name) for field, values in summary.items()}}
+            metrics["generic_messages"][name] = {"rows": int(len(df)), "numeric": summary, "numeric_units": units_for_numeric_summary(summary, message=name)}
 
     # Confidence gating
     if "ATT" not in tables or "RATE" not in tables:
