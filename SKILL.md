@@ -41,6 +41,8 @@ If the file is a telemetry `.tlog`, not a DataFlash `.bin/.log`, state that this
 
 For the investigation sequence, use `references/how-to-investigate.md`: validate and inventory first, run the manifest before symptom diagnosis, select a relevant time window, plot desired-vs-actual signals, then treat script findings as hypotheses to verify against timing and missing evidence. If validation, indexing, or the manifest shows missing required/strongly recommended messages, use `references/logging-configuration-for-investigation.md` to explain what should be logged and `references/evidence-gathering-flights.md` to decide whether the next evidence should be a parameter dump, bench inspection, ground test, restrained test, or controlled flight.
 
+If validation or indexing reports parse errors, bad-byte skips, logging dropouts, missing timebase, missing core messages after arm, no `FMT`, no `PARM`, or likely truncated/partial data, consult `references/corrupt-or-incomplete-log.md` before writing conclusions. Treat missing evidence in damaged logs as a confidence limit, not proof that a fault was absent.
+
 ## Analysis modes
 
 Choose the mode from the user's request. If the user reports a symptom, symptom-led diagnosis has priority over a general review.

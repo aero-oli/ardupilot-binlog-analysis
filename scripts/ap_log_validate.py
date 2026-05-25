@@ -28,6 +28,82 @@ MODULE_SYMPTOM_CLASS = {
 }
 
 
+def log_quality_status(index, file_path=None, warnings=None):
+    messages = index.get("messages", {}) or {}
+    stats = index.get("parser_stats", {}) or {}
+    logging_health = index.get("logging_health", {}) or {}
+    issues = []
+    confidence_limits = []
+    guidance = []
+
+    suffix = Path(file_path or index.get("file", "")).suffix.lower()
+    if suffix == ".tlog":
+        issues.append({"code": "telemetry_tlog_supplied", "severity": "warning", "detail": "Input appears to be a telemetry .tlog rather than onboard DataFlash."})
+        confidence_limits.append("Telemetry logs may not contain onboard DataFlash messages needed for this skill.")
+    if stats.get("parser_errors"):
+        issues.append({"code": "parser_errors", "severity": "error", "detail": stats.get("parser_errors")})
+        confidence_limits.append("Parser errors mean missing messages cannot be treated as absent faults.")
+    if stats.get("bad_byte_warnings") or stats.get("bad_bytes"):
+        issues.append({"code": "bad_byte_skips", "severity": "warning", "detail": stats.get("bad_byte_warnings") or stats.get("bad_bytes")})
+        confidence_limits.append("Bad-byte skips can hide short events and reduce timing confidence.")
+    if not messages:
+        issues.append({"code": "no_dataflash_messages", "severity": "error", "detail": "No DataFlash messages were parsed."})
+    if "FMT" not in messages:
+        issues.append({"code": "no_fmt", "severity": "warning", "detail": "No FMT message was indexed; schema confidence may be limited for damaged or text-converted logs."})
+    if index.get("start_time_s") is None or index.get("end_time_s") is None or index.get("duration_s") is None:
+        issues.append({"code": "no_usable_timebase", "severity": "warning", "detail": "No usable timebase was found."})
+        confidence_limits.append("Time-window selection, event ordering, and correlation plots may be limited.")
+    if "PARM" not in messages and not index.get("parameters"):
+        issues.append({"code": "no_parm", "severity": "info", "detail": "No PARM message or indexed parameter values were available."})
+        confidence_limits.append("Parameter context and output/RC mapping may need an external .param file; external parameters are configuration context, not proof of in-flight values.")
+    if logging_health.get("confirmed_dropouts"):
+        issues.append({"code": "logging_dropouts", "severity": "warning", "detail": "Confirmed logging dropout/drop-count evidence is present."})
+        confidence_limits.append(logging_health.get("confidence_impact") or "Dropouts reduce confidence for missing/timing-sensitive evidence.")
+    if logging_health.get("possible_dropouts"):
+        issues.append({"code": "possible_logging_dropouts", "severity": "info", "detail": "Possible logging dropout context was found in unrecognized drop-like fields."})
+    if logging_health.get("missing_core_messages_after_arm"):
+        issues.append({"code": "missing_core_messages_after_arm", "severity": "warning", "detail": logging_health.get("missing_core_messages_after_arm")})
+        confidence_limits.append("Core messages are missing after arming; do not treat absence of a message as absence of a fault.")
+    if logging_health.get("timestamp_resets"):
+        issues.append({"code": "timestamp_resets", "severity": "warning", "detail": "Timestamp resets were detected."})
+        confidence_limits.append("Timestamp resets reduce confidence in time-window and correlation conclusions.")
+    if logging_health.get("max_time_gap_s", 0) and logging_health.get("max_time_gap_s", 0) >= 10:
+        issues.append({"code": "large_timestamp_gaps", "severity": "warning", "detail": f"Maximum indexed timestamp gap is {logging_health.get('max_time_gap_s')} s."})
+    raw_count = sum((messages.get(name, {}) or {}).get("count", 0) for name in ["ISBD", "ISBH", "GYR", "ACC", "IMU", "IMU_FAST", "RAW_IMU"])
+    if raw_count > 500000:
+        issues.append({"code": "very_large_raw_imu_log", "severity": "info", "detail": f"High-rate/raw IMU message count is {raw_count}."})
+        guidance.append("Very large raw IMU logs can be partial or sparse; check DSF/DMS/logging health before relying on FFT/filter evidence.")
+    if stats.get("max_messages_reached"):
+        issues.append({"code": "validation_parse_limited", "severity": "info", "detail": "Validation stopped at --max-messages."})
+        confidence_limits.append("Validation/index inventory may be partial because parsing stopped early.")
+
+    if warnings:
+        for warning in warnings:
+            if "No usable time base" in warning and not any(i["code"] == "no_usable_timebase" for i in issues):
+                issues.append({"code": "no_usable_timebase", "severity": "warning", "detail": warning})
+
+    severities = {issue["severity"] for issue in issues}
+    if "error" in severities:
+        status = "unusable_or_parse_failed"
+    elif "warning" in severities:
+        status = "limited"
+    else:
+        status = "usable"
+    return {
+        "status": status,
+        "issues": issues,
+        "confidence_limits": list(dict.fromkeys(confidence_limits)),
+        "guidance": list(dict.fromkeys(guidance)),
+        "reference": "references/corrupt-or-incomplete-log.md",
+        "agent_behaviour": [
+            "State log quality limitations clearly.",
+            "Do not treat absence of a message as absence of a fault.",
+            "Prefer evidence that exists before making claims.",
+            "Request another log or targeted capture only when safe.",
+        ],
+    }
+
+
 def module_availability(index):
     modules = {}
     for name, spec in MODULES.items():
@@ -97,9 +173,11 @@ def main() -> int:
             warnings.append("Yaw diagnosis is available from ATT/RATE but confidence is reduced without yaw_diagnosis.missing_strongly_recommended messages.")
         warnings.extend(scope.get("notes", []))
         mode_timeline = mode_timeline_from_rows(index.get("modes", []), log_end_s=index.get("end_time_s"))
+        quality = log_quality_status(index, file_path=path, warnings=warnings)
         result = {
             "file": str(path),
             "warnings": warnings,
+            "log_quality_status": quality,
             "vehicle_scope": scope,
             "mode_decoding": mode_decoding_note(scope),
             "mode_timeline": mode_timeline,
@@ -114,6 +192,12 @@ def main() -> int:
                 lines.append("## Warnings")
                 lines.extend(f"- {w}" for w in warnings)
                 lines.append("")
+            lines.append("## Log Quality")
+            lines.append(f"- Status: {quality.get('status')}")
+            lines.append(f"- Reference: {quality.get('reference')}")
+            for issue in quality.get("issues", []):
+                lines.append(f"- {issue.get('severity')}: {issue.get('code')} - {issue.get('detail')}")
+            lines.append("")
             lines.append("## Logging Health")
             lines.append(f"- Confirmed dropouts detected: {logging_health.get('dropouts_detected', False)}")
             lines.append(f"- Possible dropout context: {logging_health.get('possible_dropout_count', 0)}")

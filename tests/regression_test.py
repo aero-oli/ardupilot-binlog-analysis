@@ -36,7 +36,7 @@ from update_parameter_metadata import compact_from_raw
 from ap_log_plots import main as plots_main
 from ap_parameters import select_relevant_parameters
 from ap_rcin import build_command_response_investigation, rc_channel_mapping, summarize_rcin
-from ap_log_validate import module_availability
+from ap_log_validate import log_quality_status, module_availability
 from ap_skill_doctor import run_doctor
 from ap_symptom_map import load_symptom_map
 from ap_vibration import build_vibration_assessment
@@ -254,6 +254,52 @@ def test_logging_health_manifest_and_diagnosis_confidence_limit():
     checked_text = "\n".join(c.get("result", "") for c in checked)
     assert_true(yaw_finding["confidence"] == "medium", "logging health should lower high-confidence diagnosis")
     assert_true("Timestamp gaps may hide short events" in checked_text, "diagnosis should state logging-health confidence impact")
+
+
+def test_log_quality_status_flags_logging_dropouts_as_confidence_limit():
+    index = {
+        "file": "flight.bin",
+        "messages": {"FMT": {"count": 1}, "ATT": {"count": 10}},
+        "parameters": {},
+        "duration_s": 10.0,
+        "start_time_s": 0.0,
+        "end_time_s": 10.0,
+        "logging_health": {
+            "confirmed_dropouts": [{"message": "DSF", "fields": {"Dp": 3}}],
+            "dropouts_detected": True,
+            "confidence_impact": "Log dropout/drop-count evidence is present; conclusions that rely on exact timing or missing rows are reduced confidence.",
+        },
+        "parser_stats": {},
+    }
+    quality = log_quality_status(index)
+    issue_codes = {issue["code"] for issue in quality["issues"]}
+    assert_true(quality["status"] == "limited", f"dropout quality should be limited: {quality}")
+    assert_true("logging_dropouts" in issue_codes, "confirmed dropouts should become a log quality issue")
+    assert_true(any("reduced confidence" in item for item in quality["confidence_limits"]), "dropouts should create confidence limit")
+
+
+def test_log_quality_status_reports_missing_timebase():
+    index = {"file": "flight.bin", "messages": {"FMT": {"count": 1}, "ATT": {"count": 3}}, "parameters": {"FRAME_CLASS": 1}, "duration_s": None, "start_time_s": None, "end_time_s": None, "logging_health": {}, "parser_stats": {}}
+    quality = log_quality_status(index)
+    assert_true(any(issue["code"] == "no_usable_timebase" for issue in quality["issues"]), "missing timebase should be reported")
+    assert_true(any("Time-window" in item for item in quality["confidence_limits"]), "missing timebase should limit time/correlation claims")
+
+
+def test_no_parm_is_reported_as_parameter_context_limitation():
+    index = {"messages": {"ATT": {}, "RATE": {}}, "parameters": {}, "errors": [], "events": [], "modes": []}
+    manifest = build_manifest_from_index(index, "yaw issue", "flight.bin")
+    quality = log_quality_status({**index, "duration_s": 1.0, "start_time_s": 0.0, "end_time_s": 1.0, "logging_health": {}, "parser_stats": {}})
+    assert_true(manifest["parameter_context"]["limitation"].startswith("No PARM/index parameter values"), "manifest should report missing parameter context")
+    assert_true(any(issue["code"] == "no_parm" for issue in quality["issues"]), "validation quality should report no PARM")
+
+
+def test_corrupt_incomplete_reference_exists_and_is_linked_from_skill():
+    ref = Path("references/corrupt-or-incomplete-log.md")
+    skill = Path("SKILL.md").read_text(encoding="utf-8")
+    assert_true(ref.exists(), "corrupt/incomplete log reference should exist")
+    text = ref.read_text(encoding="utf-8")
+    assert_true("Do not attempt to repair logs automatically" in text, "reference should forbid automatic repair")
+    assert_true("references/corrupt-or-incomplete-log.md" in skill, "SKILL should link corrupt/incomplete log guidance")
 
 
 def test_load_tables_fails_on_unreadable_table():
@@ -2288,6 +2334,10 @@ def main():
     test_logging_health_detects_timestamp_gap_and_reset()
     test_logging_health_detects_missing_core_messages_after_arm()
     test_logging_health_manifest_and_diagnosis_confidence_limit()
+    test_log_quality_status_flags_logging_dropouts_as_confidence_limit()
+    test_log_quality_status_reports_missing_timebase()
+    test_no_parm_is_reported_as_parameter_context_limitation()
+    test_corrupt_incomplete_reference_exists_and_is_linked_from_skill()
     test_load_tables_fails_on_unreadable_table()
     test_time_window_filters_tables_inclusively()
     test_window_selector_mode_intervals()
