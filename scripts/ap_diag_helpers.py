@@ -47,7 +47,7 @@ def _add_context(context, source, detail, values=None):
         context.append(item)
 
 
-def add_motor_esc_findings(tables, findings, checked, context=None, rank=1):
+def add_motor_esc_findings(tables, findings, checked, context=None, rank=1, index=None, parameters=None):
     if context is None:
         context = []
     evidence = []
@@ -55,7 +55,7 @@ def add_motor_esc_findings(tables, findings, checked, context=None, rank=1):
     rcou = combined_rcout_dataframe(tables)
     if rcou is not None:
         channels = output_channel_columns(rcou)
-        mapping = output_mapping_from_tables(tables)
+        mapping = output_mapping_from_tables(tables, index=index, parameters=parameters)
         motor_channels = motor_channels_from_mapping(mapping, channels)
         for c in [ch for ch in channels if ch in motor_channels]:
             s = numeric_series(rcou, [c])

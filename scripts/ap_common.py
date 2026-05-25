@@ -573,11 +573,20 @@ def parse_time_window(value: str | None) -> Dict[str, Optional[float]]:
         return {"start_s": start_s, "end_s": end_s}
     raise AnalysisError(f"Invalid --window value: {value}. Use START:END or around:CENTER:RADIUS")
 
-def filter_tables_by_time(tables: Dict[str, Any], start_s: Optional[float] = None, end_s: Optional[float] = None) -> Dict[str, Any]:
+def filter_tables_by_time(
+    tables: Dict[str, Any],
+    start_s: Optional[float] = None,
+    end_s: Optional[float] = None,
+    preserve_static_messages: Sequence[str] = ("PARM",),
+) -> Dict[str, Any]:
     if start_s is None and end_s is None:
         return tables
+    static_messages = {str(name).upper() for name in preserve_static_messages}
     out = {}
     for name, df in tables.items():
+        if str(name).upper() in static_messages:
+            out[name] = df.copy() if hasattr(df, "copy") else df
+            continue
         if df is None or not hasattr(df, "columns") or "TimeS" not in df.columns:
             out[name] = df
             continue
@@ -589,10 +598,19 @@ def filter_tables_by_time(tables: Dict[str, Any], start_s: Optional[float] = Non
         out[name] = df.loc[mask].copy()
     return out
 
-def params_from_tables(tables: Dict[str, Any]) -> Dict[str, Any]:
-    if "PARM" not in tables:
-        return {}
+def params_from_tables(
+    tables: Dict[str, Any],
+    *,
+    index: Optional[Dict[str, Any]] = None,
+    parameters: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
     params = {}
+    if index:
+        params.update(index.get("parameters", {}) or {})
+    if parameters:
+        params.update(parameters)
+    if "PARM" not in tables:
+        return params
     parm = tables["PARM"]
     if parm is None or not hasattr(parm, "to_dict"):
         return params
@@ -620,8 +638,17 @@ def output_mapping_from_params(params: Dict[str, Any], max_outputs: int = 32) ->
         }
     return mapping
 
-def output_mapping_from_tables(tables: Dict[str, Any], max_outputs: int = 32) -> Dict[str, Dict[str, Any]]:
-    return output_mapping_from_params(params_from_tables(tables), max_outputs=max_outputs)
+def output_mapping_from_tables(
+    tables: Dict[str, Any],
+    max_outputs: int = 32,
+    *,
+    index: Optional[Dict[str, Any]] = None,
+    parameters: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Dict[str, Any]]:
+    return output_mapping_from_params(
+        params_from_tables(tables, index=index, parameters=parameters),
+        max_outputs=max_outputs,
+    )
 
 def motor_channels_from_mapping(mapping: Dict[str, Dict[str, Any]], fallback_channels: Sequence[str]) -> List[str]:
     mapped = [

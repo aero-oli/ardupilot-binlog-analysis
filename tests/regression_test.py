@@ -343,6 +343,47 @@ def test_motor_output_metrics_are_mapping_aware():
     assert_true(channels == ["C1", "C2"], "only mapped motor channels should be treated as motors")
 
 
+def test_windowed_tables_preserve_boot_only_parameter_context():
+    full_tables = {
+        "PARM": pd.DataFrame({
+            "TimeS": [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8],
+            "Name": [
+                "SERVO1_FUNCTION", "SERVO2_FUNCTION", "SERVO3_FUNCTION",
+                "RCMAP_ROLL", "RCMAP_PITCH", "RCMAP_THROTTLE", "RCMAP_YAW", "RC2_TRIM",
+            ],
+            "Value": [33, 34, 1, 1, 3, 4, 2, 1490],
+        }),
+        "RCOU": pd.DataFrame({"TimeS": [20.0, 21.0], "C1": [1900, 1910], "C2": [1700, 1710], "C3": [1950, 1960]}),
+        "RCIN": pd.DataFrame({"TimeS": [20.0, 21.0], "C1": [1500, 1500], "C2": [1490, 1710], "C4": [1100, 1900]}),
+        "ATT": pd.DataFrame({"TimeS": [20.0, 21.0], "DesYaw": [0.0, 5.0], "Yaw": [0.0, 4.0]}),
+        "RATE": pd.DataFrame({"TimeS": [20.0, 21.0], "YDes": [0.0, 30.0], "Y": [0.0, 25.0], "YOut": [0.0, 0.2]}),
+    }
+    index = {"messages": {name: {} for name in full_tables}, "parameters": ap_common.params_from_tables(full_tables), "errors": [], "events": [], "modes": []}
+
+    window_tables = ap_common.filter_tables_by_time(full_tables, start_s=20.0, end_s=22.0)
+    mapping = ap_common.output_mapping_from_tables(window_tables, parameters=index["parameters"])
+    metrics = compute_metrics(window_tables, analysis_window={"start_s": 20.0, "end_s": 22.0})
+    rcin = summarize_rcin(window_tables, index)
+    command_response = build_command_response_investigation(window_tables, index, axes=("yaw",))
+
+    assert_true(len(window_tables["PARM"]) == len(full_tables["PARM"]), "boot-only PARM rows should survive dynamic telemetry windowing")
+    assert_true(ap_common.motor_channels_from_mapping(mapping, ["C1", "C2", "C3"]) == ["C1", "C2"], "windowed motor outputs should still use SERVOx_FUNCTION mapping")
+    assert_true(metrics["health"]["motor_outputs"]["motor_channels"] == ["C1", "C2"], "windowed metrics should not fall back to generic output channels when PARM exists")
+    confidence_reasons = "\n".join(metrics["confidence"]["reasons"])
+    assert_true("Output mapping could not be confirmed" not in confidence_reasons, "windowed metrics should not warn about generic output mapping when full-log PARM exists")
+    assert_true(rcin["mapping"]["axes"]["yaw"]["channel"] == 2, "windowed RCIN summary should use RCMAP_YAW from full-log parameters")
+    assert_true(rcin["mapping"]["limitation"] is None, "complete full-log RCMAP parameters should avoid fallback mapping warnings")
+    command_context = "\n".join(item.get("detail", "") for item in command_response["context"])
+    assert_true("RCIN yaw channel 2" in command_context, "windowed command-vs-response should use mapped RCMAP_YAW channel")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        plots = make_targeted_plots_from_tables(window_tables, "motor_esc_issue", Path(tmp), index=index)
+        motor_plot = next(path for path in plots if path.endswith("motor_outputs_symptom.html"))
+        html = Path(motor_plot).read_text(encoding="utf-8")
+    assert_true("C1 motor1" in html and "C2 motor2" in html, "windowed mapped motor-output plot should label motor channels from SERVOx_FUNCTION")
+    assert_true("C3 rc_passthrough" not in html, "windowed mapped motor-output plot should not treat passthrough outputs as motors")
+
+
 def test_motor_output_metrics_include_rco2_and_rco3_channels():
     tables = {
         "RCOU": pd.DataFrame({"TimeS": [0.0, 1.0], "C1": [1200, 1300]}),
@@ -1182,6 +1223,7 @@ def main():
     test_output_mapping_reads_servo_function_parameters()
     test_copter_output_mapping_handles_motor9_to_motor12_and_tilt_roles()
     test_motor_output_metrics_are_mapping_aware()
+    test_windowed_tables_preserve_boot_only_parameter_context()
     test_motor_output_metrics_include_rco2_and_rco3_channels()
     test_parameter_context_uses_yaml_selectors_and_servo_wildcards()
     test_stream_index_preserves_parameter_defaults_for_context()

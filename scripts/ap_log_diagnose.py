@@ -36,7 +36,7 @@ def add_event_markers(fig, markers):
     fig.update_layout(shapes=shapes, annotations=annotations)
 
 
-def make_targeted_plots_from_tables(tables, symptom_class, plots_dir, events=False):
+def make_targeted_plots_from_tables(tables, symptom_class, plots_dir, events=False, index=None, parameters=None):
     generated = []
     try:
         import plotly.graph_objects as go
@@ -47,7 +47,7 @@ def make_targeted_plots_from_tables(tables, symptom_class, plots_dir, events=Fal
     markers = event_markers_from_tables(tables) if events else []
     if symptom_class == "yaw_misbehaviour":
         if "RCIN" in tables and "RATE" in tables:
-            mapping = rc_channel_mapping(tables)
+            mapping = rc_channel_mapping(tables, index)
             yaw_info = mapping["axes"]["yaw"]
             yaw_col = rcin_channel_col(tables["RCIN"], yaw_info["channel"])
             rate = tables["RATE"]
@@ -101,7 +101,7 @@ def make_targeted_plots_from_tables(tables, symptom_class, plots_dir, events=Fal
             fig = go.Figure()
             x = rcou["TimeS"] if "TimeS" in rcou.columns else list(range(len(rcou)))
             channels = output_channel_columns(rcou)
-            mapping = output_mapping_from_tables(tables)
+            mapping = output_mapping_from_tables(tables, index=index, parameters=parameters)
             motor_channels = motor_channels_from_mapping(mapping, channels)
             for c in [c for c in channels if c in motor_channels]:
                 fig.add_trace(go.Scatter(x=x, y=rcou[c], mode="lines", name=output_channel_label(c, mapping)))
@@ -111,7 +111,7 @@ def make_targeted_plots_from_tables(tables, symptom_class, plots_dir, events=Fal
         generated.extend(write_compass_yaw_plots(tables, out, events=events))
     if symptom_class in {"attitude_rate_issue", "crash_or_loss_of_control", "general_investigation"}:
         if "RCIN" in tables and "ATT" in tables:
-            mapping = rc_channel_mapping(tables)
+            mapping = rc_channel_mapping(tables, index)
             rcin = tables["RCIN"]
             att = tables["ATT"]
             for axis, des_col, actual_col in [("roll", "DesRoll", "Roll"), ("pitch", "DesPitch", "Pitch")]:
@@ -203,7 +203,7 @@ def make_targeted_plots_from_tables(tables, symptom_class, plots_dir, events=Fal
             add_event_markers(fig, markers)
             p = out / "battery_power_symptom.html"; fig.write_html(str(p), include_plotlyjs="cdn"); generated.append(str(p))
         if "RCIN" in tables and ("CTUN" in tables or "BAT" in tables):
-            mapping = rc_channel_mapping(tables)
+            mapping = rc_channel_mapping(tables, index)
             thr_info = mapping["axes"]["throttle"]
             thr_col = rcin_channel_col(tables["RCIN"], thr_info["channel"])
             if thr_col:
@@ -228,7 +228,7 @@ def make_targeted_plots_from_tables(tables, symptom_class, plots_dir, events=Fal
             x = rcou["TimeS"] if "TimeS" in rcou.columns else list(range(len(rcou)))
             fig = go.Figure()
             channels = output_channel_columns(rcou)
-            mapping = output_mapping_from_tables(tables)
+            mapping = output_mapping_from_tables(tables, index=index, parameters=parameters)
             motor_channels = motor_channels_from_mapping(mapping, channels)
             for c in [c for c in channels if c in motor_channels]:
                 fig.add_trace(go.Scatter(x=x, y=rcou[c], mode="lines", name=output_channel_label(c, mapping)))
@@ -633,7 +633,7 @@ def diagnose_yaw(tables, index, vibration_assessment=None):
         else:
             checked.append({"check": "PIDY flags/limits", "result": "No PIDY limit/Dmod issue detected by heuristic"})
 
-    add_motor_esc_findings(tables, findings, checked, context, rank=1)
+    add_motor_esc_findings(tables, findings, checked, context, rank=1, index=index)
 
     compass_yaw = build_compass_yaw_investigation(tables)
     findings.extend(compass_yaw["findings"])
@@ -663,7 +663,7 @@ def diagnose_by_class(symptom_class, tables, index, vibration_assessment=None):
 
     if symptom_class == "attitude_rate_issue":
         add_attitude_rate_findings(tables, findings, checked, axes=("roll", "pitch"), rank=2)
-        add_motor_esc_findings(tables, findings, checked, context, rank=3)
+        add_motor_esc_findings(tables, findings, checked, context, rank=3, index=index)
         add_vibration_findings(tables, findings, checked, rank=3, vibration_assessment=vibration_assessment, symptom_class=symptom_class)
         add_power_findings(tables, findings, checked, context, rank=4)
     elif symptom_class == "ekf_gps_issue":
@@ -681,15 +681,15 @@ def diagnose_by_class(symptom_class, tables, index, vibration_assessment=None):
         add_ekf_gps_findings(tables, index, findings, checked, rank=3)
     elif symptom_class == "battery_power_issue":
         add_power_findings(tables, findings, checked, context, rank=1)
-        add_motor_esc_findings(tables, findings, checked, context, rank=2)
+        add_motor_esc_findings(tables, findings, checked, context, rank=2, index=index)
         add_attitude_rate_findings(tables, findings, checked, axes=("roll", "pitch", "yaw"), rank=3)
     elif symptom_class == "motor_esc_issue":
-        add_motor_esc_findings(tables, findings, checked, context, rank=1)
+        add_motor_esc_findings(tables, findings, checked, context, rank=1, index=index)
         add_attitude_rate_findings(tables, findings, checked, axes=("roll", "pitch", "yaw"), rank=2)
         add_power_findings(tables, findings, checked, context, rank=3)
         add_vibration_findings(tables, findings, checked, rank=4, vibration_assessment=vibration_assessment, symptom_class=symptom_class)
     elif symptom_class == "crash_or_loss_of_control":
-        add_motor_esc_findings(tables, findings, checked, context, rank=1)
+        add_motor_esc_findings(tables, findings, checked, context, rank=1, index=index)
         add_attitude_rate_findings(tables, findings, checked, axes=("roll", "pitch", "yaw"), rank=1)
         add_power_findings(tables, findings, checked, context, rank=2)
         add_ekf_gps_findings(tables, index, findings, checked, rank=2)
@@ -699,11 +699,11 @@ def diagnose_by_class(symptom_class, tables, index, vibration_assessment=None):
         add_altitude_findings(tables, findings, checked, context, rank=1)
         add_vibration_findings(tables, findings, checked, rank=2, vibration_assessment=vibration_assessment, symptom_class=symptom_class)
         add_power_findings(tables, findings, checked, context, rank=2)
-        add_motor_esc_findings(tables, findings, checked, context, rank=3)
+        add_motor_esc_findings(tables, findings, checked, context, rank=3, index=index)
         add_ekf_gps_findings(tables, index, findings, checked, rank=3)
     else:
         add_attitude_rate_findings(tables, findings, checked, axes=("roll", "pitch", "yaw"), rank=2)
-        add_motor_esc_findings(tables, findings, checked, context, rank=2)
+        add_motor_esc_findings(tables, findings, checked, context, rank=2, index=index)
         add_ekf_gps_findings(tables, index, findings, checked, rank=3)
         add_vibration_findings(tables, findings, checked, rank=3, vibration_assessment=vibration_assessment, symptom_class=symptom_class)
         add_power_findings(tables, findings, checked, context, rank=4)
@@ -802,7 +802,14 @@ def main() -> int:
             findings, context, checked, missing_required, missing_strongly, missing_optional = diagnose_yaw(tables, index, vibration_assessment=vibration_assessment)
         else:
             findings, context, checked, missing_required, missing_strongly, missing_optional = diagnose_by_class(symptom_class, tables, index, vibration_assessment=vibration_assessment)
-        plots = make_targeted_plots_from_tables(tables, symptom_class, args.plots, events=args.events) if args.plots else []
+        plots = make_targeted_plots_from_tables(
+            tables,
+            symptom_class,
+            args.plots,
+            events=args.events,
+            index=index,
+            parameters=index.get("parameters"),
+        ) if args.plots else []
         warnings = []
         if stats.get("max_messages_reached"):
             warnings.append("Diagnosis stopped at --max-messages; evidence may be partial.")
@@ -839,7 +846,7 @@ def main() -> int:
             "plots": plots,
             "logging_dropouts": index.get("logging_dropouts", []),
             "safety_note": "Do not treat this diagnosis as clearance to fly. Bench and ground checks are required after any configuration, mechanical, power, or tuning changes.",
-            "what_cannot_be_concluded": build_cannot_conclude(symptom_class, missing_required + missing_strongly + missing_optional, tables),
+            "what_cannot_be_concluded": build_cannot_conclude(symptom_class, missing_required + missing_strongly + missing_optional, tables, index=index),
         }
         write_json(args.out, result)
         print(f"Diagnosis class={symptom_class}; findings={len(findings)}; plots={len(plots)}")
@@ -849,7 +856,7 @@ def main() -> int:
         return 2
 
 
-def build_cannot_conclude(symptom_class, missing, tables=None):
+def build_cannot_conclude(symptom_class, missing, tables=None, index=None):
     tables = tables or {}
     out = []
     if "ESC" not in tables and "ESCX" not in tables and "EDT2" not in tables:
@@ -858,7 +865,7 @@ def build_cannot_conclude(symptom_class, missing, tables=None):
         out.append("ESCX duty/power/flags are available, but ESC RPM/current/temperature/error and EDT2 status confirmation are not available because ESC and EDT2 telemetry are missing.")
     if not any(name in tables for name in ["RCOU", "RCO2", "RCO3"]):
         out.append("Actuator output saturation cannot be confirmed because RCOU/RCO2/RCO3 is missing.")
-    elif not output_mapping_from_tables(tables):
+    elif not output_mapping_from_tables(tables, index=index):
         out.append("Output mapping could not be confirmed from parameters; RCOU/RCO2/RCO3 channel interpretation is generic.")
     if "PIDY" not in tables and symptom_class == "yaw_misbehaviour":
         out.append("Yaw PID limiting, I-term behaviour, and Dmod cannot be confirmed because PIDY is missing.")
