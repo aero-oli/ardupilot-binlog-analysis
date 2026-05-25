@@ -1,59 +1,183 @@
-yaw_misbehaviour:
-  aliases:
-    - yaw bad
-    - yaw twitching
-    - yaw oscillating
-    - yaw drifting
-    - yaw toilet bowling
-    - heading not holding
-    - spin
-    - pirouette
-  primary_messages: [ATT, RATE, PIDY, RCOU, MODE, MSG, EV, ERR]
-  secondary_messages: [MAG, XKF3, XKF4, GPS, VIBE, BAT, ESC, ESCX, EDT2, RCIN, POWR]
-  parameters:
-    - FRAME_CLASS
-    - FRAME_TYPE
-    - MOT_SPIN_ARM
-    - MOT_SPIN_MIN
-    - MOT_THST_EXPO
-    - ATC_RAT_YAW_P
-    - ATC_RAT_YAW_I
-    - ATC_RAT_YAW_D
-    - ATC_RAT_YAW_FF
-    - ATC_ANG_YAW_P
-    - ATC_ACCEL_Y_MAX
-    - INS_HNTCH_ENABLE
-    - INS_LOG_BAT_MASK
-    - COMPASS_USE
-    - COMPASS_ORIENT
-    - EK3_SRC1_YAW
+version: 1
+default_class: general_investigation
+symptom_classes:
+  - name: yaw_misbehaviour
+    aliases:
+      - yaw bad
+      - yaw
+      - heading
+      - yaw twitching
+      - yaw oscillating
+      - yaw drifting
+      - yaw toilet bowling
+      - heading not holding
+      - spin
+      - pirouette
+      - compass
+    required_messages: [ATT, RATE]
+    strongly_recommended_messages: [PIDY, RCOU, MODE]
+    optional_context_messages: [MSG, EV, ERR, RCIN, MAG, XKF3, XKF4, VIBE, BAT, POWR, ESC, ESCX, EDT2]
+    relevant_parameters:
+      - FRAME_CLASS
+      - FRAME_TYPE
+      - MOT_SPIN_ARM
+      - MOT_SPIN_MIN
+      - MOT_THST_EXPO
+      - ATC_RAT_YAW_P
+      - ATC_RAT_YAW_I
+      - ATC_RAT_YAW_D
+      - ATC_RAT_YAW_FF
+      - ATC_ANG_YAW_P
+      - ATC_ACCEL_Y_MAX
+      - INS_HNTCH_ENABLE
+      - INS_LOG_BAT_MASK
+      - COMPASS_USE
+      - COMPASS_ORIENT
+      - EK3_SRC1_YAW
+    recommended_plot_groups: [yaw_attitude, yaw_rate, yaw_pid, motor_outputs, esc_telemetry, vibration, power, ekf_mag]
+    diagnostic_questions:
+      - Was yaw commanded by pilot/autopilot or uncommanded?
+      - Did ATT yaw, RATE yaw, and PIDY evidence agree on the tracking problem?
+      - Did motor outputs or ESC telemetry show saturation, asymmetry, or faults?
+      - Did compass/EKF, vibration, or power evidence coincide with the yaw symptom?
+    likely_fault_branches:
+      - yaw_tracking_error
+      - yaw_authority_limitation
+      - motor_esc_prop_frame_issue
+      - yaw_pid_limiting_or_noise
+      - compass_ekf_yaw_source_issue
+      - vibration_or_power_contribution
 
-attitude_rate_issue:
-  aliases: [wobble, oscillation, roll wobble, pitch wobble, twitching, shaking]
-  primary_messages: [ATT, RATE, PIDR, PIDP, RCOU, MODE]
-  secondary_messages: [VIBE, IMU, BAT, ESC, XKF4]
+  - name: attitude_rate_issue
+    aliases: [wobble, oscillation, roll wobble, pitch wobble, twitching, shaking, bounce]
+    required_messages: [ATT, RATE]
+    strongly_recommended_messages: [PIDR, PIDP, RCOU, MODE]
+    optional_context_messages: [PIDY, MSG, EV, ERR, VIBE, IMU, BAT, POWR, ESC, ESCX, EDT2, XKF4]
+    relevant_parameters: [ATC_RAT_RLL_P, ATC_RAT_RLL_I, ATC_RAT_RLL_D, ATC_RAT_PIT_P, ATC_RAT_PIT_I, ATC_RAT_PIT_D, INS_HNTCH_ENABLE]
+    recommended_plot_groups: [attitude_rate, pid_terms, motor_outputs, vibration, power]
+    diagnostic_questions:
+      - Is the issue on roll, pitch, yaw, or multiple axes?
+      - Does RATE tracking error coincide with controller output or motor saturation?
+      - Is vibration or D-term limiting present during the symptom?
+    likely_fault_branches:
+      - rate_tracking_error
+      - controller_output_saturation
+      - tune_oscillation
+      - vibration_noise_coupling
 
-ekf_gps_issue:
-  aliases: [loiter drift, gps glitch, ekf error, toilet bowling, position jump, flyaway]
-  primary_messages: [GPS, XKF1, XKF3, XKF4, MODE, MSG, EV, ERR]
-  secondary_messages: [MAG, ATT, RATE, VIBE, BAT]
+  - name: ekf_gps_issue
+    aliases: [loiter drift, gps glitch, ekf error, toilet bowling, position jump, gps flyaway]
+    required_messages: [GPS]
+    strongly_recommended_messages: [XKF1, XKF3, XKF4, MODE]
+    optional_context_messages: [MSG, EV, ERR, GPA, GPS2, MAG, ATT, RATE, VIBE, BAT, POWR]
+    relevant_parameters: [GPS_TYPE, GPS_AUTO_CONFIG, EK3_SRC1_POSXY, EK3_SRC1_VELXY, EK3_SRC1_YAW, COMPASS_USE, COMPASS_ORIENT]
+    recommended_plot_groups: [gps_quality, ekf_innovations, mode_timeline, mag, vibration, power]
+    diagnostic_questions:
+      - Did GPS fix quality, satellite count, HDOP, or EKF test ratios degrade?
+      - Did the symptom occur only in navigation modes?
+      - Is magnetic/yaw-source evidence implicated?
+    likely_fault_branches:
+      - gps_quality_loss
+      - ekf_innovation_rejection
+      - compass_or_yaw_source_error
+      - navigation_mode_dependency
 
-motor_esc_issue:
-  aliases: [motor pulsing, esc desync, motor stopped, motor hot, rpm mismatch]
-  primary_messages: [RCOU, RATE, PIDR, PIDP, PIDY, BAT]
-  secondary_messages: [ESC, ESCX, EDT2, VIBE, MSG, EV, ERR]
+  - name: motor_esc_issue
+    aliases: [motor pulsing, esc desync, motor stopped, motor hot, rpm mismatch, prop, output]
+    required_messages: []
+    strongly_recommended_messages: [RCOU, RATE]
+    optional_context_messages: [ESC, ESCX, EDT2, PIDR, PIDP, PIDY, BAT, POWR, VIBE, MSG, EV, ERR]
+    relevant_parameters: [FRAME_CLASS, FRAME_TYPE, SERVO1_FUNCTION, SERVO2_FUNCTION, SERVO3_FUNCTION, SERVO4_FUNCTION, MOT_PWM_TYPE, MOT_SPIN_MIN, MOT_THST_EXPO]
+    recommended_plot_groups: [motor_outputs, esc_telemetry, attitude_rate, power, vibration]
+    diagnostic_questions:
+      - Are motor outputs saturating or asymmetric?
+      - Do ESC/EDT2 status, error, RPM, current, or temperature traces show faults?
+      - Does the issue correlate with rate error, battery sag, or vibration?
+    likely_fault_branches:
+      - output_saturation
+      - esc_status_or_error
+      - motor_prop_frame_mapping
+      - power_related_thrust_loss
 
-vibration_issue:
-  aliases: [vibration, vibes, clipping, noisy gyro, resonance]
-  primary_messages: [VIBE, IMU, ACC, GYR]
-  secondary_messages: [RATE, PIDR, PIDP, PIDY, INS, BAT]
+  - name: vibration_issue
+    aliases: [vibration, vibes, clipping, noisy gyro, resonance]
+    required_messages: [VIBE]
+    strongly_recommended_messages: [RATE]
+    optional_context_messages: [PIDR, PIDP, PIDY, IMU, GYR, ACC, ISBH, ISBD, BAT, POWR]
+    relevant_parameters: [INS_HNTCH_ENABLE, INS_HNTCH_FREQ, INS_LOG_BAT_MASK, INS_GYRO_FILTER]
+    recommended_plot_groups: [vibration, fft, rate_tracking, pid_terms]
+    diagnostic_questions:
+      - Are VIBE levels high or are clipping counters increasing?
+      - Is raw IMU or batch-sample data available for FFT?
+      - Does vibration coincide with rate errors or EKF/GPS problems?
+    likely_fault_branches:
+      - vibration_high
+      - clipping
+      - filter_notch_issue
+      - mechanical_resonance
 
-battery_power_issue:
-  aliases: [battery sag, brownout, low voltage, power problem, voltage drop]
-  primary_messages: [BAT, POWR, RCOU, CTUN]
-  secondary_messages: [ESC, RATE, ERR, EV, MSG]
+  - name: battery_power_issue
+    aliases: [battery sag, brownout, low voltage, power problem, voltage drop]
+    required_messages: [BAT]
+    strongly_recommended_messages: [POWR, RCOU]
+    optional_context_messages: [CTUN, RATE, ESC, ESCX, EDT2, ERR, EV, MSG, VIBE]
+    relevant_parameters: [BATT_MONITOR, BATT_ARM_VOLT, BATT_LOW_VOLT, BATT_CRT_VOLT, MOT_BAT_VOLT_MAX, MOT_BAT_VOLT_MIN]
+    recommended_plot_groups: [power, motor_outputs, altitude_throttle, esc_telemetry]
+    diagnostic_questions:
+      - Does voltage sag coincide with high current or throttle demand?
+      - Are board-power flags or Vcc drops present?
+      - Does power evidence coincide with motor output saturation or log end?
+    likely_fault_branches:
+      - battery_voltage_sag
+      - board_power_fault
+      - connector_or_power_module_issue
+      - throttle_saturation_under_load
 
-crash_or_loss_of_control:
-  aliases: [crash, fell, dropped, loss of control, flyaway, flipped]
-  primary_messages: [ATT, RATE, RCOU, EV, ERR, MODE, MSG, BAT, GPS, XKF4, VIBE]
-  secondary_messages: [ESC, PIDR, PIDP, PIDY, RCIN, CTUN, POWR]
+  - name: crash_or_loss_of_control
+    aliases: [crash, fell, dropped, loss of control, flyaway, flipped]
+    required_messages: []
+    strongly_recommended_messages: [ATT, RATE, RCOU, MODE]
+    optional_context_messages: [EV, ERR, MSG, BAT, GPS, XKF4, VIBE, PIDR, PIDP, PIDY, ESC, ESCX, EDT2, RCIN, CTUN, POWR, MAG]
+    relevant_parameters: [FRAME_CLASS, FRAME_TYPE, FS_THR_ENABLE, FS_BATT_ENABLE, ARMING_CHECK]
+    recommended_plot_groups: [mode_timeline, attitude_rate, motor_outputs, power, ekf_gps, vibration, esc_telemetry]
+    diagnostic_questions:
+      - What changed immediately before loss of control?
+      - Did attitude/rate tracking fail before impact?
+      - Did failsafe, EKF/GPS, power, motor/ESC, or vibration evidence appear?
+    likely_fault_branches:
+      - attitude_control_loss
+      - actuator_or_motor_failure
+      - power_failure
+      - ekf_gps_failure
+      - vibration_or_impact_sequence
+
+  - name: altitude_throttle_issue
+    aliases: [altitude, althold, height, baro, climb, descend, altitude hold]
+    required_messages: []
+    strongly_recommended_messages: [CTUN]
+    optional_context_messages: [ATT, RATE, BAT, POWR, VIBE, BARO, RNGF, GPS, XKF4, ESC, ESCX, EDT2]
+    relevant_parameters: [PSC_ACCZ_P, PSC_ACCZ_I, PSC_ACCZ_D, MOT_THST_EXPO, PILOT_THR_BHV, RNGFND1_TYPE]
+    recommended_plot_groups: [altitude_throttle, power, vibration, ekf_gps, motor_outputs]
+    diagnostic_questions:
+      - Does altitude target-vs-actual error exceed the threshold?
+      - Does throttle demand or battery sag coincide with altitude error?
+      - Is barometer/rangefinder/estimator evidence available?
+    likely_fault_branches:
+      - altitude_tracking_error
+      - throttle_saturation
+      - barometer_or_rangefinder_issue
+      - vibration_or_power_contribution
+
+  - name: general_investigation
+    aliases: []
+    required_messages: []
+    strongly_recommended_messages: [ATT, RATE]
+    optional_context_messages: [RCOU, MODE, MSG, EV, ERR, PIDR, PIDP, PIDY, VIBE, BAT, POWR, GPS, XKF4, ESC, ESCX, EDT2]
+    relevant_parameters: []
+    recommended_plot_groups: [mode_timeline, attitude_rate, motor_outputs, power, vibration, ekf_gps]
+    diagnostic_questions:
+      - What symptom or event should be prioritized?
+      - Which flight segment and mode are relevant?
+      - Are safety-critical messages present?
+    likely_fault_branches:
+      - broad_health_triage

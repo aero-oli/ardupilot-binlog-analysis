@@ -682,27 +682,10 @@ def md_table(rows: List[Dict[str, Any]], columns: Sequence[str]) -> str:
         out.append("| " + " | ".join(str(r.get(c, "")) for c in columns) + " |")
     return "\n".join(out)
 
-def classify_symptom(text: str) -> str:
-    s = text.lower()
-    if any(k in s for k in ["crash", "fell", "dropped", "loss of control", "flyaway"]):
-        return "crash_or_loss_of_control"
-    if "toilet" in s and not any(k in s for k in ["yaw", "heading"]):
-        return "ekf_gps_issue"
-    if any(k in s for k in ["gps", "loiter", "position", "drift", "ekf", "glitch"]):
-        return "ekf_gps_issue"
-    if any(k in s for k in ["yaw", "heading", "spin", "pirouette", "toilet", "compass"]):
-        return "yaw_misbehaviour"
-    if any(k in s for k in ["roll", "pitch", "wobble", "oscillat", "shake", "bounce"]):
-        return "attitude_rate_issue"
-    if any(k in s for k in ["vibration", "vibe", "noise", "clip"]):
-        return "vibration_issue"
-    if any(k in s for k in ["battery", "voltage", "sag", "brown", "power"]):
-        return "battery_power_issue"
-    if any(k in s for k in ["motor", "esc", "desync", "prop", "output"]):
-        return "motor_esc_issue"
-    if any(k in s for k in ["altitude", "althold", "height", "baro", "climb", "descend"]):
-        return "altitude_throttle_issue"
-    return "general_diagnosis"
+def classify_symptom(text: str, map_path: Optional[os.PathLike | str] = None) -> str:
+    from ap_symptom_map import classify_symptom_from_map
+
+    return classify_symptom_from_map(text, map_path)
 
 def severity_rank(sev: str) -> int:
     order = {"safety-critical": 0, "likely-issue": 1, "worth-checking": 2, "info": 3}

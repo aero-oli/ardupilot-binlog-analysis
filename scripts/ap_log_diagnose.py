@@ -85,7 +85,7 @@ def make_targeted_plots_from_tables(tables, symptom_class, plots_dir, events=Fal
             fig.update_layout(title="Motor outputs during yaw diagnosis", template="plotly_white", hovermode="x unified")
             add_event_markers(fig, markers)
             p = out / "motor_outputs_during_yaw_error.html"; fig.write_html(str(p), include_plotlyjs="cdn"); generated.append(str(p))
-    if symptom_class in {"attitude_rate_issue", "crash_or_loss_of_control", "general_diagnosis"}:
+    if symptom_class in {"attitude_rate_issue", "crash_or_loss_of_control", "general_investigation"}:
         if "ATT" in tables:
             att = tables["ATT"]
             fig = make_subplots(rows=3, cols=1, shared_xaxes=True, subplot_titles=("Roll", "Pitch", "Yaw"))
@@ -108,7 +108,7 @@ def make_targeted_plots_from_tables(tables, symptom_class, plots_dir, events=Fal
             fig.update_layout(title="Rate tracking symptom plot", template="plotly_white", hovermode="x unified")
             add_event_markers(fig, markers)
             p = out / "rate_tracking_symptom.html"; fig.write_html(str(p), include_plotlyjs="cdn"); generated.append(str(p))
-    if symptom_class in {"ekf_gps_issue", "crash_or_loss_of_control", "general_diagnosis"}:
+    if symptom_class in {"ekf_gps_issue", "crash_or_loss_of_control", "general_investigation"}:
         if "GPS" in tables or "GPS2" in tables or "XKF4" in tables or "NKF4" in tables:
             gps = tables.get("GPS") if "GPS" in tables else tables.get("GPS2")
             ekf = tables.get("XKF4") if "XKF4" in tables else tables.get("NKF4")
@@ -129,7 +129,7 @@ def make_targeted_plots_from_tables(tables, symptom_class, plots_dir, events=Fal
             fig.update_layout(title="EKF/GPS symptom plot", template="plotly_white", hovermode="x unified")
             add_event_markers(fig, markers)
             p = out / "ekf_gps_symptom.html"; fig.write_html(str(p), include_plotlyjs="cdn"); generated.append(str(p))
-    if symptom_class in {"vibration_issue", "crash_or_loss_of_control", "general_diagnosis"} and "VIBE" in tables:
+    if symptom_class in {"vibration_issue", "crash_or_loss_of_control", "general_investigation"} and "VIBE" in tables:
         vibe = tables["VIBE"]
         fig = make_subplots(rows=2, cols=1, shared_xaxes=True, subplot_titles=("Vibration", "Clipping"))
         x = vibe["TimeS"] if "TimeS" in vibe.columns else list(range(len(vibe)))
@@ -141,7 +141,7 @@ def make_targeted_plots_from_tables(tables, symptom_class, plots_dir, events=Fal
         fig.update_layout(title="Vibration symptom plot", template="plotly_white", hovermode="x unified")
         add_event_markers(fig, markers)
         p = out / "vibration_symptom.html"; fig.write_html(str(p), include_plotlyjs="cdn"); generated.append(str(p))
-    if symptom_class in {"battery_power_issue", "crash_or_loss_of_control", "general_diagnosis"}:
+    if symptom_class in {"battery_power_issue", "crash_or_loss_of_control", "general_investigation"}:
         if "BAT" in tables or "POWR" in tables:
             fig = make_subplots(rows=2, cols=1, shared_xaxes=True, subplot_titles=("Battery", "Board power"))
             if "BAT" in tables:
@@ -157,7 +157,7 @@ def make_targeted_plots_from_tables(tables, symptom_class, plots_dir, events=Fal
             fig.update_layout(title="Battery and board power symptom plot", template="plotly_white", hovermode="x unified")
             add_event_markers(fig, markers)
             p = out / "battery_power_symptom.html"; fig.write_html(str(p), include_plotlyjs="cdn"); generated.append(str(p))
-    if symptom_class in {"motor_esc_issue", "crash_or_loss_of_control", "general_diagnosis"}:
+    if symptom_class in {"motor_esc_issue", "crash_or_loss_of_control", "general_investigation"}:
         rcou = combined_rcout_dataframe(tables)
         if rcou is not None:
             x = rcou["TimeS"] if "TimeS" in rcou.columns else list(range(len(rcou)))

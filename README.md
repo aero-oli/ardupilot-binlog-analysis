@@ -67,13 +67,13 @@ You can run the scripts manually while developing or debugging the skill, but no
 Run the lightweight checks:
 
 ```bash
-bash tests/smoke_test.sh
+uv run --with pymavlink --with pandas --with numpy --with plotly --with pyyaml bash tests/smoke_test.sh
 ```
 
 Run regression tests:
 
 ```bash
-uv run --with pymavlink --with pandas --with numpy --with plotly python tests/regression_test.py
+uv run --with pymavlink --with pandas --with numpy --with plotly --with pyyaml python tests/regression_test.py
 ```
 
 Run the real-log fixture check with a local, non-committed `.bin` file:

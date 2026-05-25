@@ -5,12 +5,14 @@ import tempfile
 from pathlib import Path
 
 import pandas as pd
+import yaml
 
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
 import ap_common
+from ap_common import AnalysisError
 from ap_log_compare import metric_differences
 from ap_log_custom_plot import make_custom_plot
 from ap_log_diagnose import diagnosis_missing
@@ -22,6 +24,7 @@ from ap_log_metrics import compute_metrics
 from ap_log_plots import health_plots
 from ap_log_plots import main as plots_main
 from ap_log_validate import module_availability
+from ap_symptom_map import load_symptom_map
 
 
 def assert_true(condition, message):
@@ -212,6 +215,49 @@ def test_non_yaw_symptoms_get_targeted_findings():
 def test_toilet_bowling_prefers_ekf_gps_when_navigation_context_is_present():
     symptom = ap_common.classify_symptom("toilet bowling in loiter after a GPS glitch")
     assert_true(symptom == "ekf_gps_issue", f"expected ekf_gps_issue, got {symptom}")
+
+
+def test_yaml_aliases_drive_symptom_classification():
+    symptom = ap_common.classify_symptom("yaw twitching on takeoff")
+    assert_true(symptom == "yaw_misbehaviour", f"expected yaw_misbehaviour from YAML alias, got {symptom}")
+
+
+def test_new_yaml_alias_does_not_need_python_change():
+    source = Path("references/symptom-diagnosis-map.yaml")
+    data = yaml.safe_load(source.read_text(encoding="utf-8"))
+    for item in data["symptom_classes"]:
+        if item["name"] == "battery_power_issue":
+            item["aliases"].append("pack droop")
+            break
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "symptom-map.yaml"
+        path.write_text(yaml.safe_dump(data), encoding="utf-8")
+        symptom = ap_common.classify_symptom("pack droop under throttle", map_path=path)
+    assert_true(symptom == "battery_power_issue", f"expected battery_power_issue from injected YAML alias, got {symptom}")
+
+
+def test_unmatched_symptom_returns_general_investigation():
+    symptom = ap_common.classify_symptom("please look at this flight")
+    assert_true(symptom == "general_investigation", f"unmatched symptoms should be conservative, got {symptom}")
+
+
+def test_malformed_symptom_yaml_fails_clearly():
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "bad-map.yaml"
+        path.write_text(
+            yaml.safe_dump({
+                "version": 1,
+                "default_class": "general_investigation",
+                "symptom_classes": [{"name": "bad_issue", "aliases": ["bad"]}],
+            }),
+            encoding="utf-8",
+        )
+        try:
+            load_symptom_map(path)
+        except AnalysisError as exc:
+            assert_true("missing required field 'required_messages'" in str(exc), f"unexpected validation error: {exc}")
+        else:
+            raise AssertionError("malformed symptom YAML should fail validation")
 
 
 def test_edt2_status_is_used_for_motor_esc_findings():
@@ -617,6 +663,10 @@ def main():
     test_vibe_clip_variants_are_detected()
     test_non_yaw_symptoms_get_targeted_findings()
     test_toilet_bowling_prefers_ekf_gps_when_navigation_context_is_present()
+    test_yaml_aliases_drive_symptom_classification()
+    test_new_yaml_alias_does_not_need_python_change()
+    test_unmatched_symptom_returns_general_investigation()
+    test_malformed_symptom_yaml_fails_clearly()
     test_edt2_status_is_used_for_motor_esc_findings()
     test_escx_is_used_for_motor_esc_metrics_and_findings()
     test_escx_generates_plots_and_avoids_missing_telemetry_caveat()

@@ -140,7 +140,7 @@ Use `--window START:END` or `--window around:CENTER:RADIUS` on metrics, plots, t
 
 ## Symptom diagnosis fault tree
 
-For symptom-led diagnosis, classify the symptom using `references/symptom-diagnosis-map.yaml`. Then follow the relevant reference file:
+For symptom-led diagnosis, `references/symptom-diagnosis-map.yaml` is authoritative for symptom classification, diagnostic message tiers, relevant parameters, recommended plot groups, diagnostic questions, and likely fault branches. If no YAML alias confidently matches, use `general_investigation` rather than guessing. Then follow the relevant reference file:
 
 - yaw or heading issue: `references/yaw-diagnosis.md`
 - roll/pitch wobble or oscillation: `references/attitude-rate-diagnosis.md`

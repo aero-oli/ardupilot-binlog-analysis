@@ -30,10 +30,10 @@ MODULE_SYMPTOM_CLASS = {
 def module_availability(index):
     modules = {}
     for name, spec in MODULES.items():
-        required = spec["required"]
-        strongly = spec.get("strongly_recommended", [])
-        optional = spec.get("optional_context", spec.get("optional", []))
-        if "strongly_recommended" in spec or "optional_context" in spec:
+        required = spec.get("required_messages", spec.get("required", []))
+        strongly = spec.get("strongly_recommended_messages", spec.get("strongly_recommended", []))
+        optional = spec.get("optional_context_messages", spec.get("optional_context", spec.get("optional", [])))
+        if "strongly_recommended_messages" in spec or "optional_context_messages" in spec:
             missing_required, missing_strongly, missing_optional = missing_by_tier(index, MODULE_SYMPTOM_CLASS[name], missing_messages)
         else:
             missing_required = missing_messages(index, required)
