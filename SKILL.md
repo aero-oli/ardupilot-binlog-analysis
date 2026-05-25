@@ -91,6 +91,24 @@ Then inspect `out/diagnosis.json`, generated plots, validation/index summaries, 
 - generated plots;
 - what cannot be concluded.
 
+## When evidence is missing
+
+Inspect `missing_required`, `missing_strongly_recommended`, `missing_optional`, `what_cannot_be_concluded`, and `next_evidence_gathering` in the investigation manifest before advising next steps.
+
+```bash
+python scripts/ap_log_investigation_manifest.py LOG.BIN --symptom "USER SYMPTOM" --out out/investigation.json
+```
+
+Use `references/evidence-gathering-flights.md` and `references/logging-configuration-for-investigation.md` to recommend the safest next evidence source. Do not automatically recommend another flight:
+
+- suspected motor/ESC/power failure: bench inspection and ground checks first;
+- crash/loss-of-control: no repeat flight until hardware and setup checks are complete;
+- pre-arm/boot issue: recommend `LOG_DISARMED`/boot logging where appropriate, not flight;
+- vibration/filter evidence missing: controlled short capture only when the aircraft is otherwise stable; warn about large logs and dropouts;
+- EKF/GPS issue: compare modes only if manual control is stable.
+
+High-volume logging for raw IMU, batch sampling, FFT, or disarmed boot evidence should be targeted, checked for logging dropouts after capture, and normally disabled again after the diagnostic test.
+
 ### Mode 2: full health and tuning review
 
 Use when the user asks generally to analyse, review, or summarize a log.
@@ -219,10 +237,6 @@ Required yaw evidence sources, if present:
 - Preserve explicit units from script JSON. If a value reports unit `unknown`, do not infer one unless the log message documentation or field context confirms it.
 - Use `MODE`, `MSG`, `EV`, `ERR`, `ARM` to build the timeline.
 - When data conflicts, present competing hypotheses and explain what would confirm/refute them.
-
-## What to do when evidence is missing
-
-If required or strongly recommended messages are missing, state what cannot be concluded from the current log, then inspect `next_evidence_gathering` in the manifest. Use `references/logging-configuration-for-investigation.md` to describe the minimum future logging needed and `references/evidence-gathering-flights.md` to choose a safe next activity. Never treat absent evidence as proof that the issue did not happen, and never recommend disabling safety checks or intentionally reproducing dangerous loss of control to get better data.
 
 ## Output standard
 

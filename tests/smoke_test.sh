@@ -18,6 +18,21 @@ assert logging_reference_path.exists()
 reference = logging_reference_path.read_text(encoding="utf-8")
 assert "references/logging-configuration-for-investigation.md" in skill
 for required in [
+    "## When evidence is missing",
+    "missing_required",
+    "missing_strongly_recommended",
+    "missing_optional",
+    "what_cannot_be_concluded",
+    "next_evidence_gathering",
+    "python scripts/ap_log_investigation_manifest.py LOG.BIN --symptom \"USER SYMPTOM\" --out out/investigation.json",
+    "Do not automatically recommend another flight",
+    "bench inspection and ground checks first",
+    "no repeat flight until hardware and setup checks are complete",
+    "`LOG_DISARMED`/boot logging",
+    "normally disabled again after the diagnostic test",
+]:
+    assert required in skill, required
+for required in [
     "LOG_BITMASK",
     "LOG_BACKEND_TYPE",
     "LOG_DISARMED",
