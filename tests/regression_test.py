@@ -137,8 +137,43 @@ def test_stream_index_reports_logging_dropouts():
 
     assert_true(index["logging_dropouts"], "DSF dropout evidence should be reported in the index")
     assert_true(index["logging_dropouts"][0]["fields"]["Dp"] == 3.0, "drop count field should be retained")
+    assert_true(index["logging_health"]["confirmed_dropouts"][0]["fields"]["Dp"] == 3.0, "DSF.Dp should be confirmed dropout evidence")
+    assert_true(index["logging_health"]["possible_dropouts"] == [], "confirmed DSF.Dp should not also be possible evidence")
     assert_true(index["logging_health"]["dropouts_detected"] is True, "logging health should flag DSF dropouts")
     assert_true(index["logging_health"]["limits_diagnosis"] is True, "dropouts should limit diagnosis confidence")
+
+
+def test_non_logging_drop_field_is_possible_not_confirmed_dropout():
+    messages = [
+        FakeMsg("FOO", TimeUS=1000000, VoltageDrop=4),
+        FakeMsg("ATT", TimeUS=1000000, Roll=0),
+        FakeMsg("ATT", TimeUS=2000000, Roll=1),
+    ]
+
+    _rows, index, _stats = ap_common.collect_dataflash(messages, include=[], source="synthetic")
+    health = index["logging_health"]
+
+    assert_true(index["logging_dropouts"] == [], "non-logging drop-like fields should not become confirmed dropouts")
+    assert_true(health["confirmed_dropouts"] == [], "non-logging drop-like fields should not be confirmed dropout evidence")
+    assert_true(health["dropouts_detected"] is False, "possible-only dropout context should not set confirmed dropout flag")
+    assert_true(health["possible_dropouts"][0]["message"] == "FOO", "possible dropout evidence should remain visible for inspection")
+    assert_true(health["possible_dropout_count"] == 1, "possible dropout evidence should be counted separately")
+    assert_true(health["limits_diagnosis"] is False, "possible-only dropout context should not reduce confidence by itself")
+
+
+def test_logging_related_unknown_drop_field_is_possible_dropout_context():
+    messages = [
+        FakeMsg("LOGX", TimeUS=1000000, Drops=2),
+        FakeMsg("ATT", TimeUS=1000000, Roll=0),
+        FakeMsg("ATT", TimeUS=2000000, Roll=1),
+    ]
+
+    _rows, index, _stats = ap_common.collect_dataflash(messages, include=[], source="synthetic")
+    health = index["logging_health"]
+
+    assert_true(health["confirmed_dropouts"] == [], "unknown logging-like messages should not be confirmed without a known message/field pair")
+    assert_true(health["possible_dropouts"][0]["fields"]["Drops"] == 2.0, "logging-like drop fields should be retained as possible context")
+    assert_true("possible logging dropout" in health["confidence_impact"].lower(), "possible-only dropout context should be mentioned without a confidence downgrade")
 
 
 def test_logging_health_clean_log_has_no_limits():
@@ -148,6 +183,8 @@ def test_logging_health_clean_log_has_no_limits():
     _rows, index, _stats = ap_common.collect_dataflash(messages, include=[], source="synthetic")
     health = index["logging_health"]
     assert_true(health["dropouts_detected"] is False, "clean log should not flag dropouts")
+    assert_true(health["confirmed_dropouts"] == [], "clean log should have no confirmed dropouts")
+    assert_true(health["possible_dropouts"] == [], "clean log should have no possible dropouts")
     assert_true(health["limits_diagnosis"] is False, "clean log should not limit diagnosis")
     assert_true(health["max_time_gap_s"] == 1.0, "clean log should still report max normal gap")
 
@@ -1591,6 +1628,8 @@ def main():
     test_extract_jsonl_stream_respects_message_and_time_filters()
     test_extract_jsonl_stream_supports_gzip_and_armed_filter()
     test_stream_index_reports_logging_dropouts()
+    test_non_logging_drop_field_is_possible_not_confirmed_dropout()
+    test_logging_related_unknown_drop_field_is_possible_dropout_context()
     test_logging_health_clean_log_has_no_limits()
     test_logging_health_detects_timestamp_gap_and_reset()
     test_logging_health_detects_missing_core_messages_after_arm()

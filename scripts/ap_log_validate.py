@@ -79,9 +79,11 @@ def main() -> int:
             warnings.append("No DataFlash messages parsed.")
         if index.get("parser_stats", {}).get("max_messages_reached"):
             warnings.append("Validation stopped at --max-messages; message counts and module availability may be partial.")
-        if index.get("logging_dropouts"):
-            warnings.append("Possible logging dropout/drop count evidence was found; inspect index.logging_dropouts.")
         logging_health = index.get("logging_health", {})
+        if logging_health.get("confirmed_dropouts"):
+            warnings.append("Confirmed logging dropout/drop-count evidence was found; inspect index.logging_health.confirmed_dropouts.")
+        if logging_health.get("possible_dropouts"):
+            warnings.append("Possible logging dropout context was found; inspect index.logging_health.possible_dropouts.")
         if logging_health.get("limits_diagnosis"):
             warnings.append("Logging health limits diagnosis confidence: " + logging_health.get("confidence_impact", "inspect logging_health"))
         if index.get("duration_s") is None:
@@ -102,7 +104,8 @@ def main() -> int:
                 lines.extend(f"- {w}" for w in warnings)
                 lines.append("")
             lines.append("## Logging Health")
-            lines.append(f"- Dropouts detected: {logging_health.get('dropouts_detected', False)}")
+            lines.append(f"- Confirmed dropouts detected: {logging_health.get('dropouts_detected', False)}")
+            lines.append(f"- Possible dropout context: {logging_health.get('possible_dropout_count', 0)}")
             lines.append(f"- Max time gap: {logging_health.get('max_time_gap_s', 0)} s")
             lines.append(f"- Confidence impact: {logging_health.get('confidence_impact', 'unknown')}\n")
             lines.append("## Module availability")

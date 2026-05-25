@@ -230,18 +230,51 @@ def _armed_value(row: Dict[str, Any]) -> Optional[bool]:
     return None
 
 
-def _detect_dropout(typ: str, row: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    dropout_fields = {}
+CONFIRMED_DROPOUT_MESSAGES = {"DSF", "DRO", "DROP"}
+EXPLICIT_DROPOUT_FIELDS = {"dp", "drop", "drops", "dropped", "dropout", "dropouts", "lost", "skipped"}
+
+
+def _dropout_candidate_fields(row: Dict[str, Any]) -> Dict[str, float]:
+    fields = {}
     for key, value in row.items():
         lower = str(key).lower()
-        if lower in {"dp", "drop", "drops", "dropped", "dropout", "dropouts", "lost", "skipped"} or "drop" in lower:
+        if lower in EXPLICIT_DROPOUT_FIELDS or "drop" in lower:
             numeric = safe_float(value)
             if numeric is not None and numeric > 0:
-                dropout_fields[key] = numeric
-    if not dropout_fields and typ.upper() not in {"DSF", "DRO", "DROP"}:
+                fields[key] = numeric
+    return fields
+
+
+def _detect_dropout(typ: str, row: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    typ_upper = typ.upper()
+    dropout_fields = _dropout_candidate_fields(row)
+    if not dropout_fields:
+        if typ_upper in {"DRO", "DROP"}:
+            _, ts = time_column(row)
+            return {
+                "time_s": ts,
+                "message": typ,
+                "fields": strip_private(row),
+                "classification": "confirmed",
+                "reason": "known logging dropout message",
+            }
         return None
     _, ts = time_column(row)
-    return {"time_s": ts, "message": typ, "fields": dropout_fields or strip_private(row)}
+    if typ_upper in CONFIRMED_DROPOUT_MESSAGES:
+        return {
+            "time_s": ts,
+            "message": typ,
+            "fields": dropout_fields,
+            "classification": "confirmed",
+            "reason": "known logging dropout message/field",
+        }
+    return {
+        "time_s": ts,
+        "message": typ,
+        "fields": dropout_fields,
+        "classification": "possible",
+        "reason": "drop-like field on an unrecognized message",
+    }
 
 
 class StreamingIndexBuilder:
@@ -255,6 +288,7 @@ class StreamingIndexBuilder:
         self.events: List[Dict[str, Any]] = []
         self.errors: List[Dict[str, Any]] = []
         self.logging_dropouts: List[Dict[str, Any]] = []
+        self.possible_logging_dropouts: List[Dict[str, Any]] = []
         self.start_s: Optional[float] = None
         self.end_s: Optional[float] = None
         self.first_armed_s: Optional[float] = None
@@ -309,8 +343,10 @@ class StreamingIndexBuilder:
                 self.first_armed_s = ts
                 self._after_arm_counts[typ] += 1
         dropout = _detect_dropout(typ, row)
-        if dropout and len(self.logging_dropouts) < 200:
+        if dropout and dropout.get("classification") == "confirmed" and len(self.logging_dropouts) < 200:
             self.logging_dropouts.append(dropout)
+        elif dropout and dropout.get("classification") == "possible" and len(self.possible_logging_dropouts) < 200:
+            self.possible_logging_dropouts.append(dropout)
 
     def logging_health(self) -> Dict[str, Any]:
         duration = None if self.start_s is None or self.end_s is None else max(0.0, float(self.end_s - self.start_s))
@@ -344,9 +380,10 @@ class StreamingIndexBuilder:
             affected.extend({"message": item, "reason": "missing_core_after_arm"} for item in missing_after_arm)
         if self._timestamp_resets:
             affected.extend({**item, "reason": "timestamp_reset"} for item in self._timestamp_resets[:20])
-        dropouts = bool(self.logging_dropouts)
-        limited = dropouts or bool(affected)
-        if dropouts:
+        confirmed_dropouts = bool(self.logging_dropouts)
+        possible_dropouts = bool(self.possible_logging_dropouts)
+        limited = confirmed_dropouts or bool(affected)
+        if confirmed_dropouts:
             impact = "Log dropout/drop-count evidence is present; conclusions that rely on exact timing or missing rows are reduced confidence."
         elif self._timestamp_resets:
             impact = "Timestamp resets were detected; time-window and correlation conclusions may be unreliable."
@@ -354,12 +391,18 @@ class StreamingIndexBuilder:
             impact = "Core evidence is missing after arming; absence of evidence must not be read as absence of a fault."
         elif affected:
             impact = "Timestamp gaps or sparse messages may hide short events; diagnosis confidence is reduced."
+        elif possible_dropouts:
+            impact = "Possible logging dropout context was found in unrecognized drop-like fields; inspect possible_dropouts, but confidence is not reduced by this context alone."
         else:
             impact = "No logging dropouts, timestamp resets, large gaps, or armed-core-message gaps detected by heuristic."
         return {
-            "dropouts_detected": dropouts,
+            "dropouts_detected": confirmed_dropouts,
             "dropout_count": len(self.logging_dropouts),
             "dropouts": self.logging_dropouts[:50],
+            "confirmed_dropouts": self.logging_dropouts[:50],
+            "confirmed_dropout_count": len(self.logging_dropouts),
+            "possible_dropouts": self.possible_logging_dropouts[:50],
+            "possible_dropout_count": len(self.possible_logging_dropouts),
             "max_time_gap_s": round(max_gap, 6) if max_gap else 0.0,
             "affected_messages": affected[:100],
             "timestamp_resets": self._timestamp_resets[:50],
@@ -393,6 +436,7 @@ class StreamingIndexBuilder:
             "events": self.events[:500],
             "errors": self.errors[:500],
             "logging_dropouts": self.logging_dropouts[:200],
+            "possible_logging_dropouts": self.possible_logging_dropouts[:200],
             "logging_health": self.logging_health(),
             "parser_stats": stats or {},
         }

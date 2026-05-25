@@ -236,9 +236,11 @@ def build_manifest_from_index(index, symptom_text, log_path):
         warnings.append("Manifest stopped at --max-messages; evidence inventory may be partial.")
     if stats.get("armed_only") and not stats.get("armed_filter_supported"):
         warnings.append("--armed-only was requested, but ARM state could not be confirmed from ARM messages.")
-    if index.get("logging_dropouts"):
-        warnings.append("Possible logging dropout/drop count evidence was found; inspect index.logging_dropouts.")
     logging_health = index.get("logging_health", {})
+    if logging_health.get("confirmed_dropouts"):
+        warnings.append("Confirmed logging dropout/drop count evidence was found; inspect index.logging_health.confirmed_dropouts.")
+    if logging_health.get("possible_dropouts"):
+        warnings.append("Possible logging dropout context was found; inspect index.logging_health.possible_dropouts.")
     if logging_health.get("limits_diagnosis"):
         warnings.append("Logging health limits diagnosis confidence: " + logging_health.get("confidence_impact", "inspect logging_health"))
     return {

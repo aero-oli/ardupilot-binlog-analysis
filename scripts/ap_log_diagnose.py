@@ -869,9 +869,11 @@ def main() -> int:
             warnings.append("Diagnosis used an explicit --messages filter; unavailable evidence may be due to filtering.")
         if args.armed_only and not stats.get("armed_filter_supported"):
             warnings.append("--armed-only was requested, but ARM state could not be confirmed from ARM messages.")
-        if index.get("logging_dropouts"):
-            warnings.append("Possible logging dropout/drop count evidence was found; inspect logging_dropouts.")
         logging_health = index.get("logging_health", {})
+        if logging_health.get("confirmed_dropouts"):
+            warnings.append("Confirmed logging dropout/drop count evidence was found; inspect logging_health.confirmed_dropouts.")
+        if logging_health.get("possible_dropouts"):
+            warnings.append("Possible logging dropout context was found; inspect logging_health.possible_dropouts.")
         if logging_health.get("limits_diagnosis"):
             warnings.append("Logging health limits diagnosis confidence: " + logging_health.get("confidence_impact", "inspect logging_health"))
         result = {
@@ -897,6 +899,7 @@ def main() -> int:
             "missing_optional": missing_optional,
             "plots": plots,
             "logging_dropouts": index.get("logging_dropouts", []),
+            "possible_logging_dropouts": index.get("possible_logging_dropouts", []),
             "safety_note": "Do not treat this diagnosis as clearance to fly. Bench and ground checks are required after any configuration, mechanical, power, or tuning changes.",
             "what_cannot_be_concluded": build_cannot_conclude(
                 symptom_class,
