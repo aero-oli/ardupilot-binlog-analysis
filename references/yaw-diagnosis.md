@@ -27,6 +27,7 @@ Use this when the user reports yaw, heading, spinning, pirouetting, toilet-bowli
 
 5. Is this really heading estimation, not physical yaw?
    - Check MAG, XKF3 and XKF4.
+   - Use measured MAG field components such as MagX/MagY/MagZ, MX/MY/MZ or Mx/My/Mz for magnetic field magnitude. Do not use compass offset fields OfsX/OfsY/OfsZ as measured field strength.
    - Check whether the issue appears in Loiter/Auto but not Stabilize/AltHold.
    - XKF4 magnetic/velocity/position/height ratios above 1 indicate innovation rejection.
 
@@ -40,7 +41,7 @@ Use this when the user reports yaw, heading, spinning, pirouetting, toilet-bowli
 - Yaw authority limited: RATE.YDes/RATE.Y diverge, RATE.YOut high, PIDY limit and/or mapped output-channel saturation.
 - Motor/ESC/prop/frame issue: one output/ESC abnormal or persistent yaw bias, especially with ESC RPM/current errors.
 - Yaw tune oscillation: RATE.Y oscillates around target without actuator saturation; PIDY terms oscillatory.
-- EKF/compass/yaw-source issue: heading/yaw estimate jumps or XKF/MAG evidence abnormal without matching motor outputs.
+- EKF/compass/yaw-source issue: heading/yaw estimate jumps or XKF/measured-MAG evidence abnormal without matching motor outputs.
 - Vibration/noise issue: high VIBE/clipping or FFT peaks correlate with yaw-rate noise.
 - Battery/throttle issue: yaw degrades at high throttle or during voltage sag/current peaks.
 

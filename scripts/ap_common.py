@@ -577,9 +577,19 @@ def filter_tables_by_time(
     tables: Dict[str, Any],
     start_s: Optional[float] = None,
     end_s: Optional[float] = None,
+    intervals: Optional[Sequence[Dict[str, Any]]] = None,
     preserve_static_messages: Sequence[str] = ("PARM",),
 ) -> Dict[str, Any]:
-    if start_s is None and end_s is None:
+    normalized_intervals = []
+    for interval in intervals or []:
+        interval_start = safe_float(interval.get("start_s") if isinstance(interval, dict) else None)
+        interval_end = safe_float(interval.get("end_s") if isinstance(interval, dict) else None)
+        if interval_start is None and interval_end is None:
+            continue
+        if interval_start is not None and interval_end is not None and interval_end < interval_start:
+            continue
+        normalized_intervals.append({"start_s": interval_start, "end_s": interval_end})
+    if start_s is None and end_s is None and not normalized_intervals:
         return tables
     static_messages = {str(name).upper() for name in preserve_static_messages}
     out = {}
@@ -591,6 +601,16 @@ def filter_tables_by_time(
             out[name] = df
             continue
         mask = df["TimeS"].notna()
+        if normalized_intervals:
+            interval_mask = df["TimeS"].notna() & False
+            for interval in normalized_intervals:
+                current = df["TimeS"].notna()
+                if interval["start_s"] is not None:
+                    current = current & (df["TimeS"] >= interval["start_s"])
+                if interval["end_s"] is not None:
+                    current = current & (df["TimeS"] <= interval["end_s"])
+                interval_mask = interval_mask | current
+            mask = mask & interval_mask
         if start_s is not None:
             mask = mask & (df["TimeS"] >= start_s)
         if end_s is not None:

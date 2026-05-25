@@ -303,7 +303,12 @@ def main() -> int:
             high_throttle_percentile=args.high_throttle_percentile,
             high_throttle_threshold=args.high_throttle_threshold,
         )
-        tables = filter_tables_by_time(tables, start_s=selection.get("start_s"), end_s=selection.get("end_s"))
+        tables = filter_tables_by_time(
+            tables,
+            start_s=selection.get("start_s"),
+            end_s=selection.get("end_s"),
+            intervals=selection.get("intervals_used"),
+        )
         if args.align_tolerance is not None and args.align_tolerance < 0:
             raise AnalysisError("--align-tolerance must be non-negative")
         manifest = make_custom_plot(

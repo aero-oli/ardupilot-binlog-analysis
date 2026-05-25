@@ -789,7 +789,12 @@ def main() -> int:
             selection["end_s"] = window["end_s"] if window["end_s"] is not None else selection.get("end_s")
             selection["rule"] = "start_end" if selection.get("rule") == "whole_log" else selection.get("rule")
         full_tables = tables
-        tables = filter_tables_by_time(full_tables, start_s=selection.get("start_s"), end_s=selection.get("end_s"))
+        tables = filter_tables_by_time(
+            full_tables,
+            start_s=selection.get("start_s"),
+            end_s=selection.get("end_s"),
+            intervals=selection.get("intervals_used"),
+        )
         vibration_assessment = build_vibration_assessment(
             full_tables,
             symptom_class,

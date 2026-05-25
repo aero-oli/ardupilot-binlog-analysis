@@ -16,7 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 import ap_common
 from ap_common import AnalysisError
 from ap_log_compare import metric_differences
-from ap_compass_yaw import build_compass_yaw_investigation
+from ap_compass_yaw import build_compass_yaw_investigation, mag_field_frame
 from ap_log_custom_plot import make_custom_plot
 from ap_log_diagnose import diagnosis_missing
 from ap_log_diagnose import build_cannot_conclude
@@ -248,6 +248,76 @@ def test_window_selector_mode_intervals():
     selection = select_analysis_window(tables, mode="LOITER", log_end_s=40.0)
     assert_true(selection["start_s"] == 10.0 and selection["end_s"] == 30.0, "mode selector should return active interval")
     assert_true(selection["rule"] == "mode", "selection should record mode rule")
+
+
+def test_mode_window_filters_disjoint_intervals_without_intervening_modes():
+    tables = {
+        "MODE": pd.DataFrame({
+            "TimeS": [0.0, 10.0, 20.0, 30.0, 40.0],
+            "Mode": ["STABILIZE", "LOITER", "STABILIZE", "LOITER", "RTL"],
+        }),
+        "RATE": pd.DataFrame({
+            "TimeS": [12.0, 16.0, 24.0, 32.0, 36.0],
+            "YDes": [5.0, 5.0, 99.0, 7.0, 7.0],
+            "Y": [4.5, 4.7, 98.0, 6.5, 6.8],
+            "YOut": [0.2, 0.2, 0.95, 0.3, 0.3],
+        }),
+    }
+    selection = select_analysis_window(tables, mode="LOITER", log_end_s=45.0)
+
+    filtered = ap_common.filter_tables_by_time(
+        tables,
+        start_s=selection["start_s"],
+        end_s=selection["end_s"],
+        intervals=selection.get("intervals_used"),
+    )
+
+    assert_true(selection["start_s"] == 10.0 and selection["end_s"] == 40.0, "mode metadata should record bounding selected span")
+    assert_true(selection["intervals_found"] == [{"start_s": 10.0, "end_s": 20.0}, {"start_s": 30.0, "end_s": 40.0}], "all matching mode intervals should be recorded")
+    assert_true(selection["intervals_used"] == selection["intervals_found"], "all matching mode intervals should be used")
+    assert_true(selection["non_matching_gaps_excluded"] is True, "split mode selection should report excluded gaps")
+    assert_true(filtered["RATE"]["TimeS"].tolist() == [12.0, 16.0, 32.0, 36.0], "intervening STABILIZE telemetry should be excluded")
+
+
+def test_mode_window_diagnosis_uses_only_selected_intervals():
+    tables = {
+        "MODE": pd.DataFrame({
+            "TimeS": [0.0, 10.0, 20.0, 30.0, 40.0],
+            "Mode": ["STABILIZE", "LOITER", "STABILIZE", "LOITER", "RTL"],
+        }),
+        "ATT": pd.DataFrame({"TimeS": [12.0, 24.0, 32.0], "DesYaw": [0.0, 0.0, 0.0], "Yaw": [1.0, 90.0, 2.0]}),
+        "RATE": pd.DataFrame({"TimeS": [12.0, 24.0, 32.0], "YDes": [0.0, 0.0, 0.0], "Y": [1.0, 120.0, 2.0], "YOut": [0.1, 0.99, 0.1]}),
+        "PIDY": pd.DataFrame({"TimeS": [12.0, 24.0, 32.0], "Tar": [0.0, 0.0, 0.0], "Act": [1.0, 120.0, 2.0], "Err": [1.0, 120.0, 2.0]}),
+        "RCOU": pd.DataFrame({"TimeS": [12.0, 24.0, 32.0], "C1": [1500, 2000, 1500], "C2": [1500, 2000, 1500]}),
+    }
+    selection = select_analysis_window(tables, mode="LOITER", log_end_s=45.0)
+    filtered = ap_common.filter_tables_by_time(tables, start_s=selection["start_s"], end_s=selection["end_s"], intervals=selection["intervals_used"])
+
+    findings, _context, _checked, *_missing = diagnose_yaw(filtered, {"messages": {"ATT": {}, "RATE": {}, "PIDY": {}, "RCOU": {}}})
+
+    finding_text = "\n".join(str(f) for f in findings)
+    assert_true("Yaw tracking error" not in finding_text, "diagnosis should not see yaw error from intervening non-LOITER interval")
+    assert_true(filtered["RATE"]["TimeS"].tolist() == [12.0, 32.0], "diagnosis input should only contain LOITER RATE rows")
+
+
+def test_custom_plot_manifest_records_split_mode_intervals(tmp_path=None):
+    with tempfile.TemporaryDirectory() as tmp:
+        tables = {
+            "MODE": pd.DataFrame({
+                "TimeS": [0.0, 10.0, 20.0, 30.0, 40.0],
+                "Mode": ["STABILIZE", "LOITER", "STABILIZE", "LOITER", "RTL"],
+            }),
+            "RATE": pd.DataFrame({"TimeS": [12.0, 24.0, 32.0], "Y": [1.0, 99.0, 2.0]}),
+        }
+        selection = select_analysis_window(tables, mode="LOITER", log_end_s=45.0)
+        filtered = ap_common.filter_tables_by_time(tables, start_s=selection["start_s"], end_s=selection["end_s"], intervals=selection["intervals_used"])
+        manifest = make_custom_plot(filtered, ["RATE.Y"], Path(tmp) / "plot.html", analysis_window=selection)
+
+    assert_true(manifest["analysis_window"]["rule"] == "mode", "plot manifest should record mode window rule")
+    assert_true(manifest["analysis_window"]["source"] == "LOITER", "plot manifest should record selected mode")
+    assert_true(manifest["analysis_window"]["intervals_found"] == [{"start_s": 10.0, "end_s": 20.0}, {"start_s": 30.0, "end_s": 40.0}], "plot manifest should record candidate mode intervals")
+    assert_true(manifest["analysis_window"]["intervals_used"] == manifest["analysis_window"]["intervals_found"], "plot manifest should record used mode intervals")
+    assert_true(manifest["analysis_window"]["non_matching_gaps_excluded"] is True, "plot manifest should state that non-matching gaps were excluded")
 
 
 def test_window_selector_around_msg_event_and_error():
@@ -726,6 +796,36 @@ def test_normal_compass_data_is_context_not_interference_finding():
     assert_true("mag field magnitude" in context, "normal MAG magnitude should be retained as context")
     assert_true("magnetic interference" not in evidence.lower(), "MAG data alone should not become an interference finding")
     assert_true("No compass/yaw-source issue" in checks or "No magnetic-field correlation" in checks, "normal compass data should be checked but not flagged")
+
+
+def test_mag_field_magnitude_uses_measured_components_only():
+    tables = {
+        "MAG": pd.DataFrame({"TimeS": [0, 1], "MagX": [3, 0], "MagY": [4, 0], "MagZ": [12, 5]}),
+    }
+    frame = mag_field_frame(tables)
+    assert_true(frame is not None, "measured MAG components should produce a field magnitude frame")
+    assert_true(frame["mag_field"].round(3).tolist() == [13.0, 5.0], "field magnitude should be computed from MagX/MagY/MagZ")
+
+
+def test_mag_offsets_are_context_not_field_magnitude_or_interference():
+    tables = {
+        "MAG": pd.DataFrame({"TimeS": [0, 1, 2, 3, 4], "OfsX": [100, 130, 160, 190, 220], "OfsY": [20, 25, 30, 35, 40], "OfsZ": [350, 390, 430, 470, 510]}),
+        "ATT": pd.DataFrame({"TimeS": [0, 1, 2, 3, 4], "DesYaw": [0, 0, 0, 0, 0], "Yaw": [0, 5, 12, 20, 30]}),
+        "RATE": pd.DataFrame({"TimeS": [0, 1, 2, 3, 4], "YDes": [0, 0, 0, 0, 0], "Y": [0, 1, 1, 2, 1], "YOut": [0.05, 0.05, 0.06, 0.05, 0.04]}),
+        "CTUN": pd.DataFrame({"TimeS": [0, 1, 2, 3, 4], "ThO": [0.2, 0.35, 0.5, 0.65, 0.8]}),
+        "BAT": pd.DataFrame({"TimeS": [0, 1, 2, 3, 4], "Curr": [5, 10, 15, 20, 25]}),
+    }
+    result = build_compass_yaw_investigation(tables)
+    evidence = "\n".join("\n".join(f.get("evidence", [])) for f in result["findings"])
+    context = "\n".join(c.get("detail", "") for c in result["context"])
+    checks = "\n".join(c.get("result", "") for c in result["checked"])
+
+    assert_true(mag_field_frame(tables) is None, "offset-only MAG data must not produce measured field magnitude")
+    assert_true("measured magnetic field components" in checks, "offset-only MAG should explain that measured components are unavailable")
+    assert_true("MAG compass offsets" in context, "offset fields should still be retained as context")
+    assert_true("mag field magnitude" not in context, "offset fields should not be summarized as field magnitude")
+    assert_true("Compass/yaw-source interference hypothesis" not in "\n".join(f.get("possible_cause", "") for f in result["findings"]), "offset-only MAG data must not create interference finding")
+    assert_true("mag field magnitude correlates" not in evidence, "offset-only MAG data must not create magnetic-field correlation evidence")
 
 
 def test_magnetic_interference_hypothesis_requires_correlation():
@@ -1336,6 +1436,9 @@ def main():
     test_load_tables_fails_on_unreadable_table()
     test_time_window_filters_tables_inclusively()
     test_window_selector_mode_intervals()
+    test_mode_window_filters_disjoint_intervals_without_intervening_modes()
+    test_mode_window_diagnosis_uses_only_selected_intervals()
+    test_custom_plot_manifest_records_split_mode_intervals()
     test_window_selector_around_msg_event_and_error()
     test_window_selector_takeoff_hover_and_high_throttle()
     test_window_selector_fails_requested_missing_selector()
@@ -1367,6 +1470,8 @@ def main():
     test_multi_instance_gps_battery_esc_and_ekf_are_summarized_separately()
     test_multi_instance_diagnosis_flags_degraded_gps_and_esc_instances()
     test_normal_compass_data_is_context_not_interference_finding()
+    test_mag_field_magnitude_uses_measured_components_only()
+    test_mag_offsets_are_context_not_field_magnitude_or_interference()
     test_magnetic_interference_hypothesis_requires_correlation()
     test_yaw_diagnosis_separates_yaw_control_from_yaw_estimator_evidence()
     test_rcin_summary_uses_parameter_channel_mapping()

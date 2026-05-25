@@ -23,12 +23,17 @@ def _window(start, end, rule, source=None, intervals=None, warnings=None):
     end = float(end)
     if end < start:
         raise AnalysisError(f"Window selector '{rule}' produced an invalid range")
+    selected_interval = {"start_s": start, "end_s": end}
+    normalized_intervals = intervals or [selected_interval]
     return {
         "start_s": start,
         "end_s": end,
         "rule": rule,
         "source": source,
-        "intervals": intervals or [{"start_s": start, "end_s": end}],
+        "intervals": normalized_intervals,
+        "intervals_found": normalized_intervals,
+        "intervals_used": [selected_interval],
+        "non_matching_gaps_excluded": False,
         "warnings": warnings or [],
     }
 
@@ -71,7 +76,15 @@ def _mode_window(tables, mode, log_end_s=None):
             intervals.append({"start_s": start, "end_s": end})
     if not intervals:
         raise AnalysisError(f"--mode {mode!r} did not match any MODE intervals")
-    return _window(intervals[0]["start_s"], intervals[-1]["end_s"], "mode", source=str(mode), intervals=intervals)
+    selection = _window(intervals[0]["start_s"], intervals[-1]["end_s"], "mode", source=str(mode), intervals=intervals)
+    selection["intervals_found"] = intervals
+    selection["intervals_used"] = intervals
+    selection["non_matching_gaps_excluded"] = len(intervals) > 1
+    if len(intervals) > 1:
+        selection["warnings"].append(
+            f"--mode {mode!r} matched {len(intervals)} separate intervals; non-matching gaps were excluded."
+        )
+    return selection
 
 
 def _around_msg_window(tables, text, radius):
@@ -267,6 +280,9 @@ def select_analysis_window(
         "rule": "whole_log",
         "source": None,
         "intervals": [] if start is None or end is None else [{"start_s": start, "end_s": end}],
+        "intervals_found": [] if start is None or end is None else [{"start_s": start, "end_s": end}],
+        "intervals_used": [] if start is None or end is None else [{"start_s": start, "end_s": end}],
+        "non_matching_gaps_excluded": False,
         "warnings": ["Whole-log analysis window used because no selector was requested."],
         "armed_only": bool(armed_only),
     }

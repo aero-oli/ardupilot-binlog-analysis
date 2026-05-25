@@ -53,9 +53,18 @@ def _add_finding(findings, rank, cause, severity, confidence, evidence, interpre
 
 
 def _mag_axis_columns(df):
-    x = get_col(df, ["MagX", "MX", "X", "OfsX"])
-    y = get_col(df, ["MagY", "MY", "Y", "OfsY"])
-    z = get_col(df, ["MagZ", "MZ", "Z", "OfsZ"])
+    x = get_col(df, ["MagX", "MX", "Mx", "X"])
+    y = get_col(df, ["MagY", "MY", "My", "Y"])
+    z = get_col(df, ["MagZ", "MZ", "Mz", "Z"])
+    if x and y and z:
+        return x, y, z
+    return None
+
+
+def _mag_offset_columns(df):
+    x = get_col(df, ["OfsX"])
+    y = get_col(df, ["OfsY"])
+    z = get_col(df, ["OfsZ"])
     if x and y and z:
         return x, y, z
     return None
@@ -76,6 +85,30 @@ def mag_field_frame(tables):
     out = mag.copy()
     out["mag_field"] = (x * x + y * y + z * z).pow(0.5)
     return out
+
+
+def _add_mag_offset_context(tables, context):
+    mag = tables.get("MAG")
+    if mag is None or len(mag) == 0:
+        return
+    cols = _mag_offset_columns(mag)
+    if not cols:
+        return
+    details = []
+    values = []
+    for col in cols:
+        s = numeric_series(mag, [col])
+        if s is None or len(s.dropna()) == 0:
+            continue
+        min_v = float(s.min())
+        max_v = float(s.max())
+        details.append(f"{col}: min={min_v:.2f} unknown, max={max_v:.2f} unknown")
+        values.extend([
+            value_with_unit(f"MAG.{col}_min", min_v, "unknown"),
+            value_with_unit(f"MAG.{col}_max", max_v, "unknown"),
+        ])
+    if details:
+        _add_context(context, "MAG", "MAG compass offsets " + "; ".join(details), values)
 
 
 def yaw_error_frame(tables):
@@ -226,6 +259,7 @@ def build_compass_yaw_investigation(tables: Dict[str, Any]) -> Dict[str, Any]:
     checked: List[Dict[str, str]] = []
 
     mag_field = mag_field_frame(tables)
+    _add_mag_offset_context(tables, context)
     yaw_frame = yaw_error_frame(tables)
     mag_evidence = []
     estimator_evidence = []
@@ -257,7 +291,7 @@ def build_compass_yaw_investigation(tables: Dict[str, Any]) -> Dict[str, Any]:
             if abs(corr) >= 0.70 and span_pct > 10.0 and source in {"throttle", "current"}:
                 mag_evidence.append(f"{mag_span_detail}; mag field magnitude correlates with {label} (r={corr:.2f} ratio)")
     elif "MAG" in tables:
-        checked.append({"check": "MAG axes", "result": "MAG present but no recognized MagX/MagY/MagZ-style axis fields for field magnitude"})
+        checked.append({"check": "MAG measured field axes", "result": "MAG present but measured magnetic field components are unavailable; OfsX/OfsY/OfsZ offsets are not used for field magnitude or interference correlation."})
     else:
         checked.append({"check": "MAG availability", "result": "MAG unavailable; compass field magnitude and interference correlation cannot be checked"})
 
