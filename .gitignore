@@ -1,0 +1,11 @@
+.DS_Store
+__pycache__/
+*.py[cod]
+.venv/
+out/
+log-analysis-out/
+*.BIN
+*.bin
+*.LOG
+*.log
+*.tlog

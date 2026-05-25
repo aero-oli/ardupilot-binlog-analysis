@@ -91,6 +91,12 @@ Run regression tests:
 uv run --with pymavlink --with pandas --with numpy --with plotly --with pyyaml python tests/regression_test.py
 ```
 
+Run reference and metadata consistency checks:
+
+```bash
+uv run --with pyyaml python tests/reference_consistency_test.py
+```
+
 Run the real-log fixture check with a local, non-committed `.bin` file:
 
 ```bash
