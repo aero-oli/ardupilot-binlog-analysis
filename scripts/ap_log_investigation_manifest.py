@@ -66,6 +66,7 @@ BASE_LOGGING_SETTINGS = ["LOG_BITMASK", "LOG_BACKEND_TYPE", "LOG_FILE_RATEMAX", 
 HIGH_RATE_LOGGING_SETTINGS = ["INS_RAW_LOG_OPT", "INS_LOG_BAT_MASK", "INS_LOG_BAT_OPT"]
 ACTUATOR_OUTPUT_MESSAGES = {"RCOU", "RCO2", "RCO3"}
 ESC_TELEMETRY_MESSAGES = {"ESC", "ESCX", "EDT2"}
+RAW_OR_HIGH_RATE_IMU_MESSAGES = {"GYR", "ACC", "IMU", "IMU_FAST", "RAW_IMU", "ISBH", "ISBD"}
 
 SYMPTOM_EVIDENCE_PLANS = {
     "yaw_misbehaviour": {
@@ -451,12 +452,61 @@ def _step_type(symptom_class, missing, present, symptom_text):
         if missing["required"] or missing["strongly_recommended"] or not (present & ACTUATOR_OUTPUT_MESSAGES):
             return "bench_check", False
         return "ground_test", False
-    if symptom_class == "vibration_issue" and not (present & {"GYR", "ACC", "IMU", "ISBH", "ISBD"}):
+    if symptom_class == "vibration_issue" and not (present & RAW_OR_HIGH_RATE_IMU_MESSAGES):
         return "controlled_flight", True
     if not missing["required"] and not missing["strongly_recommended"]:
         return "existing_log_analysis", False
     plan = SYMPTOM_EVIDENCE_PLANS.get(symptom_class, SYMPTOM_EVIDENCE_PLANS["general_investigation"])
     return plan["default_step"], bool(plan["safe_to_request_flight"])
+
+
+def _missing_critical_message_guidance(symptom_class, present):
+    guidance = []
+    logging_profile_hints = []
+    hardware_support_dependent_evidence = []
+
+    if symptom_class == "yaw_misbehaviour":
+        if "PIDY" not in present:
+            guidance.append("Capture PIDY to verify yaw PID error, I-term behaviour, Dmod, SRate, and flags.")
+            logging_profile_hints.append("Review rate-controller/PID logging so PIDY is present during the yaw symptom window.")
+        if not (present & ACTUATOR_OUTPUT_MESSAGES):
+            guidance.append("Capture actuator outputs to verify yaw authority and saturation.")
+            logging_profile_hints.append("Ensure actuator output messages RCOU/RCO2/RCO3 are logged for the selected frame/output backend.")
+        if not (present & ESC_TELEMETRY_MESSAGES):
+            hardware_support_dependent_evidence.append("Enable ESC telemetry if hardware/firmware supports it; otherwise use RCOU/RCO2/RCO3 plus BAT/POWR as proxy evidence.")
+
+    elif symptom_class == "attitude_rate_issue":
+        missing_pid = [msg for msg in ["PIDR", "PIDP"] if msg not in present]
+        if missing_pid:
+            guidance.append("Capture PIDR/PIDP to verify Dmod, limiting, P/I/D/FF terms, and rate-controller behaviour.")
+            logging_profile_hints.append("Review rate-controller/PID logging so PIDR and PIDP are present during the wobble/attitude-rate symptom window.")
+
+    elif symptom_class == "vibration_issue":
+        if "VIBE" not in present:
+            guidance.append("VIBE is missing, so basic vibration and clipping assessment is unavailable.")
+            logging_profile_hints.append("Ensure VIBE logging is present for basic vibration and clipping review.")
+        if not (present & RAW_OR_HIGH_RATE_IMU_MESSAGES):
+            guidance.append("Raw/high-rate IMU or batch-sampler data is missing, so FFT/filter conclusions are limited.")
+            logging_profile_hints.append("Use raw/high-rate IMU or batch-sampler logging only for a short targeted capture, then check DSF/DMS/logging health and disable high-volume logging afterward.")
+
+    elif symptom_class == "motor_esc_issue":
+        if not (present & ACTUATOR_OUTPUT_MESSAGES):
+            guidance.append("Capture actuator-output logging with RCOU/RCO2/RCO3 before assessing output saturation, asymmetry, or motor command evidence.")
+            logging_profile_hints.append("Ensure actuator output messages RCOU/RCO2/RCO3 are logged during props-off bench checks or restrained ground checks before any flight consideration.")
+        if not (present & ESC_TELEMETRY_MESSAGES):
+            hardware_support_dependent_evidence.append("Enable ESC telemetry only if the ESCs, wiring, protocol, and firmware support it; otherwise do not claim ESC-level RPM/current/error diagnosis from the log.")
+
+    elif symptom_class == "battery_power_issue":
+        missing_power = [msg for msg in ["BAT", "POWR"] if msg not in present]
+        if missing_power:
+            guidance.append("Capture BAT and/or POWR power logging before drawing further voltage, current, sag, brownout, or power-integrity conclusions.")
+            logging_profile_hints.append("Review battery monitor and power logging setup so BAT/POWR evidence is available before further power conclusions.")
+
+    return {
+        "missing_critical_message_guidance": _dedupe(guidance),
+        "logging_profile_hints": _dedupe(logging_profile_hints),
+        "hardware_support_dependent_evidence": _dedupe(hardware_support_dependent_evidence),
+    }
 
 
 def _next_evidence_gathering(symptom_class, symptom_text, spec, present, missing, confidence_limits):
@@ -467,6 +517,7 @@ def _next_evidence_gathering(symptom_class, symptom_text, spec, present, missing
     do_not_attempt = list(plan["do_not_attempt"])
     reset_after_test = list(plan["reset"])
     confidence = list(confidence_limits)
+    targeted_guidance = _missing_critical_message_guidance(symptom_class, present)
 
     if _is_boot_or_prearm_request(symptom_text):
         logging_settings.append("LOG_DISARMED")
@@ -475,10 +526,11 @@ def _next_evidence_gathering(symptom_class, symptom_text, spec, present, missing
         reset_after_test.append("Disable LOG_DISARMED again after boot/pre-arm evidence is collected if it is not normally needed.")
         confidence.append("Boot/pre-arm/arming evidence requires disarmed logging and timeline messages; flight evidence is not required for this step.")
 
-    if symptom_class == "vibration_issue" and not (present & {"GYR", "ACC", "IMU", "ISBH", "ISBD"}):
+    if symptom_class == "vibration_issue" and not (present & RAW_OR_HIGH_RATE_IMU_MESSAGES):
         logging_settings.extend(HIGH_RATE_LOGGING_SETTINGS)
         suggested_safe_capture.append("For filtering/FFT questions, collect a short raw/high-rate IMU or batch-sampler capture only if the vehicle is otherwise controllable.")
         suggested_safe_capture.append("Warn that raw/high-rate IMU and batch sampling can create large logs or dropouts; check DSF/DMS after capture.")
+        do_not_attempt.append("Do not request raw/high-rate IMU or batch-sampler flight capture if the aircraft is unstable, unsafe, mechanically suspect, or not controllable.")
         reset_after_test.append("Reset high-volume raw/batch IMU logging after the short capture.")
         confidence.append("FFT/filter confidence is limited because no usable FFT evidence is available until raw IMU, high-rate IMU, or batch-sampler data is captured.")
 
@@ -506,6 +558,9 @@ def _next_evidence_gathering(symptom_class, symptom_text, spec, present, missing
         "do_not_attempt": _dedupe(do_not_attempt),
         "reset_after_test": _dedupe(reset_after_test),
         "confidence_limits": _dedupe(confidence),
+        "missing_critical_message_guidance": targeted_guidance["missing_critical_message_guidance"],
+        "logging_profile_hints": targeted_guidance["logging_profile_hints"],
+        "hardware_support_dependent_evidence": targeted_guidance["hardware_support_dependent_evidence"],
     }
 
 

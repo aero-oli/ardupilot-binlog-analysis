@@ -1723,8 +1723,20 @@ def test_manifest_next_evidence_yaw_missing_pidy_outputs():
     assert_true(plan["recommended_next_step_type"] == "controlled_flight", f"unexpected yaw next step: {plan}")
     assert_true("PIDY" in plan["messages_to_capture"], "yaw plan should ask for missing PIDY")
     assert_true("RCOU" in plan["messages_to_capture"], "yaw plan should ask for actuator outputs")
+    assert_true(any("Capture PIDY" in item for item in plan["missing_critical_message_guidance"]), "yaw plan should explain why PIDY is needed")
+    assert_true(any("yaw authority" in item for item in plan["missing_critical_message_guidance"]), "yaw plan should explain why actuator outputs are needed")
+    assert_true(any("PIDY" in item for item in plan["logging_profile_hints"]), "yaw logging hints should mention PIDY")
     assert_true(any("stable hover" in item for item in plan["suggested_safe_capture"]), "yaw plan should suggest a cautious hover capture")
     assert_true(plan["recommended_next_step_type"] != "do_not_fly_until_checked", "ordinary yaw missing-evidence plan should not become crash no-fly guidance")
+
+
+def test_manifest_next_evidence_yaw_missing_esc_telemetry_is_support_dependent():
+    index = {"messages": {"ATT": {}, "RATE": {}, "PIDY": {}, "RCOU": {}, "BAT": {}, "POWR": {}}, "errors": [], "events": [], "modes": []}
+    manifest = build_manifest_from_index(index, "yaw issue", "flight.bin")
+    plan = manifest["next_evidence_gathering"]
+    assert_true(any("Enable ESC telemetry" in item for item in plan["hardware_support_dependent_evidence"]), "yaw plan should make ESC telemetry hardware-support dependent")
+    assert_true(any("proxy evidence" in item for item in plan["hardware_support_dependent_evidence"]), "yaw plan should name actuator/power proxy evidence when ESC telemetry is unavailable")
+    assert_true(any("ESC-level confirmation is limited" in item for item in plan["confidence_limits"]), "missing ESC telemetry should limit yaw confidence")
 
 
 def test_manifest_next_evidence_motor_esc_missing_outputs_prefers_bench():
@@ -1734,6 +1746,9 @@ def test_manifest_next_evidence_motor_esc_missing_outputs_prefers_bench():
     assert_true(plan["safe_to_request_flight"] is False, "motor/ESC missing evidence should not request flight first")
     assert_true(plan["recommended_next_step_type"] == "bench_check", f"unexpected motor/ESC next step: {plan}")
     assert_true("RCOU" in plan["messages_to_capture"], "motor/ESC plan should request actuator output evidence")
+    assert_true(any("actuator-output logging" in item for item in plan["missing_critical_message_guidance"]), "motor/ESC plan should request actuator-output logging")
+    assert_true(any("bench checks" in item or "restrained ground checks" in item for item in plan["logging_profile_hints"]), "motor/ESC logging hints should be bench/ground-first")
+    assert_true(any("do not claim ESC-level" in item for item in plan["hardware_support_dependent_evidence"]), "motor/ESC plan should avoid unsupported ESC-level claims")
     assert_true(any("Enable ESC telemetry" in item for item in plan["suggested_safe_capture"]), "missing ESC telemetry should be called out")
     assert_true(any("proxy evidence" in item for item in plan["suggested_safe_capture"]), "plan should identify RCOU/BAT/POWR proxy evidence when ESC telemetry is unavailable")
 
@@ -1758,6 +1773,9 @@ def test_manifest_next_evidence_vibration_missing_raw_imu_short_controlled_captu
     assert_true(any("short" in item and "raw/high-rate IMU" in item for item in plan["suggested_safe_capture"]), "vibration plan should recommend short high-rate capture cautiously")
     assert_true(any("dropouts" in item for item in plan["suggested_safe_capture"]), "vibration plan should require dropout checks")
     assert_true(any("fft_available=false" in item for item in plan["suggested_safe_capture"]), "vibration plan should route unusable FFT diagnostics back to ap_log_fft output")
+    assert_true(any("FFT/filter conclusions are limited" in item for item in plan["missing_critical_message_guidance"]), "vibration plan should explain raw/high-rate IMU limits")
+    assert_true(any("short targeted capture" in item for item in plan["logging_profile_hints"]), "vibration logging hints should keep raw/high-rate capture short")
+    assert_true(any("unstable" in item for item in plan["do_not_attempt"]), "vibration plan should forbid raw IMU capture if unstable or unsafe")
     assert_true(any("usable FFT evidence" in item for item in plan["confidence_limits"]), "vibration plan should state missing usable FFT evidence")
     assert_true(any("Reset high-volume" in item or "Clear INS_RAW_LOG_OPT" in item for item in plan["reset_after_test"]), "vibration plan should reset high-volume logging")
 
@@ -2212,6 +2230,7 @@ def main():
     test_investigation_manifest_yaw_inventory_plans_next_steps()
     test_investigation_manifest_suggests_extract_when_core_evidence_missing()
     test_manifest_next_evidence_yaw_missing_pidy_outputs()
+    test_manifest_next_evidence_yaw_missing_esc_telemetry_is_support_dependent()
     test_manifest_next_evidence_motor_esc_missing_outputs_prefers_bench()
     test_manifest_next_evidence_crash_is_do_not_fly()
     test_manifest_next_evidence_vibration_missing_raw_imu_short_controlled_capture()
