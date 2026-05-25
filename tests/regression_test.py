@@ -821,11 +821,57 @@ def test_roll_pitch_rcin_command_response_checks_are_added():
 
 
 def test_manifest_includes_rcin_plot_presets_when_supported():
-    index = {"messages": {"ATT": {}, "RATE": {}, "RCIN": {}, "CTUN": {}, "BAT": {}}, "errors": [], "events": [], "modes": []}
+    index = {
+        "messages": {
+            "ATT": {},
+            "RATE": {},
+            "RCIN": {"fields": ["TimeS", "C1", "C2", "C3", "C4"]},
+            "CTUN": {},
+            "BAT": {},
+        },
+        "errors": [],
+        "events": [],
+        "modes": [],
+    }
     manifest = build_manifest_from_index(index, "yaw issue", "flight.bin")
     commands = "\n".join(manifest["recommended_next_commands"])
     assert_true("RCIN.C4=RC yaw input" in commands, "yaw manifest should include RCIN yaw command-response custom plot")
     assert_true("rcin_yaw_rate" in manifest["recommended_plots"], "RCIN yaw plot preset should be listed as recommended when data exists")
+    assert_true(any("default ArduPilot channel order" in limit for limit in manifest["confidence_limits"]), "manifest should state when default RC mapping was assumed")
+
+
+def test_manifest_rcin_plot_uses_rcmap_parameters_when_available():
+    index = {
+        "messages": {
+            "ATT": {},
+            "RATE": {},
+            "RCIN": {"fields": ["TimeS", "C1", "C2", "C3", "C4"]},
+        },
+        "parameters": {
+            "RCMAP_ROLL": 1,
+            "RCMAP_PITCH": 3,
+            "RCMAP_THROTTLE": 4,
+            "RCMAP_YAW": 2,
+        },
+        "errors": [],
+        "events": [],
+        "modes": [],
+    }
+    manifest = build_manifest_from_index(index, "yaw issue", "flight.bin")
+    commands = "\n".join(manifest["recommended_next_commands"])
+
+    assert_true("RCIN.C2=RC yaw input" in commands, "RCMAP_YAW=2 should make yaw plot use RCIN.C2")
+    assert_true("RCIN.C4=RC yaw input" not in commands, "mapped yaw plot should not use default RCIN.C4")
+    assert_true(not any("default ArduPilot channel order" in limit for limit in manifest["confidence_limits"]), "complete RCMAP parameters should avoid default-mapping limitation")
+
+
+def test_manifest_suppresses_rcin_plot_when_rcin_inventory_missing():
+    index = {"messages": {"ATT": {}, "RATE": {}}, "errors": [], "events": [], "modes": []}
+    manifest = build_manifest_from_index(index, "yaw issue", "flight.bin")
+    commands = "\n".join(manifest["recommended_next_commands"])
+
+    assert_true("RCIN." not in commands, "manifest should not recommend RCIN custom plots when RCIN is absent")
+    assert_true("rcin_yaw_rate" not in manifest["recommended_plots"], "missing RCIN should keep RCIN plot group unavailable")
 
 
 def test_manifest_plot_group_validation_covers_yaml_and_unknown_groups():
@@ -1328,6 +1374,8 @@ def main():
     test_yaw_without_rcin_or_desired_command_flags_uncommanded_motion()
     test_roll_pitch_rcin_command_response_checks_are_added()
     test_manifest_includes_rcin_plot_presets_when_supported()
+    test_manifest_rcin_plot_uses_rcmap_parameters_when_available()
+    test_manifest_suppresses_rcin_plot_when_rcin_inventory_missing()
     test_manifest_plot_group_validation_covers_yaml_and_unknown_groups()
     test_manifest_recommends_fft_workflow_for_vibration_raw_imu_evidence()
     test_manifest_recommends_mag_yaw_source_plot_for_ekf_gps_evidence()

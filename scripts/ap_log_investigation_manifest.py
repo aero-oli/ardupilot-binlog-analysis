@@ -8,6 +8,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from ap_common import AnalysisError, classify_symptom, collect_dataflash, missing_messages, write_json
 from ap_parameters import select_relevant_parameters
+from ap_rcin import rc_channel_mapping, rcin_channel_col
 from ap_symptom_map import diagnosis_requirements, requirement_spec
 
 
@@ -53,6 +54,13 @@ SPECIAL_PLOT_GROUPS = {
     },
 }
 
+RCIN_PLOT_GROUPS = {
+    "rcin_yaw_rate": {"axis": "yaw", "label": "RC yaw input"},
+    "rcin_roll_attitude": {"axis": "roll", "label": "RC roll input"},
+    "rcin_pitch_attitude": {"axis": "pitch", "label": "RC pitch input"},
+    "rcin_throttle_power": {"axis": "throttle", "label": "RC throttle input"},
+}
+
 
 def _present_messages(index):
     return set(index.get("messages", {}).keys())
@@ -88,10 +96,40 @@ def validate_recommended_plot_groups(symptom_specs=None):
         )
 
 
-def _available_plot_groups(spec, present):
+class _InventoryTable:
+    def __init__(self, fields):
+        self.columns = list(fields)
+
+
+def _message_fields(index, message):
+    return set((index.get("messages", {}).get(message, {}) or {}).get("fields", []) or [])
+
+
+def _rcin_plot_parts(group, index):
+    config = RCIN_PLOT_GROUPS.get(group)
+    if not config or "RCIN" not in index.get("messages", {}):
+        return None
+    fields = _message_fields(index, "RCIN")
+    if not fields:
+        return None
+    mapping = rc_channel_mapping({}, index)
+    axis_info = mapping["axes"][config["axis"]]
+    field = rcin_channel_col(_InventoryTable(fields), axis_info["channel"])
+    if not field:
+        return None
+    return [f"--series RCIN.{field}={config['label']}"] + PLOT_COMMANDS[group][1:]
+
+
+def _plot_command_parts(group, index):
+    if group in RCIN_PLOT_GROUPS:
+        return _rcin_plot_parts(group, index)
+    return PLOT_COMMANDS.get(group)
+
+
+def _available_plot_groups(spec, present, index):
     groups = []
     for group in spec.get("recommended_plot_groups", []):
-        command_parts = PLOT_COMMANDS.get(group)
+        command_parts = _plot_command_parts(group, index)
         special = SPECIAL_PLOT_GROUPS.get(group)
         if not command_parts and not special:
             continue
@@ -105,8 +143,8 @@ def _available_plot_groups(spec, present):
     return groups
 
 
-def _custom_plot_command(log_path, group):
-    parts = PLOT_COMMANDS.get(group)
+def _custom_plot_command(log_path, group, index):
+    parts = _plot_command_parts(group, index)
     if not parts:
         return None
     out_name = group.replace("/", "_") + ".html"
@@ -123,7 +161,7 @@ def _special_plot_command(log_path, group):
     return spec["command"].format(log=log_path)
 
 
-def _recommended_commands(log_path, symptom_text, spec, present, missing):
+def _recommended_commands(log_path, symptom_text, spec, present, missing, index):
     commands = [
         f"python scripts/ap_log_diagnose.py {log_path} --symptom \"{symptom_text}\" --out out/diagnosis.json --plots out/plots/diagnosis"
     ]
@@ -140,8 +178,8 @@ def _recommended_commands(log_path, symptom_text, spec, present, missing):
         )
     elif spec.get("recommended_plot_groups"):
         commands.append(f"python scripts/ap_log_extract.py {log_path} --out out/tables --format csv")
-    for group in _available_plot_groups(spec, present)[:5]:
-        command = _custom_plot_command(log_path, group)
+    for group in _available_plot_groups(spec, present, index)[:5]:
+        command = _custom_plot_command(log_path, group, index)
         if command is None:
             command = _special_plot_command(log_path, group)
         if command:
@@ -149,7 +187,13 @@ def _recommended_commands(log_path, symptom_text, spec, present, missing):
     return commands
 
 
-def _confidence_limits(missing):
+def _rcin_mapping_limitation(spec, present, index):
+    if "RCIN" not in present or not any(group in RCIN_PLOT_GROUPS for group in spec.get("recommended_plot_groups", [])):
+        return None
+    return rc_channel_mapping({}, index).get("limitation")
+
+
+def _confidence_limits(missing, rcin_mapping_limitation=None):
     limits = []
     if missing["required"]:
         limits.append("Cannot answer core diagnosis until required evidence is available: " + ", ".join(missing["required"]))
@@ -159,6 +203,8 @@ def _confidence_limits(missing):
         timeline_missing = [name for name in ["MODE", "MSG", "EV", "ERR"] if name in missing["optional_context"]]
         if timeline_missing:
             limits.append("Timeline confidence is reduced because optional timeline context is missing: " + ", ".join(timeline_missing))
+    if rcin_mapping_limitation:
+        limits.append(rcin_mapping_limitation)
     return limits
 
 
@@ -182,7 +228,8 @@ def build_manifest_from_index(index, symptom_text, log_path):
     spec = requirement_spec(symptom_class)
     present = _present_messages(index)
     missing = _missing_evidence(index, spec)
-    plot_groups = _available_plot_groups(spec, present)
+    plot_groups = _available_plot_groups(spec, present, index)
+    rcin_mapping_limitation = _rcin_mapping_limitation(spec, present, index)
     warnings = []
     stats = index.get("parser_stats", {})
     if stats.get("max_messages_reached"):
@@ -202,10 +249,10 @@ def build_manifest_from_index(index, symptom_text, log_path):
         "parameter_context": select_relevant_parameters(symptom_class, index=index),
         "available_evidence": _available_evidence(index),
         "missing_evidence": missing,
-        "recommended_next_commands": _recommended_commands(log_path, symptom_text, spec, present, missing),
+        "recommended_next_commands": _recommended_commands(log_path, symptom_text, spec, present, missing, index),
         "recommended_plots": plot_groups,
         "questions_to_answer": _yaw_questions_first(symptom_class, spec.get("diagnostic_questions", [])),
-        "confidence_limits": _confidence_limits(missing),
+        "confidence_limits": _confidence_limits(missing, rcin_mapping_limitation=rcin_mapping_limitation),
     }
 
 
