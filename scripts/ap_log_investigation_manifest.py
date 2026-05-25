@@ -355,10 +355,21 @@ def _special_plot_command(log_path, group):
     return spec["command"].format(log=log_path)
 
 
+def _mode_compare_requested(symptom_text):
+    text = str(symptom_text or "").lower()
+    return any(token in text for token in ["mission", "auto", "waypoint", "manual", "poshold", "loiter", "during missions"])
+
+
 def _recommended_commands(log_path, symptom_text, spec, present, missing, index):
     commands = [
         f"python scripts/ap_log_diagnose.py {log_path} --symptom \"{symptom_text}\" --out out/diagnosis.json --plots out/plots/diagnosis"
     ]
+    if _mode_compare_requested(symptom_text):
+        commands.append(
+            f"python scripts/ap_log_mode_compare.py {log_path} --symptom {spec.get('name', classify_symptom(symptom_text))} "
+            "--compare-modes AUTO,POSHOLD,LOITER,ALTHOLD,STABILIZE --active-flight-only "
+            "--json out/mode_compare.json --plots out/plots/mode_compare"
+        )
     message_plan = []
     for message in spec["required_messages"] + spec["strongly_recommended_messages"] + spec["optional_context_messages"]:
         if message not in message_plan:

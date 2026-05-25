@@ -183,6 +183,14 @@ python scripts/ap_log_diagnose.py LOG.BIN --symptom "yaw issue" --around-msg "ya
 python scripts/ap_log_diagnose.py LOG.BIN --symptom "motor issue" --high-throttle-only --out out/diagnosis.json
 ```
 
+For mission-vs-manual complaints, especially yaw or wobble that appears in AUTO/mission but not in manual or positioning modes, run the mode comparison aid before drawing conclusions:
+
+```bash
+python scripts/ap_log_mode_compare.py LOG.BIN --symptom yaw_misbehaviour --compare-modes AUTO,POSHOLD,ALTHOLD,STABILIZE --active-flight-only --json out/mode_compare.json --plots out/plots/mode_compare
+```
+
+Treat mode comparison as scoping evidence. Inspect the intervals, active-flight criteria, missing evidence, and confidence limits before deciding whether AUTO behaviour reflects mission yaw demand, estimator/navigation context, or a control/authority issue.
+
 Selectors include `--mode`, `--around-msg`, `--around-event`, `--around-error`, `--takeoff-only`, `--hover-candidates`, and `--high-throttle-only`. For diagnosis and custom plots, `--mode` uses all matching mode intervals and excludes intervening non-matching gaps; inspect `analysis_window.intervals_found`, `analysis_window.intervals_used`, and `analysis_window.non_matching_gaps_excluded` when reporting scope. If a requested selector cannot be resolved from available log messages, the script should fail with a clear error rather than silently using whole-log averages.
 
 `--hover-candidates` uses a conservative duration-based CTUN hover heuristic. Tune it with `--hover-min-duration`, `--hover-alt-span-max`, `--hover-throttle-min`, and `--hover-throttle-max`; report the selected `analysis_window.criteria` and candidate intervals when using it.

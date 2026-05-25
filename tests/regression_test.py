@@ -28,6 +28,7 @@ from ap_log_diagnose import make_targeted_plots_from_tables
 from ap_log_fft import fft_from_isb_rows
 from ap_log_investigation_manifest import build_manifest_from_index, validate_recommended_plot_groups
 from ap_log_metrics import compute_metrics
+from ap_log_mode_compare import compare_modes
 from ap_log_plots import health_plots
 from ap_log_plots import main as plots_main
 from ap_parameters import select_relevant_parameters
@@ -852,6 +853,41 @@ def test_manifest_questions_include_mission_yaw_context_for_auto_symptom():
     assert_true("Is the yaw issue mostly in AUTO/mission?" in questions, "mission yaw manifest should ask whether symptom is mission-specific")
     assert_true("Is RATE.YDes unusually high or continuous in AUTO?" in questions, "mission yaw manifest should ask about commanded yaw demand")
     assert_true("Does WP_YAW_BEHAVIOR explain mission yaw demands?" in questions, "mission yaw manifest should ask about mission yaw behaviour")
+
+
+def test_mode_compare_ranks_auto_worse_for_yaw_tracking_with_numeric_modes():
+    tables = {
+        "MODE": pd.DataFrame({"TimeS": [0.0, 10.0, 20.0], "Mode": [3, 16, 3]}),
+        "ARM": pd.DataFrame({"TimeS": [0.0], "Armed": [1]}),
+        "CTUN": pd.DataFrame({"TimeS": [0.0, 1.0, 2.0, 11.0, 12.0, 21.0, 22.0], "Alt": [0.0, 0.1, 0.1, 3.0, 3.1, 3.0, 3.2], "ThO": [0.08, 0.10, 0.10, 0.42, 0.43, 0.44, 0.45]}),
+        "ATT": pd.DataFrame({"TimeS": [1.0, 2.0, 11.0, 12.0, 21.0, 22.0], "DesYaw": [0, 0, 0, 0, 0, 0], "Yaw": [80, 90, 2, 3, 60, 70]}),
+        "RATE": pd.DataFrame({"TimeS": [1.0, 2.0, 11.0, 12.0, 21.0, 22.0], "YDes": [0, 0, 0, 0, 0, 0], "Y": [90, 100, 2, 3, 70, 80], "YOut": [0.9, 0.95, 0.1, 0.1, 0.85, 0.9]}),
+        "RCOU": pd.DataFrame({"TimeS": [1.0, 2.0, 11.0, 12.0, 21.0, 22.0], "C1": [1950, 1960, 1500, 1510, 1900, 1910], "C2": [1500, 1500, 1500, 1510, 1500, 1510]}),
+        "PARM": pd.DataFrame({"Name": ["SERVO1_FUNCTION", "SERVO2_FUNCTION"], "Value": [33, 34]}),
+    }
+
+    result = compare_modes(
+        tables,
+        symptom="yaw_misbehaviour",
+        compare_modes=["3", "16"],
+        active_flight_only=True,
+        index={"parameters": {"SERVO1_FUNCTION": 33, "SERVO2_FUNCTION": 34}},
+    )
+
+    assert_true(result["decoded_modes"] == ["AUTO", "POSHOLD"], "numeric mode ids should decode in mode comparison")
+    assert_true(result["ranking"][0]["decoded_mode"] == "AUTO", "AUTO should rank worse for yaw tracking")
+    auto = next(item for item in result["mode_comparisons"] if item["decoded_mode"] == "AUTO")
+    poshold = next(item for item in result["mode_comparisons"] if item["decoded_mode"] == "POSHOLD")
+    assert_true(auto["metrics"]["rate_y_error"]["p95_abs"] > poshold["metrics"]["rate_y_error"]["p95_abs"], "AUTO yaw rate error should be larger than POSHOLD")
+    assert_true(auto["intervals_used"][0]["start_s"] >= 21.0, "active-flight filtering should exclude AUTO ground rows")
+    assert_true(auto["window_quality"]["ground_spool_rows_included"] is True, "mode comparison should record ground/spool contamination")
+
+
+def test_manifest_recommends_mode_compare_for_mission_symptom():
+    index = {"messages": {"ATT": {}, "RATE": {}, "MODE": {}, "CTUN": {}, "RCOU": {}}, "parameters": {}, "errors": [], "events": [], "modes": []}
+    manifest = build_manifest_from_index(index, "yaw problem during missions", "flight.bin")
+
+    assert_true(any("ap_log_mode_compare.py" in cmd for cmd in manifest["recommended_next_commands"]), "manifest should recommend mode comparison for mission/manual symptoms")
 
 
 def test_event_markers_collect_mode_err_ev_msg():
@@ -2084,6 +2120,8 @@ def main():
     test_parameter_context_yaw_includes_mission_yaw_parameters()
     test_parameter_context_mission_yaw_includes_rate_accel_and_headroom()
     test_manifest_questions_include_mission_yaw_context_for_auto_symptom()
+    test_mode_compare_ranks_auto_worse_for_yaw_tracking_with_numeric_modes()
+    test_manifest_recommends_mode_compare_for_mission_symptom()
     test_event_markers_collect_mode_err_ev_msg()
     test_mode_segments_are_derived_from_mode_rows()
     test_validate_marks_non_copter_scope_as_partial()

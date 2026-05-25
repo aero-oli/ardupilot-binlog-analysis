@@ -81,7 +81,17 @@ User report: "yaw misbehaves".
    python scripts/ap_log_diagnose.py LOG.BIN --symptom "yaw misbehaves" --mode LOITER --out out/diagnosis.json --plots out/plots/diagnosis
    ```
 
-3. Plot yaw desired vs actual signals.
+3. If the complaint is mission/AUTO versus manual or positioning modes, compare modes directly before treating the issue as a generic yaw tune problem.
+
+   ```bash
+   python scripts/ap_log_mode_compare.py LOG.BIN --symptom yaw_misbehaviour --compare-modes AUTO,POSHOLD,ALTHOLD,STABILIZE --active-flight-only --json out/mode_compare.json --plots out/plots/mode_compare
+   ```
+
+   Treat this as a diagnostic aid: inspect `intervals_found`, `intervals_used`,
+   active-flight criteria, missing evidence, and confidence limits before
+   ranking causes.
+
+4. Plot yaw desired vs actual signals.
 
    ```bash
    python scripts/ap_log_extract.py LOG.BIN --messages ATT,RATE,PIDY,RCOU,RCO2,RCO3,MAG,XKF3,XKF4,BAT,POWR,VIBE,MODE,MSG,EV,ERR,RCIN,PARM --out out/tables --format csv
@@ -89,15 +99,15 @@ User report: "yaw misbehaves".
    python scripts/ap_log_custom_plot.py --tables out/tables --series RATE.YDes --series RATE.Y --out out/plots/yaw_rate.html
    ```
 
-4. Inspect `PIDY` and actuator evidence.
+5. Inspect `PIDY` and actuator evidence.
 
    Check `PIDY.Err`, PID terms, `PIDY.Dmod`, `PIDY.Flags`, `RATE.YOut`, mapped motor outputs, and ESC/ESCX/EDT2 if present. If yaw error rises while yaw output is high and motor outputs saturate, yaw authority is supported. If desired yaw changes first, check whether it was pilot-commanded (`RCIN`) or mode/autopilot-commanded.
 
-5. If controller evidence does not explain the issue, inspect yaw estimator and compass evidence.
+6. If controller evidence does not explain the issue, inspect yaw estimator and compass evidence.
 
    Compare heading/yaw jumps with `MAG`, `XKF3`, `XKF4`, GPS/yaw-source messages if logged, flight mode, and yaw rate. Estimator or compass hypotheses need timing or innovation/test-ratio support, not MAG data alone.
 
-6. Inspect battery, power, and vibration as supporting context.
+7. Inspect battery, power, and vibration as supporting context.
 
    Check whether voltage sag, high current, power flags, high vibration, or clipping occurred in the same window as yaw error or output saturation. If they occurred elsewhere, list them as context rather than cause.
 
