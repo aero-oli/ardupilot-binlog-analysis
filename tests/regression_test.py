@@ -14,6 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 import ap_common
 from ap_common import AnalysisError
 from ap_log_compare import metric_differences
+from ap_compass_yaw import build_compass_yaw_investigation
 from ap_log_custom_plot import make_custom_plot
 from ap_log_diagnose import diagnosis_missing
 from ap_log_diagnose import diagnose_by_class
@@ -435,6 +436,59 @@ def test_multi_instance_diagnosis_flags_degraded_gps_and_esc_instances():
     assert_true("ESC[0] RPM" in context_text and "ESC[1] RPM" in context_text, "ESC ranges should be contextualized per instance")
 
 
+def test_normal_compass_data_is_context_not_interference_finding():
+    tables = {
+        "MAG": pd.DataFrame({"TimeS": [0, 1, 2, 3], "MagX": [100, 101, 100, 99], "MagY": [20, 21, 20, 19], "MagZ": [350, 351, 350, 349]}),
+        "ATT": pd.DataFrame({"TimeS": [0, 1, 2, 3], "DesYaw": [10, 10, 10, 10], "Yaw": [10, 11, 10, 10]}),
+        "RATE": pd.DataFrame({"TimeS": [0, 1, 2, 3], "YDes": [0, 0, 0, 0], "Y": [0, 1, 0, 0], "YOut": [0.01, 0.01, 0.01, 0.01]}),
+        "CTUN": pd.DataFrame({"TimeS": [0, 1, 2, 3], "ThO": [0.3, 0.4, 0.5, 0.4]}),
+        "BAT": pd.DataFrame({"TimeS": [0, 1, 2, 3], "Curr": [5, 6, 7, 6]}),
+        "MODE": pd.DataFrame({"TimeS": [0], "Mode": ["STABILIZE"]}),
+    }
+    result = build_compass_yaw_investigation(tables)
+    evidence = "\n".join("\n".join(f.get("evidence", [])) for f in result["findings"])
+    context = "\n".join(c.get("detail", "") for c in result["context"])
+    checks = "\n".join(c.get("result", "") for c in result["checked"])
+    assert_true("mag field magnitude" in context, "normal MAG magnitude should be retained as context")
+    assert_true("magnetic interference" not in evidence.lower(), "MAG data alone should not become an interference finding")
+    assert_true("No compass/yaw-source issue" in checks or "No magnetic-field correlation" in checks, "normal compass data should be checked but not flagged")
+
+
+def test_magnetic_interference_hypothesis_requires_correlation():
+    tables = {
+        "MAG": pd.DataFrame({"TimeS": [0, 1, 2, 3, 4], "MagX": [100, 130, 160, 190, 220], "MagY": [20, 25, 30, 35, 40], "MagZ": [350, 390, 430, 470, 510]}),
+        "ATT": pd.DataFrame({"TimeS": [0, 1, 2, 3, 4], "DesYaw": [0, 0, 0, 0, 0], "Yaw": [0, 5, 12, 20, 30]}),
+        "RATE": pd.DataFrame({"TimeS": [0, 1, 2, 3, 4], "YDes": [0, 0, 0, 0, 0], "Y": [0, 1, 1, 2, 1], "YOut": [0.05, 0.05, 0.06, 0.05, 0.04]}),
+        "CTUN": pd.DataFrame({"TimeS": [0, 1, 2, 3, 4], "ThO": [0.2, 0.35, 0.5, 0.65, 0.8]}),
+        "BAT": pd.DataFrame({"TimeS": [0, 1, 2, 3, 4], "Curr": [5, 10, 15, 20, 25]}),
+        "XKF4": pd.DataFrame({"TimeS": [0, 1, 2, 3, 4], "SM": [0.2, 0.4, 1.2, 1.4, 1.6]}),
+        "MODE": pd.DataFrame({"TimeS": [0], "Mode": ["LOITER"]}),
+    }
+    result = build_compass_yaw_investigation(tables)
+    evidence = "\n".join("\n".join(f.get("evidence", [])) for f in result["findings"])
+    assert_true("mag field magnitude changed" in evidence, "magnetic field change should be evidence when correlated with load")
+    assert_true("correlates with battery current" in evidence or "correlates with throttle" in evidence, "interference hypothesis should require correlation")
+    assert_true("XKF4.SM max=1.60" in evidence, "magnetic/yaw EKF test-ratio evidence should be included")
+
+
+def test_yaw_diagnosis_separates_yaw_control_from_yaw_estimator_evidence():
+    index = {"messages": {name: {} for name in ["ATT", "RATE", "MAG", "XKF4", "CTUN", "BAT"]}, "errors": [], "events": [], "modes": []}
+    tables = {
+        "MAG": pd.DataFrame({"TimeS": [0, 1, 2, 3, 4], "MagX": [100, 130, 160, 190, 220], "MagY": [20, 25, 30, 35, 40], "MagZ": [350, 390, 430, 470, 510]}),
+        "ATT": pd.DataFrame({"TimeS": [0, 1, 2, 3, 4], "DesYaw": [0, 0, 0, 0, 0], "Yaw": [0, 5, 12, 20, 30]}),
+        "RATE": pd.DataFrame({"TimeS": [0, 1, 2, 3, 4], "YDes": [0, 0, 0, 0, 0], "Y": [0, 1, 1, 2, 1], "YOut": [0.05, 0.05, 0.06, 0.05, 0.04]}),
+        "CTUN": pd.DataFrame({"TimeS": [0, 1, 2, 3, 4], "ThO": [0.2, 0.35, 0.5, 0.65, 0.8]}),
+        "BAT": pd.DataFrame({"TimeS": [0, 1, 2, 3, 4], "Curr": [5, 10, 15, 20, 25]}),
+        "XKF4": pd.DataFrame({"TimeS": [0, 1, 2, 3, 4], "SM": [0.2, 0.4, 1.2, 1.4, 1.6]}),
+    }
+    findings, context, checked, *_ = diagnose_yaw(tables, index)
+    causes = "\n".join(f.get("possible_cause", "") for f in findings)
+    evidence = "\n".join("\n".join(f.get("evidence", [])) for f in findings)
+    assert_true("Compass/yaw-source interference hypothesis" in causes, "yaw diagnosis should include yaw-estimator evidence")
+    assert_true("Yaw authority limited" not in causes, "low RATE.Y/YOut should not be reported as yaw authority saturation")
+    assert_true("mag field magnitude correlates" in evidence, "yaw estimator evidence should retain MAG/load correlation")
+
+
 def test_escx_generates_plots_and_avoids_missing_telemetry_caveat():
     tables = {
         "ESCX": pd.DataFrame({
@@ -835,6 +889,9 @@ def main():
     test_escx_is_used_for_motor_esc_metrics_and_findings()
     test_multi_instance_gps_battery_esc_and_ekf_are_summarized_separately()
     test_multi_instance_diagnosis_flags_degraded_gps_and_esc_instances()
+    test_normal_compass_data_is_context_not_interference_finding()
+    test_magnetic_interference_hypothesis_requires_correlation()
+    test_yaw_diagnosis_separates_yaw_control_from_yaw_estimator_evidence()
     test_escx_generates_plots_and_avoids_missing_telemetry_caveat()
     test_normal_telemetry_is_context_not_findings()
     test_yaw_pid_error_below_threshold_is_checked_not_finding()

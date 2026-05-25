@@ -16,6 +16,7 @@ from ap_diag_helpers import add_motor_esc_findings, add_power_findings, vals
 from ap_diag_requirements import missing_by_tier
 from ap_symptom_map import requirement_spec
 from ap_window_select import select_analysis_window
+from ap_compass_yaw import build_compass_yaw_investigation, write_compass_yaw_plots
 
 
 def add_event_markers(fig, markers):
@@ -88,6 +89,7 @@ def make_targeted_plots_from_tables(tables, symptom_class, plots_dir, events=Fal
             fig.update_layout(title="Motor outputs during yaw diagnosis", template="plotly_white", hovermode="x unified")
             add_event_markers(fig, markers)
             p = out / "motor_outputs_during_yaw_error.html"; fig.write_html(str(p), include_plotlyjs="cdn"); generated.append(str(p))
+        generated.extend(write_compass_yaw_plots(tables, out, events=events))
     if symptom_class in {"attitude_rate_issue", "crash_or_loss_of_control", "general_investigation"}:
         if "ATT" in tables:
             att = tables["ATT"]
@@ -134,6 +136,7 @@ def make_targeted_plots_from_tables(tables, symptom_class, plots_dir, events=Fal
             fig.update_layout(title="EKF/GPS symptom plot", template="plotly_white", hovermode="x unified")
             add_event_markers(fig, markers)
             p = out / "ekf_gps_symptom.html"; fig.write_html(str(p), include_plotlyjs="cdn"); generated.append(str(p))
+            generated.extend(write_compass_yaw_plots(tables, out, events=events))
     if symptom_class in {"vibration_issue", "crash_or_loss_of_control", "general_investigation"} and "VIBE" in tables:
         vibe = tables["VIBE"]
         fig = make_subplots(rows=2, cols=1, shared_xaxes=True, subplot_titles=("Vibration", "Clipping"))
@@ -552,27 +555,10 @@ def diagnose_yaw(tables, index):
 
     add_motor_esc_findings(tables, findings, checked, context, rank=1)
 
-    # EKF/MAG yaw source
-    ekf = tables.get("XKF4") if "XKF4" in tables else tables.get("NKF4")
-    if ekf is not None:
-        evidence = []
-        for col in ["SM", "SV", "SP", "SH"]:
-            if col in ekf.columns:
-                s = numeric_series(ekf, [col])
-                if s is not None and len(s.dropna()) > 0 and float(s.max()) > 1.0:
-                    evidence.append(f"{col} max={float(s.max()):.2f}, samples >1={int((s>1.0).sum())}")
-        if evidence:
-            findings.append({
-                "rank": 2,
-                "possible_cause": "EKF innovation/test-ratio issue affecting yaw/heading reliability",
-                "severity": "safety-critical",
-                "confidence": "medium",
-                "evidence": evidence,
-                "interpretation": "EKF test ratios exceeded acceptance thresholds. If this coincides with yaw/heading symptoms, check compass/GPS/yaw source setup and interference.",
-                "recommended_checks": ["Inspect MAG and XKF3 yaw/magnetic innovations", "Check compass orientation, interference and yaw source parameters", "Compare behaviour in Stabilize/AltHold vs Loiter/Auto"],
-            })
-        else:
-            checked.append({"check": "XKF4/NKF4 test ratios", "result": "No >1 test-ratio exceedance detected by heuristic"})
+    compass_yaw = build_compass_yaw_investigation(tables)
+    findings.extend(compass_yaw["findings"])
+    context.extend(compass_yaw["context"])
+    checked.extend(compass_yaw["checked"])
 
     add_vibration_findings(tables, findings, checked, rank=4)
     add_power_findings(tables, findings, checked, context, rank=3)
@@ -596,6 +582,10 @@ def diagnose_by_class(symptom_class, tables, index):
         add_power_findings(tables, findings, checked, context, rank=4)
     elif symptom_class == "ekf_gps_issue":
         add_ekf_gps_findings(tables, index, findings, checked, rank=1)
+        compass_yaw = build_compass_yaw_investigation(tables)
+        findings.extend(compass_yaw["findings"])
+        context.extend(compass_yaw["context"])
+        checked.extend(compass_yaw["checked"])
         add_vibration_findings(tables, findings, checked, rank=2)
         add_power_findings(tables, findings, checked, context, rank=3)
         add_attitude_rate_findings(tables, findings, checked, axes=("roll", "pitch", "yaw"), rank=4)
