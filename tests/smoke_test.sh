@@ -37,6 +37,25 @@ assert evidence_reference_path.exists()
 evidence_reference = evidence_reference_path.read_text(encoding="utf-8")
 assert "references/evidence-gathering-flights.md" in skill
 assert "evidence-gathering-flights.md" in how_to
+for how_to_section in [
+    "## Worked Yaw Example",
+    "## Worked Loiter / GPS-EKF Example",
+    "## Worked Vibration / Filter / FFT Example",
+    "## Worked Motor / ESC / Thrust-Loss Example",
+    "## Worked Altitude / Throttle Example",
+]:
+    assert how_to_section in how_to, how_to_section
+for how_to_required in [
+    "python scripts/ap_log_validate.py",
+    "python scripts/ap_log_index.py",
+    "python scripts/ap_log_investigation_manifest.py",
+    "python scripts/ap_log_diagnose.py",
+    "python scripts/ap_log_extract.py",
+    "python scripts/ap_log_custom_plot.py",
+    "python scripts/ap_log_fft.py",
+    "scripts provide evidence and hypotheses",
+]:
+    assert how_to_required in how_to, how_to_required
 for symptom_class in [
     "yaw_misbehaviour",
     "attitude_rate_issue",
