@@ -6,8 +6,9 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from ap_common import (
-    AnalysisError, AXIS_MAP, clip_columns, combined_rcout_dataframe, df_duration, filter_tables_by_time,
-    first_existing, fmt, get_col, load_tables, md_table, motor_channels_from_mapping, numeric_series,
+    AnalysisError, AXIS_MAP, battery_instance_groups, clip_columns, combined_rcout_dataframe, df_duration,
+    ekf_instance_groups, esc_instance_groups, filter_tables_by_time, fmt, get_col,
+    gps_instance_groups, imu_instance_groups, load_tables, md_table, motor_channels_from_mapping, numeric_series,
     output_channel_columns, output_mapping_from_tables, parse_time_window,
     percentile, rms, summarise_numeric, write_json
 )
@@ -22,6 +23,110 @@ def series_values(s):
         return []
 
 
+def _instance_base(group):
+    out = {
+        "message": group["message"],
+        "rows": int(len(group["df"])),
+        "instance_certain": bool(group.get("instance_certain")),
+        "instance_source": group.get("instance_source"),
+    }
+    if group.get("instance") is not None:
+        out["instance"] = group.get("instance")
+    if group.get("instance_note"):
+        out["instance_note"] = group.get("instance_note")
+    return out
+
+
+def _gps_instance_summary(group):
+    df = group["df"]
+    out = _instance_base(group)
+    status = numeric_series(df, ["Status"])
+    hdop = numeric_series(df, ["HDop", "HDOP", "HAcc"])
+    nsats = numeric_series(df, ["NSats", "Sats", "Satellites"])
+    if status is not None and len(status.dropna()) > 0:
+        out["status_min"] = float(status.min())
+        out["status_samples_lt_3"] = int((status < 3).sum())
+    if hdop is not None and len(hdop.dropna()) > 0:
+        out["hdop_or_hacc_max"] = float(hdop.max())
+        out["hdop_or_hacc_mean"] = float(hdop.mean())
+        out["samples_gt_2"] = int((hdop > 2.0).sum())
+    if nsats is not None and len(nsats.dropna()) > 0:
+        out["nsats_min"] = float(nsats.min())
+        out["nsats_mean"] = float(nsats.mean())
+        out["samples_lt_12"] = int((nsats < 12).sum())
+    return out
+
+
+def _battery_instance_summary(group):
+    df = group["df"]
+    out = _instance_base(group)
+    volt = numeric_series(df, ["Volt", "VoltR", "V"])
+    curr = numeric_series(df, ["Curr", "I"])
+    currtot = numeric_series(df, ["CurrTot", "CTot", "mAh"])
+    if volt is not None and len(volt.dropna()) > 0:
+        out["min_voltage"] = float(volt.min())
+        out["mean_voltage"] = float(volt.mean())
+        out["max_voltage"] = float(volt.max())
+        out["voltage_span"] = float(volt.max() - volt.min())
+        out["voltage_span_pct_of_max"] = float((volt.max() - volt.min()) / volt.max() * 100) if float(volt.max()) > 0 else None
+    if curr is not None and len(curr.dropna()) > 0:
+        out["max_current"] = float(curr.max())
+        out["mean_current"] = float(curr.mean())
+    if currtot is not None and len(currtot.dropna()) > 0:
+        out["capacity_used_mah_max"] = float(currtot.max())
+    return out
+
+
+def _esc_instance_summary(group):
+    df = group["df"]
+    out = _instance_base(group)
+    out["numeric"] = summarise_numeric(df, ["RPM", "RawRPM", "Volt", "Curr", "Temp", "MotTemp", "Err", "Status", "ErrCnt", "Stress", "MaxStress", "inpct", "outpct", "flags", "Pwr"])
+    for name, fields in {
+        "rpm": ["RPM", "RawRPM"],
+        "current": ["Curr"],
+        "temperature": ["Temp", "MotTemp"],
+        "err": ["Err", "ErrCnt"],
+        "status": ["Status"],
+        "flags": ["flags"],
+    }.items():
+        s = numeric_series(df, fields)
+        if s is not None and len(s.dropna()) > 0:
+            out[f"{name}_min"] = float(s.min())
+            out[f"{name}_max"] = float(s.max())
+    status = numeric_series(df, ["Status"])
+    if status is not None and len(status.dropna()) > 0:
+        s_i = status.fillna(0).astype(int)
+        out["status_alert_count"] = int(((s_i & 4) != 0).sum())
+        out["status_warning_count"] = int(((s_i & 8) != 0).sum())
+        out["status_error_count"] = int(((s_i & 16) != 0).sum())
+    flags = numeric_series(df, ["flags"])
+    if flags is not None and len(flags.dropna()) > 0:
+        out["nonzero_flags_count"] = int((flags.fillna(0).astype(int) != 0).sum())
+    return out
+
+
+def _ekf_instance_summary(group):
+    df = group["df"]
+    out = _instance_base(group)
+    out["test_ratio_gt_1_counts"] = {}
+    for col in ["SV", "SP", "SH", "SM", "SVT", "errRP", "OFN", "OFE"]:
+        if col not in df.columns:
+            continue
+        s = numeric_series(df, [col])
+        if s is not None and len(s.dropna()) > 0:
+            out["test_ratio_gt_1_counts"][col] = int((s > 1.0).sum())
+            out[f"{col}_gt_1_count"] = int((s > 1.0).sum())
+            out[f"{col}_max"] = float(s.max())
+    return out
+
+
+def _imu_instance_summary(group):
+    df = group["df"]
+    out = _instance_base(group)
+    out["numeric"] = summarise_numeric(df, [c for c in ["GyrX", "GyrY", "GyrZ", "AccX", "AccY", "AccZ", "T", "Temp"] if c in df.columns])
+    return out
+
+
 def compute_metrics(tables, analysis_window=None):
     metrics = {
         "messages_present": sorted(tables.keys()),
@@ -31,6 +136,13 @@ def compute_metrics(tables, analysis_window=None):
         "tuning": {},
         "generic_messages": {},
         "confidence": {"overall": "medium", "reasons": []},
+    }
+    metrics["health"]["instances"] = {
+        "gps": {g["label"]: _gps_instance_summary(g) for g in gps_instance_groups(tables)},
+        "battery": {g["label"]: _battery_instance_summary(g) for g in battery_instance_groups(tables)},
+        "esc": {g["label"]: _esc_instance_summary(g) for g in esc_instance_groups(tables)},
+        "ekf": {g["label"]: _ekf_instance_summary(g) for g in ekf_instance_groups(tables, ("XKF4", "NKF4", "XKF3", "NKF3"))},
+        "imu": {g["label"]: _imu_instance_summary(g) for g in imu_instance_groups(tables)},
     }
 
     durations = {name: df_duration(df) for name, df in tables.items() if df_duration(df) is not None}
@@ -57,20 +169,23 @@ def compute_metrics(tables, analysis_window=None):
         metrics["confidence"]["reasons"].append("No altitude/position context found; bench-only logs and flight logs may not be distinguishable")
 
     # Battery and power
-    batt_name, bat = first_existing(tables, ["BAT", "BCL"])
-    if bat is not None:
-        volt = numeric_series(bat, ["Volt", "VoltR", "V"])
-        curr = numeric_series(bat, ["Curr", "I"])
-        currtot = numeric_series(bat, ["CurrTot", "CTot", "mAh"])
-        battery = {"message": batt_name}
-        if volt is not None and len(volt.dropna()) > 0:
-            battery["min_voltage"] = float(volt.min())
-            battery["mean_voltage"] = float(volt.mean())
-        if curr is not None and len(curr.dropna()) > 0:
-            battery["max_current"] = float(curr.max())
-            battery["mean_current"] = float(curr.mean())
-        if currtot is not None and len(currtot.dropna()) > 0:
-            battery["capacity_used_mah_max"] = float(currtot.max())
+    battery_instances = metrics["health"]["instances"]["battery"]
+    if battery_instances:
+        battery = {"instances": list(battery_instances.keys())}
+        min_voltage_values = [v.get("min_voltage") for v in battery_instances.values() if v.get("min_voltage") is not None]
+        mean_current_values = [v.get("mean_current") for v in battery_instances.values() if v.get("mean_current") is not None]
+        max_current_values = [v.get("max_current") for v in battery_instances.values() if v.get("max_current") is not None]
+        capacity_values = [v.get("capacity_used_mah_max") for v in battery_instances.values() if v.get("capacity_used_mah_max") is not None]
+        if min_voltage_values:
+            battery["min_voltage"] = float(min(min_voltage_values))
+            battery["min_voltage_instance"] = min(battery_instances, key=lambda k: battery_instances[k].get("min_voltage", math.inf))
+        if max_current_values:
+            battery["max_current"] = float(max(max_current_values))
+            battery["max_current_instance"] = max(battery_instances, key=lambda k: battery_instances[k].get("max_current", -math.inf))
+        if mean_current_values:
+            battery["mean_current_across_instances"] = float(sum(mean_current_values) / len(mean_current_values))
+        if capacity_values:
+            battery["capacity_used_mah_max"] = float(max(capacity_values))
         metrics["health"]["battery"] = battery
     if "POWR" in tables:
         powr = tables["POWR"]
@@ -79,19 +194,23 @@ def compute_metrics(tables, analysis_window=None):
             metrics["health"]["board_power"] = {"vcc_min": float(vcc.min()), "vcc_max": float(vcc.max()), "vcc_span": float(vcc.max()-vcc.min())}
 
     # GPS
-    gps_name, gps = first_existing(tables, ["GPS", "GPS2"])
-    if gps is not None:
-        hdop = numeric_series(gps, ["HDop", "HDOP", "HAcc"])
-        nsats = numeric_series(gps, ["NSats", "Sats", "Satellites"])
-        gps_m = {"message": gps_name}
-        if hdop is not None and len(hdop.dropna()) > 0:
-            gps_m["hdop_or_hacc_max"] = float(hdop.max())
-            gps_m["hdop_or_hacc_mean"] = float(hdop.mean())
-            gps_m["samples_gt_2"] = int((hdop > 2.0).sum())
-        if nsats is not None and len(nsats.dropna()) > 0:
-            gps_m["nsats_min"] = float(nsats.min())
-            gps_m["nsats_mean"] = float(nsats.mean())
-            gps_m["samples_lt_12"] = int((nsats < 12).sum())
+    gps_instances = metrics["health"]["instances"]["gps"]
+    if gps_instances:
+        gps_m = {"instances": list(gps_instances.keys())}
+        status_values = [v.get("status_min") for v in gps_instances.values() if v.get("status_min") is not None]
+        hdop_values = [v.get("hdop_or_hacc_max") for v in gps_instances.values() if v.get("hdop_or_hacc_max") is not None]
+        nsats_values = [v.get("nsats_min") for v in gps_instances.values() if v.get("nsats_min") is not None]
+        if status_values:
+            gps_m["status_min"] = float(min(status_values))
+            gps_m["status_min_instance"] = min(gps_instances, key=lambda k: gps_instances[k].get("status_min", math.inf))
+        if hdop_values:
+            gps_m["hdop_or_hacc_max"] = float(max(hdop_values))
+            gps_m["hdop_or_hacc_max_instance"] = max(gps_instances, key=lambda k: gps_instances[k].get("hdop_or_hacc_max", -math.inf))
+            gps_m["samples_gt_2"] = int(sum(v.get("samples_gt_2", 0) for v in gps_instances.values()))
+        if nsats_values:
+            gps_m["nsats_min"] = float(min(nsats_values))
+            gps_m["nsats_min_instance"] = min(gps_instances, key=lambda k: gps_instances[k].get("nsats_min", math.inf))
+            gps_m["samples_lt_12"] = int(sum(v.get("samples_lt_12", 0) for v in gps_instances.values()))
         metrics["health"]["gps"] = gps_m
 
     # EKF innovation ratios

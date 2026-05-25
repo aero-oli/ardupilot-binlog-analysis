@@ -6,8 +6,9 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from ap_common import (
-    AXIS_MAP, AnalysisError, clip_columns, combined_rcout_dataframe, ensure_dir, event_markers_from_tables,
-    filter_tables_by_time, get_col, load_tables, motor_channels_from_mapping, output_channel_columns,
+    AXIS_MAP, AnalysisError, battery_instance_groups, clip_columns, combined_rcout_dataframe, ekf_instance_groups,
+    ensure_dir, event_markers_from_tables, filter_tables_by_time, get_col, gps_instance_groups,
+    load_tables, motor_channels_from_mapping, output_channel_columns,
     output_channel_label, output_mapping_from_tables, parse_time_window, read_json, write_json
 )
 
@@ -57,9 +58,9 @@ def flight_overview(tables, out, markers=None):
     if "CTUN" in tables:
         for c in ["Alt", "BAlt", "DAlt", "ThO", "ThH"]:
             add_line(fig, tables["CTUN"], c, row=1)
-    if "BAT" in tables:
+    for group in battery_instance_groups(tables):
         for c in ["Volt", "VoltR", "Curr"]:
-            add_line(fig, tables["BAT"], c, row=2)
+            add_line(fig, group["df"], c, name=f"{group['label']} {c}", row=2)
     if "VIBE" in tables:
         for c in ["VibeX", "VibeY", "VibeZ", *clip_columns(tables["VIBE"])]:
             add_line(fig, tables["VIBE"], c, row=3)
@@ -158,12 +159,14 @@ def health_plots(tables, out, markers=None):
                 fig.add_trace(go.Scatter(x=x, y=g["flags"], name=f"{label}flags", mode="lines"), row=3, col=1)
         add_event_markers(fig, markers)
         write_fig(fig, out / "06b_escx_extended_telemetry.html", "ESCX extended telemetry")
-    if "BAT" in tables:
+    if "BAT" in tables or "BCL" in tables:
         fig = make_subplots(rows=2, cols=1, shared_xaxes=True, subplot_titles=("Voltage", "Current/capacity"))
-        for c in ["Volt", "VoltR"]:
-            add_line(fig, tables["BAT"], c, row=1)
-        for c in ["Curr", "CurrTot", "EnrgTot"]:
-            add_line(fig, tables["BAT"], c, row=2)
+        for group in battery_instance_groups(tables):
+            bat = group["df"]
+            for c in ["Volt", "VoltR"]:
+                add_line(fig, bat, c, name=f"{group['label']} {c}", row=1)
+            for c in ["Curr", "CurrTot", "EnrgTot"]:
+                add_line(fig, bat, c, name=f"{group['label']} {c}", row=2)
         add_event_markers(fig, markers)
         write_fig(fig, out / "07_battery_voltage_current_sag.html", "Battery voltage/current")
     if "VIBE" in tables:
@@ -175,17 +178,18 @@ def health_plots(tables, out, markers=None):
         add_event_markers(fig, markers)
         write_fig(fig, out / "08_vibration_vibe_imu.html", "Vibration and clipping")
     # EKF/GPS
-    if "GPS" in tables or "XKF4" in tables or "NKF4" in tables:
+    if "GPS" in tables or "GPS2" in tables or "XKF4" in tables or "NKF4" in tables:
         fig = make_subplots(rows=3, cols=1, shared_xaxes=True, subplot_titles=("GPS HDop/HAcc", "GPS satellites", "EKF ratios"))
-        if "GPS" in tables:
+        for group in gps_instance_groups(tables):
+            gps = group["df"]
             for c in ["HDop", "HDOP", "HAcc"]:
-                add_line(fig, tables["GPS"], c, row=1)
+                add_line(fig, gps, c, name=f"{group['label']} {c}", row=1)
             for c in ["NSats", "Sats"]:
-                add_line(fig, tables["GPS"], c, row=2)
-        ekf = tables["XKF4"] if "XKF4" in tables else (tables["NKF4"] if "NKF4" in tables else None)
-        if ekf is not None:
+                add_line(fig, gps, c, name=f"{group['label']} {c}", row=2)
+        for group in ekf_instance_groups(tables):
+            ekf = group["df"]
             for c in ["SV", "SP", "SH", "SM"]:
-                add_line(fig, ekf, c, row=3)
+                add_line(fig, ekf, c, name=f"{group['label']} {c}", row=3)
         add_event_markers(fig, markers)
         write_fig(fig, out / "09_ekf_gps_health.html", "GPS and EKF health")
 

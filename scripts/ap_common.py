@@ -590,6 +590,108 @@ def first_existing(tables: Dict[str, Any], names: Sequence[str]) -> Tuple[Option
             return n, tables[n]
     return None, None
 
+DEFAULT_INSTANCE_FIELDS = (
+    "Instance", "Inst", "I", "Idx", "Index", "ID", "Id",
+    "Core", "C", "CIdx", "IMU", "IMUInstance",
+)
+EKF_INSTANCE_FIELDS = ("Core", "C", "CIdx", "Instance", "I", "Idx", "Index")
+
+
+def instance_column(df: Any, candidates: Sequence[str] = DEFAULT_INSTANCE_FIELDS) -> Optional[str]:
+    return get_col(df, candidates)
+
+
+def _format_instance_value(value: Any) -> str:
+    n = safe_int(value)
+    if n is not None:
+        return str(n)
+    return str(value)
+
+
+def message_instance_groups(
+    tables: Dict[str, Any],
+    names: Sequence[str],
+    *,
+    instance_fields: Sequence[str] = DEFAULT_INSTANCE_FIELDS,
+    default_instances: Optional[Dict[str, int]] = None,
+) -> List[Dict[str, Any]]:
+    """Return per-instance table slices with conservative labels.
+
+    Logs are not fully uniform across message families, so callers get an
+    `instance_certain` flag and `instance_source` instead of assuming every
+    table has the same instance field convention.
+    """
+    groups: List[Dict[str, Any]] = []
+    default_instances = default_instances or {}
+    for name in names:
+        df = tables.get(name)
+        if df is None or len(df) == 0:
+            continue
+        inst_col = instance_column(df, instance_fields)
+        if inst_col:
+            for inst, group in df.groupby(inst_col, dropna=False):
+                if pd is not None:
+                    try:
+                        if pd.isna(inst):
+                            continue
+                    except Exception:
+                        pass
+                inst_s = _format_instance_value(inst)
+                groups.append({
+                    "message": name,
+                    "instance": inst_s,
+                    "label": f"{name}[{inst_s}]",
+                    "df": group,
+                    "instance_certain": True,
+                    "instance_source": inst_col,
+                })
+            continue
+        if name in default_instances:
+            inst_s = str(default_instances[name])
+            groups.append({
+                "message": name,
+                "instance": inst_s,
+                "label": f"{name}[{inst_s}]",
+                "df": df,
+                "instance_certain": True,
+                "instance_source": "message_name",
+            })
+        else:
+            groups.append({
+                "message": name,
+                "instance": None,
+                "label": name,
+                "df": df,
+                "instance_certain": False,
+                "instance_source": None,
+                "instance_note": f"{name} has no recognized instance field; rows are summarized together.",
+            })
+    return groups
+
+
+def gps_instance_groups(tables: Dict[str, Any]) -> List[Dict[str, Any]]:
+    groups = message_instance_groups(tables, ["GPS", "GPS2"], default_instances={"GPS": 0, "GPS2": 1})
+    for group in groups:
+        if group.get("instance") is not None:
+            group["label"] = f"GPS[{group['instance']}]"
+    return groups
+
+
+def battery_instance_groups(tables: Dict[str, Any]) -> List[Dict[str, Any]]:
+    return message_instance_groups(tables, ["BAT", "BCL"], instance_fields=("Instance", "Inst", "I", "Idx", "Index", "ID", "Id"))
+
+
+def esc_instance_groups(tables: Dict[str, Any]) -> List[Dict[str, Any]]:
+    return message_instance_groups(tables, ["ESC", "ESCX", "EDT2"], instance_fields=("Instance", "Inst", "I", "Idx", "Index", "ID", "Id", "Chan", "Channel"))
+
+
+def ekf_instance_groups(tables: Dict[str, Any], names: Sequence[str] = ("XKF4", "NKF4")) -> List[Dict[str, Any]]:
+    return message_instance_groups(tables, names, instance_fields=EKF_INSTANCE_FIELDS)
+
+
+def imu_instance_groups(tables: Dict[str, Any]) -> List[Dict[str, Any]]:
+    return message_instance_groups(tables, ["IMU", "GYR", "ACC"], instance_fields=("Instance", "Inst", "I", "Idx", "Index", "IMU", "IMUInstance"))
+
 def get_col(df: Any, candidates: Sequence[str]) -> Optional[str]:
     if df is None:
         return None

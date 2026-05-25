@@ -6,8 +6,9 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from ap_common import (
-    AnalysisError, AXIS_MAP, classify_symptom, clip_columns, collect_dataflash, combined_rcout_dataframe, ensure_dir,
-    event_markers_from_tables, filter_tables_by_time, get_col, missing_messages, motor_channels_from_mapping,
+    AnalysisError, AXIS_MAP, battery_instance_groups, classify_symptom, clip_columns, collect_dataflash,
+    combined_rcout_dataframe, ekf_instance_groups, ensure_dir, esc_instance_groups, event_markers_from_tables,
+    filter_tables_by_time, get_col, gps_instance_groups, missing_messages, motor_channels_from_mapping,
     numeric_series, output_channel_columns, output_channel_label, output_mapping_from_tables,
     parse_time_window, percentile, rms, rows_to_dataframe, safe_float, severity_rank, write_json
 )
@@ -112,22 +113,24 @@ def make_targeted_plots_from_tables(tables, symptom_class, plots_dir, events=Fal
             p = out / "rate_tracking_symptom.html"; fig.write_html(str(p), include_plotlyjs="cdn"); generated.append(str(p))
     if symptom_class in {"ekf_gps_issue", "crash_or_loss_of_control", "general_investigation"}:
         if "GPS" in tables or "GPS2" in tables or "XKF4" in tables or "NKF4" in tables:
-            gps = tables.get("GPS") if "GPS" in tables else tables.get("GPS2")
-            ekf = tables.get("XKF4") if "XKF4" in tables else tables.get("NKF4")
             fig = make_subplots(rows=3, cols=1, shared_xaxes=True, subplot_titles=("GPS quality", "GPS satellites/status", "EKF test ratios"))
-            if gps is not None:
+            for group in gps_instance_groups(tables):
+                gps = group["df"]
+                label = group["label"]
                 x = gps["TimeS"] if "TimeS" in gps.columns else list(range(len(gps)))
                 for c in ["HDop", "HDOP", "HAcc", "VAcc"]:
                     if c in gps.columns:
-                        fig.add_trace(go.Scatter(x=x, y=gps[c], mode="lines", name=c), row=1, col=1)
+                        fig.add_trace(go.Scatter(x=x, y=gps[c], mode="lines", name=f"{label} {c}"), row=1, col=1)
                 for c in ["NSats", "Sats", "Status"]:
                     if c in gps.columns:
-                        fig.add_trace(go.Scatter(x=x, y=gps[c], mode="lines", name=c), row=2, col=1)
-            if ekf is not None:
+                        fig.add_trace(go.Scatter(x=x, y=gps[c], mode="lines", name=f"{label} {c}"), row=2, col=1)
+            for group in ekf_instance_groups(tables):
+                ekf = group["df"]
+                label = group["label"]
                 x = ekf["TimeS"] if "TimeS" in ekf.columns else list(range(len(ekf)))
                 for c in ["SV", "SP", "SH", "SM", "SVT"]:
                     if c in ekf.columns:
-                        fig.add_trace(go.Scatter(x=x, y=ekf[c], mode="lines", name=c), row=3, col=1)
+                        fig.add_trace(go.Scatter(x=x, y=ekf[c], mode="lines", name=f"{label} {c}"), row=3, col=1)
             fig.update_layout(title="EKF/GPS symptom plot", template="plotly_white", hovermode="x unified")
             add_event_markers(fig, markers)
             p = out / "ekf_gps_symptom.html"; fig.write_html(str(p), include_plotlyjs="cdn"); generated.append(str(p))
@@ -146,11 +149,11 @@ def make_targeted_plots_from_tables(tables, symptom_class, plots_dir, events=Fal
     if symptom_class in {"battery_power_issue", "crash_or_loss_of_control", "general_investigation"}:
         if "BAT" in tables or "POWR" in tables:
             fig = make_subplots(rows=2, cols=1, shared_xaxes=True, subplot_titles=("Battery", "Board power"))
-            if "BAT" in tables:
-                bat = tables["BAT"]; x = bat["TimeS"] if "TimeS" in bat.columns else list(range(len(bat)))
+            for group in battery_instance_groups(tables):
+                bat = group["df"]; x = bat["TimeS"] if "TimeS" in bat.columns else list(range(len(bat)))
                 for c in ["Volt", "VoltR", "Curr", "CurrTot"]:
                     if c in bat.columns:
-                        fig.add_trace(go.Scatter(x=x, y=bat[c], mode="lines", name=c), row=1, col=1)
+                        fig.add_trace(go.Scatter(x=x, y=bat[c], mode="lines", name=f"{group['label']} {c}"), row=1, col=1)
             if "POWR" in tables:
                 powr = tables["POWR"]; x = powr["TimeS"] if "TimeS" in powr.columns else list(range(len(powr)))
                 for c in ["Vcc", "VCC", "Flags", "AccFlags"]:
@@ -174,24 +177,24 @@ def make_targeted_plots_from_tables(tables, symptom_class, plots_dir, events=Fal
             p = out / "motor_outputs_symptom.html"; fig.write_html(str(p), include_plotlyjs="cdn"); generated.append(str(p))
         if "ESC" in tables or "ESCX" in tables or "EDT2" in tables:
             fig = make_subplots(rows=4, cols=1, shared_xaxes=True, subplot_titles=("ESC", "ESCX duty/power", "EDT2 status", "EDT2 stress"))
-            if "ESC" in tables:
-                esc = tables["ESC"]; x = esc["TimeS"] if "TimeS" in esc.columns else list(range(len(esc)))
-                for c in ["RPM", "RawRPM", "Curr", "Temp", "MotTemp", "Err"]:
-                    if c in esc.columns:
-                        fig.add_trace(go.Scatter(x=x, y=esc[c], mode="lines", name=c), row=1, col=1)
-            if "ESCX" in tables:
-                escx = tables["ESCX"]; x = escx["TimeS"] if "TimeS" in escx.columns else list(range(len(escx)))
-                for c in ["inpct", "outpct", "Pwr", "flags"]:
-                    if c in escx.columns:
-                        fig.add_trace(go.Scatter(x=x, y=escx[c], mode="lines", name=f"ESCX {c}"), row=2, col=1)
-            if "EDT2" in tables:
-                edt2 = tables["EDT2"]; x = edt2["TimeS"] if "TimeS" in edt2.columns else list(range(len(edt2)))
-                for c in ["Status", "ErrCnt"]:
-                    if c in edt2.columns:
-                        fig.add_trace(go.Scatter(x=x, y=edt2[c], mode="lines", name=c), row=3, col=1)
-                for c in ["Stress", "MaxStress"]:
-                    if c in edt2.columns:
-                        fig.add_trace(go.Scatter(x=x, y=edt2[c], mode="lines", name=c), row=4, col=1)
+            for group in esc_instance_groups(tables):
+                esc = group["df"]; x = esc["TimeS"] if "TimeS" in esc.columns else list(range(len(esc)))
+                label = group["label"]
+                if group["message"] == "ESC":
+                    for c in ["RPM", "RawRPM", "Curr", "Temp", "MotTemp", "Err"]:
+                        if c in esc.columns:
+                            fig.add_trace(go.Scatter(x=x, y=esc[c], mode="lines", name=f"{label} {c}"), row=1, col=1)
+                elif group["message"] == "ESCX":
+                    for c in ["inpct", "outpct", "Pwr", "flags"]:
+                        if c in esc.columns:
+                            fig.add_trace(go.Scatter(x=x, y=esc[c], mode="lines", name=f"{label} {c}"), row=2, col=1)
+                elif group["message"] == "EDT2":
+                    for c in ["Status", "ErrCnt"]:
+                        if c in esc.columns:
+                            fig.add_trace(go.Scatter(x=x, y=esc[c], mode="lines", name=f"{label} {c}"), row=3, col=1)
+                    for c in ["Stress", "MaxStress"]:
+                        if c in esc.columns:
+                            fig.add_trace(go.Scatter(x=x, y=esc[c], mode="lines", name=f"{label} {c}"), row=4, col=1)
             fig.update_layout(title="ESC/ESCX/EDT2 symptom plot", template="plotly_white", hovermode="x unified")
             add_event_markers(fig, markers)
             p = out / "esc_escx_edt2_symptom.html"; fig.write_html(str(p), include_plotlyjs="cdn"); generated.append(str(p))
@@ -307,18 +310,19 @@ def add_vibration_findings(tables, findings, checked, rank=4):
 
 def add_ekf_gps_findings(tables, index, findings, checked, rank=2):
     evidence = []
-    gps_name = "GPS" if "GPS" in tables else ("GPS2" if "GPS2" in tables else None)
-    if gps_name:
-        gps = tables[gps_name]
+    gps_groups = gps_instance_groups(tables)
+    for group in gps_groups:
+        gps = group["df"]
+        label = group["label"] if len(gps_groups) > 1 else group["message"]
         status = numeric_series(gps, ["Status"])
         if status is not None and len(status.dropna()) > 0 and float(status.min()) < 3:
-            evidence.append(f"{gps_name}.Status minimum={float(status.min()):.0f} (<3D fix)")
+            evidence.append(f"{label}.Status minimum={float(status.min()):.0f} (<3D fix)")
         nsats = numeric_series(gps, ["NSats", "Sats"])
         if nsats is not None and len(nsats.dropna()) > 0 and float(nsats.min()) < 12:
-            evidence.append(f"{gps_name} satellites minimum={float(nsats.min()):.0f}")
+            evidence.append(f"{label} satellites minimum={float(nsats.min()):.0f}")
         hdop = numeric_series(gps, ["HDop", "HDOP"])
         if hdop is not None and len(hdop.dropna()) > 0 and float(hdop.max()) > 2.0:
-            evidence.append(f"{gps_name}.HDop max={float(hdop.max()):.2f}")
+            evidence.append(f"{label}.HDop max={float(hdop.max()):.2f}")
     gpa = tables.get("GPA")
     if gpa is not None:
         for col in ["HAcc", "VAcc", "SAcc", "YAcc"]:
@@ -326,13 +330,15 @@ def add_ekf_gps_findings(tables, index, findings, checked, rank=2):
                 s = numeric_series(gpa, [col])
                 if s is not None and len(s.dropna()) > 0:
                     evidence.append(f"GPA.{col}: min={float(s.min()):.2f}, max={float(s.max()):.2f}")
-    ekf = tables.get("XKF4") if "XKF4" in tables else tables.get("NKF4")
-    if ekf is not None:
+    for group in ekf_instance_groups(tables):
+        ekf = group["df"]
+        label = group["label"] if group.get("instance_certain") else ""
         for col in ["SV", "SP", "SH", "SM", "SVT"]:
             if col in ekf.columns:
                 s = numeric_series(ekf, [col])
                 if s is not None and len(s.dropna()) > 0 and float(s.max()) > 1.0:
-                    evidence.append(f"{col} max={float(s.max()):.2f}, samples >1={int((s > 1.0).sum())}")
+                    prefix = f"{label}." if label else ""
+                    evidence.append(f"{prefix}{col} max={float(s.max()):.2f}, samples >1={int((s > 1.0).sum())}")
     if index.get("errors"):
         ekf_errors = [e for e in index["errors"] if str(e.get("subsys")) in {"7", "11", "16", "17", "24", "31"}]
         if ekf_errors:

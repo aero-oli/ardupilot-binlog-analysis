@@ -398,6 +398,43 @@ def test_escx_is_used_for_motor_esc_metrics_and_findings():
     assert_true("ESC" not in missing_optional, "ESCX should satisfy ESC-status confirmation for motor diagnostics")
 
 
+def test_multi_instance_gps_battery_esc_and_ekf_are_summarized_separately():
+    tables = {
+        "GPS": pd.DataFrame({"TimeS": [0.0, 1.0], "Status": [3, 3], "NSats": [15, 14], "HDop": [0.8, 0.9]}),
+        "GPS2": pd.DataFrame({"TimeS": [0.0, 1.0], "Status": [2, 2], "NSats": [8, 7], "HDop": [2.5, 2.7]}),
+        "BAT": pd.DataFrame({"TimeS": [0.0, 1.0, 0.0, 1.0], "Instance": [0, 0, 1, 1], "Volt": [16.8, 16.6, 14.8, 13.9], "Curr": [5, 6, 8, 9]}),
+        "ESC": pd.DataFrame({"TimeS": [0.0, 1.0, 0.0, 1.0], "Instance": [0, 0, 1, 1], "RPM": [4000, 4100, 2500, 2400], "Curr": [4, 4.2, 7, 8], "Err": [0, 0, 0, 2]}),
+        "XKF4": pd.DataFrame({"TimeS": [0.0, 1.0, 0.0, 1.0], "C": [0, 0, 1, 1], "SV": [0.2, 0.3, 1.4, 1.5], "SM": [0.3, 0.4, 1.2, 1.3]}),
+    }
+    metrics = compute_metrics(tables)
+    instances = metrics["health"]["instances"]
+    assert_true("GPS[0]" in instances["gps"] and "GPS[1]" in instances["gps"], "GPS and GPS2 should be separate instances")
+    assert_true(instances["gps"]["GPS[1]"]["status_min"] == 2.0, "GPS2 degraded status should be retained")
+    assert_true("BAT[0]" in instances["battery"] and "BAT[1]" in instances["battery"], "BAT instances should be separate")
+    assert_true(instances["battery"]["BAT[1]"]["min_voltage"] == 13.9, "battery instance sag should be retained")
+    assert_true(instances["esc"]["ESC[1]"]["err_max"] == 2.0, "ESC instance error should be retained")
+    assert_true(instances["ekf"]["XKF4[1]"]["SV_gt_1_count"] == 2, "EKF core instance should retain test-ratio exceedances")
+
+
+def test_multi_instance_diagnosis_flags_degraded_gps_and_esc_instances():
+    index = {"messages": {"GPS": {}, "GPS2": {}, "ESC": {}, "RATE": {}, "RCOU": {}}, "errors": [], "events": [], "modes": []}
+    tables = {
+        "GPS": pd.DataFrame({"TimeS": [0.0, 1.0], "Status": [3, 3], "NSats": [15, 14], "HDop": [0.8, 0.9]}),
+        "GPS2": pd.DataFrame({"TimeS": [0.0, 1.0], "Status": [2, 2], "NSats": [8, 7], "HDop": [2.5, 2.7]}),
+        "ESC": pd.DataFrame({"TimeS": [0.0, 1.0, 0.0, 1.0], "Instance": [0, 0, 1, 1], "RPM": [4000, 4100, 2500, 2400], "Curr": [4, 4.2, 7, 8], "Err": [0, 0, 0, 2]}),
+    }
+    findings, context, checked, _missing_required, _missing_strongly, _missing_optional = diagnose_by_class("ekf_gps_issue", tables, index)
+    evidence = "\n".join("\n".join(f.get("evidence", [])) for f in findings)
+    assert_true("GPS[1].Status minimum=2" in evidence, "degraded second GPS should be diagnostic evidence")
+    assert_true("GPS[0]" not in evidence, "healthy first GPS should not be collapsed into degraded evidence")
+
+    findings, context, checked, _missing_required, _missing_strongly, _missing_optional = diagnose_by_class("motor_esc_issue", tables, index)
+    evidence = "\n".join("\n".join(f.get("evidence", [])) for f in findings)
+    context_text = "\n".join(c.get("detail", "") for c in context)
+    assert_true("ESC[1].Err max=2.00" in evidence, "ESC instance error should be diagnostic evidence")
+    assert_true("ESC[0] RPM" in context_text and "ESC[1] RPM" in context_text, "ESC ranges should be contextualized per instance")
+
+
 def test_escx_generates_plots_and_avoids_missing_telemetry_caveat():
     tables = {
         "ESCX": pd.DataFrame({
@@ -796,6 +833,8 @@ def main():
     test_malformed_symptom_yaml_fails_clearly()
     test_edt2_status_is_used_for_motor_esc_findings()
     test_escx_is_used_for_motor_esc_metrics_and_findings()
+    test_multi_instance_gps_battery_esc_and_ekf_are_summarized_separately()
+    test_multi_instance_diagnosis_flags_degraded_gps_and_esc_instances()
     test_escx_generates_plots_and_avoids_missing_telemetry_caveat()
     test_normal_telemetry_is_context_not_findings()
     test_yaw_pid_error_below_threshold_is_checked_not_finding()

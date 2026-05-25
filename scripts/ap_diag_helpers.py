@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from ap_common import (
+    battery_instance_groups,
     combined_rcout_dataframe,
+    esc_instance_groups,
     get_col,
     motor_channels_from_mapping,
     numeric_series,
@@ -57,13 +59,17 @@ def add_motor_esc_findings(tables, findings, checked, context=None, rank=1):
             low_pct = float((s <= 1100).mean() * 100)
             if high_pct > 1 or low_pct > 1:
                 evidence.append(f"RCOUT.{output_channel_label(c, mapping)}: {high_pct:.1f}% >=1900us, {low_pct:.1f}% <=1100us")
-    if "ESC" in tables:
-        esc = tables["ESC"]
+    for group in esc_instance_groups(tables):
+        msg = group["message"]
+        esc = group["df"]
+        label = group["label"]
+        if group.get("instance_note"):
+            _add_context(context, msg, group["instance_note"])
         err_col = get_col(esc, ["Err"])
         if err_col:
             err = numeric_series(esc, [err_col])
             if err is not None and len(err.dropna()) > 0 and float(err.max()) > 0:
-                evidence.append(f"ESC.{err_col} max={float(err.max()):.2f}")
+                evidence.append(f"{label}.{err_col} max={float(err.max()):.2f}")
         status_col = get_col(esc, ["Status"])
         if status_col:
             status = numeric_series(esc, [status_col])
@@ -73,44 +79,27 @@ def add_motor_esc_findings(tables, findings, checked, context=None, rank=1):
                 warning = int(((s_i & 8) != 0).sum())
                 error = int(((s_i & 16) != 0).sum())
                 if alert or warning or error:
-                    evidence.append(f"ESC status alert/warning/error counts={alert}/{warning}/{error}")
-        for col in ["RPM", "RawRPM", "Curr", "Temp", "MotTemp"]:
+                    detail = f"{label} status alert/warning/error counts={alert}/{warning}/{error}"
+                    if msg != label:
+                        detail = f"{msg} status alert/warning/error counts={alert}/{warning}/{error} ({label})"
+                    evidence.append(detail)
+        for col in ["RPM", "RawRPM", "Curr", "Temp", "MotTemp", "Stress", "MaxStress", "ErrCnt", "inpct", "outpct", "Pwr"]:
             if col in esc.columns:
                 s = numeric_series(esc, [col])
                 if s is not None and len(s.dropna()) > 0:
-                    _add_context(context, "ESC", f"ESC {col}: min={float(s.min()):.2f}, max={float(s.max()):.2f}")
-    if "EDT2" in tables:
-        edt2 = tables["EDT2"]
-        status_col = get_col(edt2, ["Status"])
-        if status_col:
-            status = numeric_series(edt2, [status_col])
-            if status is not None and len(status.dropna()) > 0:
-                s_i = status.fillna(0).astype(int)
-                alert = int(((s_i & 4) != 0).sum())
-                warning = int(((s_i & 8) != 0).sum())
-                error = int(((s_i & 16) != 0).sum())
-                if alert or warning or error:
-                    evidence.append(f"EDT2 status alert/warning/error counts={alert}/{warning}/{error}")
-        for col in ["Stress", "MaxStress", "ErrCnt"]:
-            if col in edt2.columns:
-                s = numeric_series(edt2, [col])
-                if s is not None and len(s.dropna()) > 0:
-                    if col == "ErrCnt" and float(s.max()) > 0:
-                        evidence.append(f"EDT2 {col}: min={float(s.min()):.2f}, max={float(s.max()):.2f}")
+                    if msg == "EDT2" and col == "ErrCnt" and float(s.max()) > 0:
+                        evidence.append(f"{msg} {col}: min={float(s.min()):.2f}, max={float(s.max()):.2f} ({label})")
                     else:
-                        _add_context(context, "EDT2", f"EDT2 {col}: min={float(s.min()):.2f}, max={float(s.max()):.2f}")
-    if "ESCX" in tables:
-        escx = tables["ESCX"]
-        flags = numeric_series(escx, ["flags"])
+                        prefix = label if msg == "ESC" else (msg if msg != label else label)
+                        suffix = f" ({label})" if msg != label else ""
+                        _add_context(context, label, f"{prefix} {col}: min={float(s.min()):.2f}, max={float(s.max()):.2f}{suffix}")
+                        if msg == "ESC" and msg != label:
+                            _add_context(context, msg, f"{msg} {col}: min={float(s.min()):.2f}, max={float(s.max()):.2f} ({label})")
+        flags = numeric_series(esc, ["flags"])
         if flags is not None and len(flags.dropna()) > 0:
             count = int((flags.fillna(0).astype(int) != 0).sum())
             if count:
-                evidence.append(f"ESCX flags nonzero samples={count}")
-        for col in ["inpct", "outpct", "Pwr"]:
-            if col in escx.columns:
-                s = numeric_series(escx, [col])
-                if s is not None and len(s.dropna()) > 0:
-                    _add_context(context, "ESCX", f"ESCX {col}: min={float(s.min()):.2f}, max={float(s.max()):.2f}")
+                evidence.append(f"{msg} flags nonzero samples={count} ({label})")
     if evidence:
         _add_finding(
             findings, rank, "Motor output saturation or ESC telemetry abnormality", "safety-critical", "high" if any("RCOUT" in e or "status" in e for e in evidence) else "medium",
@@ -126,17 +115,24 @@ def add_power_findings(tables, findings, checked, context=None, rank=3):
     if context is None:
         context = []
     evidence = []
-    if "BAT" in tables:
-        bat = tables["BAT"]
+    for group in battery_instance_groups(tables):
+        bat = group["df"]
+        label = group["label"]
+        if group.get("instance_note"):
+            _add_context(context, group["message"], group["instance_note"])
         volt = numeric_series(bat, ["Volt", "VoltR", "V"])
         curr = numeric_series(bat, ["Curr", "I"])
         if volt is not None and len(volt.dropna()) > 0:
             vmin, vmax = float(volt.min()), float(volt.max())
-            _add_context(context, "BAT", f"BAT voltage min={vmin:.2f} V, max={vmax:.2f} V")
+            source = group["message"] if not group.get("instance_certain") else label
+            prefix = group["message"] if not group.get("instance_certain") else label
+            _add_context(context, source, f"{prefix} voltage min={vmin:.2f} V, max={vmax:.2f} V")
             if vmax > 0 and (vmax - vmin) / vmax > 0.15:
-                evidence.append(f"BAT voltage span is {(vmax - vmin) / vmax * 100:.1f}% of max")
+                evidence.append(f"{prefix} voltage span is {(vmax - vmin) / vmax * 100:.1f}% of max")
         if curr is not None and len(curr.dropna()) > 0:
-            _add_context(context, "BAT", f"BAT current max={float(curr.max()):.1f} A")
+            source = group["message"] if not group.get("instance_certain") else label
+            prefix = group["message"] if not group.get("instance_certain") else label
+            _add_context(context, source, f"{prefix} current max={float(curr.max()):.1f} A")
     if "POWR" in tables:
         powr = tables["POWR"]
         vcc = numeric_series(powr, ["Vcc", "VCC"])
