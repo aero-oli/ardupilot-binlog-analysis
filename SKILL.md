@@ -201,6 +201,7 @@ Required yaw evidence sources, if present:
 - Use `GPS` and `XKF*` for estimator/navigation issues.
 - Use `BAT` and `POWR` for battery and board power issues.
 - Use `RCIN` with `RCMAP_ROLL`, `RCMAP_PITCH`, `RCMAP_THROTTLE`, and `RCMAP_YAW` when present to distinguish pilot-commanded motion from autopilot/mode, estimator, mechanical, or uncommanded behaviour. If RC mapping parameters are missing, state that default channel order was assumed.
+- Use `parameter_context` from manifest/diagnosis as investigation context only. Treat missing relevant parameters separately from values that are logged as zero or matching defaults, and do not turn parameter context into automatic tuning advice.
 - Use `MODE`, `MSG`, `EV`, `ERR`, `ARM` to build the timeline.
 - When data conflicts, present competing hypotheses and explain what would confirm/refute them.
 

@@ -17,6 +17,7 @@ from ap_diag_requirements import missing_by_tier
 from ap_symptom_map import requirement_spec
 from ap_window_select import select_analysis_window
 from ap_compass_yaw import build_compass_yaw_investigation, write_compass_yaw_plots
+from ap_parameters import select_relevant_parameters
 from ap_rcin import build_command_response_investigation, rcin_channel_col, rc_channel_mapping, summarize_rcin
 from ap_vibration import add_vibration_assessment_findings, build_vibration_assessment
 
@@ -765,6 +766,7 @@ def main() -> int:
             analysis_window=selection,
         )
         rcin_summary = summarize_rcin(tables, index)
+        parameter_context = select_relevant_parameters(symptom_class, index=index, tables=full_tables)
         if symptom_class == "yaw_misbehaviour":
             findings, context, checked, missing_required, missing_strongly, missing_optional = diagnose_yaw(tables, index, vibration_assessment=vibration_assessment)
         else:
@@ -793,6 +795,7 @@ def main() -> int:
             "findings": findings,
             "context": context,
             "checked_but_not_supported": checked,
+            "parameter_context": parameter_context,
             "rcin_command_context": rcin_summary,
             "vibration_context": vibration_assessment.get("vibration_context", {}),
             "vibration_relevance_to_symptom": vibration_assessment.get("vibration_relevance_to_symptom", {}),

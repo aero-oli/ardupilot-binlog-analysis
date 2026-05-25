@@ -7,6 +7,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from ap_common import AnalysisError, classify_symptom, collect_dataflash, missing_messages, write_json
+from ap_parameters import select_relevant_parameters
 from ap_symptom_map import requirement_spec
 
 
@@ -160,6 +161,7 @@ def build_manifest_from_index(index, symptom_text, log_path):
         "symptom_class": symptom_class,
         "warnings": warnings,
         "logging_health": logging_health,
+        "parameter_context": select_relevant_parameters(symptom_class, index=index),
         "available_evidence": _available_evidence(index),
         "missing_evidence": missing,
         "recommended_next_commands": _recommended_commands(log_path, symptom_text, spec, present, missing),

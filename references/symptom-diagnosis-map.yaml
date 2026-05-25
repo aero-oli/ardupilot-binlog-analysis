@@ -20,6 +20,7 @@ symptom_classes:
     relevant_parameters:
       - FRAME_CLASS
       - FRAME_TYPE
+      - SERVO*_FUNCTION
       - MOT_SPIN_ARM
       - MOT_SPIN_MIN
       - MOT_THST_EXPO
@@ -31,6 +32,7 @@ symptom_classes:
       - ATC_ACCEL_Y_MAX
       - INS_HNTCH_ENABLE
       - INS_LOG_BAT_MASK
+      - INS_GYRO_FILTER
       - COMPASS_USE
       - COMPASS_ORIENT
       - EK3_SRC1_YAW
@@ -53,7 +55,23 @@ symptom_classes:
     required_messages: [ATT, RATE]
     strongly_recommended_messages: [PIDR, PIDP, RCOU, MODE]
     optional_context_messages: [PIDY, MSG, EV, ERR, RCIN, VIBE, IMU, BAT, POWR, ESC, ESCX, EDT2, XKF4]
-    relevant_parameters: [ATC_RAT_RLL_P, ATC_RAT_RLL_I, ATC_RAT_RLL_D, ATC_RAT_PIT_P, ATC_RAT_PIT_I, ATC_RAT_PIT_D, INS_HNTCH_ENABLE]
+    relevant_parameters:
+      - FRAME_CLASS
+      - FRAME_TYPE
+      - ATC_RAT_RLL_P
+      - ATC_RAT_RLL_I
+      - ATC_RAT_RLL_D
+      - ATC_RAT_RLL_FF
+      - ATC_RAT_PIT_P
+      - ATC_RAT_PIT_I
+      - ATC_RAT_PIT_D
+      - ATC_RAT_PIT_FF
+      - ATC_ANG_RLL_P
+      - ATC_ANG_PIT_P
+      - ATC_ACCEL_R_MAX
+      - ATC_ACCEL_P_MAX
+      - INS_HNTCH_ENABLE
+      - INS_GYRO_FILTER
     recommended_plot_groups: [rcin_roll_attitude, rcin_pitch_attitude, attitude_rate, pid_terms, motor_outputs, vibration, power]
     diagnostic_questions:
       - Is the issue on roll, pitch, yaw, or multiple axes?
@@ -70,7 +88,22 @@ symptom_classes:
     required_messages: [GPS]
     strongly_recommended_messages: [XKF1, XKF3, XKF4, MODE]
     optional_context_messages: [MSG, EV, ERR, GPA, GPS2, MAG, ATT, RATE, VIBE, BAT, POWR]
-    relevant_parameters: [GPS_TYPE, GPS_AUTO_CONFIG, EK3_SRC1_POSXY, EK3_SRC1_VELXY, EK3_SRC1_YAW, COMPASS_USE, COMPASS_ORIENT]
+    relevant_parameters:
+      - GPS_TYPE
+      - GPS_TYPE2
+      - GPS_AUTO_CONFIG
+      - GPS_AUTO_SWITCH
+      - EK3_SRC1_POSXY
+      - EK3_SRC1_VELXY
+      - EK3_SRC1_YAW
+      - EK3_OGN_HGT_MASK
+      - EK3_PRIMARY
+      - COMPASS_USE
+      - COMPASS_USE2
+      - COMPASS_USE3
+      - COMPASS_ORIENT
+      - COMPASS_ORIENT2
+      - COMPASS_ORIENT3
     recommended_plot_groups: [gps_quality, ekf_innovations, mode_timeline, mag, vibration, power]
     diagnostic_questions:
       - Did GPS fix quality, satellite count, HDOP, or EKF test ratios degrade?
@@ -87,7 +120,17 @@ symptom_classes:
     required_messages: []
     strongly_recommended_messages: [RCOU, RATE]
     optional_context_messages: [ESC, ESCX, EDT2, PIDR, PIDP, PIDY, BAT, POWR, VIBE, MSG, EV, ERR]
-    relevant_parameters: [FRAME_CLASS, FRAME_TYPE, SERVO1_FUNCTION, SERVO2_FUNCTION, SERVO3_FUNCTION, SERVO4_FUNCTION, MOT_PWM_TYPE, MOT_SPIN_MIN, MOT_THST_EXPO]
+    relevant_parameters:
+      - FRAME_CLASS
+      - FRAME_TYPE
+      - SERVO*_FUNCTION
+      - MOT_PWM_TYPE
+      - MOT_SPIN_ARM
+      - MOT_SPIN_MIN
+      - MOT_THST_EXPO
+      - MOT_SAFE_DISARM
+      - MOT_BAT_VOLT_MAX
+      - MOT_BAT_VOLT_MIN
     recommended_plot_groups: [motor_outputs, esc_telemetry, attitude_rate, power, vibration]
     diagnostic_questions:
       - Are motor outputs saturating or asymmetric?
@@ -104,7 +147,17 @@ symptom_classes:
     required_messages: [VIBE]
     strongly_recommended_messages: [RATE]
     optional_context_messages: [PIDR, PIDP, PIDY, IMU, GYR, ACC, ISBH, ISBD, BAT, POWR]
-    relevant_parameters: [INS_HNTCH_ENABLE, INS_HNTCH_FREQ, INS_LOG_BAT_MASK, INS_GYRO_FILTER]
+    relevant_parameters:
+      - INS_HNTCH_ENABLE
+      - INS_HNTCH_FREQ
+      - INS_HNTCH_REF
+      - INS_HNTCH_ATT
+      - INS_HNTCH_BW
+      - INS_HNTCH_MODE
+      - INS_LOG_BAT_MASK
+      - INS_GYRO_FILTER
+      - INS_FAST_SAMPLE
+      - LOG_BITMASK
     recommended_plot_groups: [vibration, fft, rate_tracking, pid_terms]
     diagnostic_questions:
       - Are VIBE levels high or are clipping counters increasing?
@@ -121,7 +174,19 @@ symptom_classes:
     required_messages: [BAT]
     strongly_recommended_messages: [POWR, RCOU]
     optional_context_messages: [CTUN, RATE, RCIN, ESC, ESCX, EDT2, ERR, EV, MSG, VIBE]
-    relevant_parameters: [BATT_MONITOR, BATT_ARM_VOLT, BATT_LOW_VOLT, BATT_CRT_VOLT, MOT_BAT_VOLT_MAX, MOT_BAT_VOLT_MIN]
+    relevant_parameters:
+      - BATT_MONITOR
+      - BATT2_MONITOR
+      - BATT_ARM_VOLT
+      - BATT_LOW_VOLT
+      - BATT_CRT_VOLT
+      - BATT_LOW_MAH
+      - BATT_CRT_MAH
+      - BATT_FS_LOW_ACT
+      - BATT_FS_CRT_ACT
+      - MOT_BAT_VOLT_MAX
+      - MOT_BAT_VOLT_MIN
+      - MOT_THST_EXPO
     recommended_plot_groups: [rcin_throttle_power, power, motor_outputs, altitude_throttle, esc_telemetry]
     diagnostic_questions:
       - Does voltage sag coincide with high current or throttle demand?
@@ -138,7 +203,16 @@ symptom_classes:
     required_messages: []
     strongly_recommended_messages: [ATT, RATE, RCOU, MODE]
     optional_context_messages: [EV, ERR, MSG, BAT, GPS, XKF4, VIBE, PIDR, PIDP, PIDY, ESC, ESCX, EDT2, RCIN, CTUN, POWR, MAG]
-    relevant_parameters: [FRAME_CLASS, FRAME_TYPE, FS_THR_ENABLE, FS_BATT_ENABLE, ARMING_CHECK]
+    relevant_parameters:
+      - FRAME_CLASS
+      - FRAME_TYPE
+      - SERVO*_FUNCTION
+      - FS_THR_ENABLE
+      - FS_BATT_ENABLE
+      - FS_EKF_ACTION
+      - ARMING_CHECK
+      - BATT_MONITOR
+      - EK3_SRC1_YAW
     recommended_plot_groups: [mode_timeline, rcin_roll_attitude, rcin_pitch_attitude, rcin_throttle_power, attitude_rate, motor_outputs, power, ekf_gps, vibration, esc_telemetry]
     diagnostic_questions:
       - What changed immediately before loss of control?
@@ -156,7 +230,19 @@ symptom_classes:
     required_messages: []
     strongly_recommended_messages: [CTUN]
     optional_context_messages: [ATT, RATE, BAT, POWR, VIBE, BARO, RNGF, GPS, XKF4, ESC, ESCX, EDT2]
-    relevant_parameters: [PSC_ACCZ_P, PSC_ACCZ_I, PSC_ACCZ_D, MOT_THST_EXPO, PILOT_THR_BHV, RNGFND1_TYPE]
+    relevant_parameters:
+      - PSC_ACCZ_P
+      - PSC_ACCZ_I
+      - PSC_ACCZ_D
+      - PSC_VELZ_P
+      - PSC_VELZ_I
+      - PSC_POSZ_P
+      - MOT_THST_EXPO
+      - MOT_SPIN_MIN
+      - PILOT_THR_BHV
+      - PILOT_SPEED_UP
+      - PILOT_SPEED_DN
+      - RNGFND1_TYPE
     recommended_plot_groups: [altitude_throttle, power, vibration, ekf_gps, motor_outputs]
     diagnostic_questions:
       - Does altitude target-vs-actual error exceed the threshold?

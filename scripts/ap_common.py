@@ -249,6 +249,7 @@ class StreamingIndexBuilder:
         self.path = path
         self.messages: Dict[str, Dict[str, Any]] = {}
         self.parameters: Dict[str, Any] = {}
+        self.parameter_defaults: Dict[str, Any] = {}
         self.firmware_messages: List[str] = []
         self.modes: List[Dict[str, Any]] = []
         self.events: List[Dict[str, Any]] = []
@@ -290,6 +291,8 @@ class StreamingIndexBuilder:
             val = row.get("Value", row.get("value"))
             if name:
                 self.parameters[name] = val
+                if "Default" in row:
+                    self.parameter_defaults[name] = row.get("Default")
         elif typ == "MSG" and len(self.firmware_messages) < 200:
             msg_text = str(row.get("Message") or row.get("Msg") or row.get("message") or "").strip()
             if msg_text:
@@ -383,6 +386,7 @@ class StreamingIndexBuilder:
             "messages": self.messages,
             "message_names": sorted(self.messages.keys()),
             "parameters": self.parameters,
+            "parameter_defaults": self.parameter_defaults,
             "parameter_count": len(self.parameters),
             "firmware_messages": self.firmware_messages[:100],
             "modes": self.modes[:500],

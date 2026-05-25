@@ -25,6 +25,7 @@ from ap_log_investigation_manifest import build_manifest_from_index
 from ap_log_metrics import compute_metrics
 from ap_log_plots import health_plots
 from ap_log_plots import main as plots_main
+from ap_parameters import select_relevant_parameters
 from ap_rcin import build_command_response_investigation, rc_channel_mapping, summarize_rcin
 from ap_log_validate import module_availability
 from ap_symptom_map import load_symptom_map
@@ -299,6 +300,58 @@ def test_motor_output_metrics_include_rco2_and_rco3_channels():
     assert_true(motor_outputs["motor_channels"] == ["C15", "C19"], "mapped high-numbered motor outputs should be motor channels")
     assert_true(motor_outputs["saturation"]["C15"]["pct_high_ge_1900"] == 100.0, "RCO2 saturation should be summarized")
     assert_true(motor_outputs["saturation"]["C19"]["pct_low_le_1100"] == 100.0, "RCO3 saturation should be summarized")
+
+
+def test_parameter_context_uses_yaml_selectors_and_servo_wildcards():
+    index = {
+        "parameters": {
+            "FRAME_CLASS": 1,
+            "SERVO1_FUNCTION": 33,
+            "SERVO2_FUNCTION": 34,
+            "MOT_SPIN_MIN": 0.12,
+            "INS_HNTCH_ENABLE": 0,
+            "ATC_RAT_YAW_P": 0.18,
+        },
+        "parameter_defaults": {
+            "FRAME_CLASS": 1,
+            "INS_HNTCH_ENABLE": 0,
+        },
+    }
+    context = select_relevant_parameters("yaw_misbehaviour", index=index)
+    names = [item["name"] for item in context["selected"]]
+    assert_true("SERVO1_FUNCTION" in names and "SERVO2_FUNCTION" in names, "SERVO*_FUNCTION should expand to present servo parameters")
+    assert_true("ATC_RAT_YAW_D" in context["missing"], "absent exact yaw parameter should be listed as missing")
+    flagged = {item["name"]: item["reasons"] for item in context["default_or_zero"]}
+    assert_true(flagged["INS_HNTCH_ENABLE"] == ["zero", "matches_default"], "zero/default parameters should be flagged separately from missing")
+    assert_true("SERVO3_FUNCTION" not in context["missing"], "wildcard selectors should not generate noisy missing servo slots")
+
+
+def test_stream_index_preserves_parameter_defaults_for_context():
+    rows, index, _stats = ap_common.collect_dataflash([
+        FakeMsg("PARM", TimeUS=0, Name="INS_HNTCH_ENABLE", Value=0, Default=0),
+        FakeMsg("PARM", TimeUS=1000000, Name="ATC_RAT_YAW_P", Value=0.2, Default=0.18),
+    ], include=[])
+    assert_true(rows == {}, "index-only collection should not store rows")
+    context = select_relevant_parameters("yaw_misbehaviour", index=index)
+    notch = next(item for item in context["selected"] if item["name"] == "INS_HNTCH_ENABLE")
+    yaw_p = next(item for item in context["selected"] if item["name"] == "ATC_RAT_YAW_P")
+    assert_true(notch["is_default"] is True and notch["is_zero"] is True, "streamed PARM defaults should be available")
+    assert_true(yaw_p["is_default"] is False, "non-default parameter values should be distinguished")
+
+
+def test_manifest_includes_symptom_parameter_context():
+    index = {
+        "messages": {"ATT": {}, "RATE": {}, "PARM": {}},
+        "parameters": {"FRAME_CLASS": 1, "SERVO1_FUNCTION": 33, "ATC_RAT_YAW_P": 0.2},
+        "parameter_defaults": {"FRAME_CLASS": 1},
+    }
+    manifest = build_manifest_from_index(index, "yaw issue", "flight.bin")
+    params = manifest["parameter_context"]
+    names = [item["name"] for item in params["selected"]]
+    assert_true(params["symptom_class"] == "yaw_misbehaviour", "manifest parameter context should match classified symptom")
+    assert_true("SERVO1_FUNCTION" in names, "manifest should include selected servo function context")
+    assert_true("MOT_SPIN_MIN" in params["missing"], "manifest should list missing exact relevant parameters")
+    assert_true(params["note"].startswith("Parameter values are context"), "manifest should not turn parameters into tuning advice")
 
 
 def test_event_markers_collect_mode_err_ev_msg():
@@ -1063,6 +1116,9 @@ def main():
     test_copter_output_mapping_handles_motor9_to_motor12_and_tilt_roles()
     test_motor_output_metrics_are_mapping_aware()
     test_motor_output_metrics_include_rco2_and_rco3_channels()
+    test_parameter_context_uses_yaml_selectors_and_servo_wildcards()
+    test_stream_index_preserves_parameter_defaults_for_context()
+    test_manifest_includes_symptom_parameter_context()
     test_event_markers_collect_mode_err_ev_msg()
     test_mode_segments_are_derived_from_mode_rows()
     test_validate_marks_non_copter_scope_as_partial()
