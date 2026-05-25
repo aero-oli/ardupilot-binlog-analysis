@@ -144,6 +144,16 @@ python scripts/ap_log_custom_plot.py --tables out/tables --series 'GPS.Alt-BARO.
 
 Use `--window START:END` or `--window around:CENTER:RADIUS` on metrics, plots, tuning, custom plots, extraction, and diagnosis when the user asks about a specific event or mode segment.
 
+For symptom-led diagnosis and custom plots, prefer selector options when exact timestamps are not known:
+
+```bash
+python scripts/ap_log_diagnose.py LOG.BIN --symptom "yaw issue" --mode LOITER --out out/diagnosis.json
+python scripts/ap_log_diagnose.py LOG.BIN --symptom "yaw issue" --around-msg "yaw" --around-radius 15 --out out/diagnosis.json
+python scripts/ap_log_diagnose.py LOG.BIN --symptom "motor issue" --high-throttle-only --out out/diagnosis.json
+```
+
+Selectors include `--mode`, `--around-msg`, `--around-event`, `--around-error`, `--takeoff-only`, `--hover-candidates`, and `--high-throttle-only`. If a requested selector cannot be resolved from available log messages, the script should fail with a clear error rather than silently using whole-log averages.
+
 ## Symptom diagnosis fault tree
 
 For symptom-led diagnosis, `references/symptom-diagnosis-map.yaml` is authoritative for symptom classification, diagnostic message tiers, relevant parameters, recommended plot groups, diagnostic questions, and likely fault branches. If no YAML alias confidently matches, use `general_investigation` rather than guessing. Then follow the relevant reference file:

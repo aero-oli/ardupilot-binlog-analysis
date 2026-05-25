@@ -10,8 +10,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from ap_common import (
     AnalysisError, ensure_dir, event_markers_from_tables, filter_tables_by_time, get_col, load_tables,
-    parse_time_window, require_package, write_json
+    require_package, write_json
 )
+from ap_window_select import select_analysis_window
 
 FIELD_TOKEN_RE = re.compile(r"\b[A-Za-z][A-Za-z0-9_]*\.[A-Za-z_][A-Za-z0-9_]*\b")
 ALLOWED_BINOPS = (ast.Add, ast.Sub, ast.Mult, ast.Div)
@@ -256,18 +257,48 @@ def main() -> int:
     p.add_argument("--tables", required=True, help="Directory produced by ap_log_extract.py")
     p.add_argument("--series", action="append", required=True, help="Series as MESSAGE.FIELD or MESSAGE.FIELD=Label; repeat for multiple traces")
     p.add_argument("--secondary", action="append", default=[], help="MESSAGE.FIELD series to plot on the right y-axis in overlay mode")
-    p.add_argument("--mode", choices=["overlay", "subplots"], default="overlay")
+    p.add_argument("--mode", default=None, help="Flight mode selector, or legacy plot mode overlay/subplots")
+    p.add_argument("--plot-mode", choices=["overlay", "subplots"], default="overlay")
     p.add_argument("--title", default="Custom ArduPilot plot")
     p.add_argument("--out", default="custom_plot.html", help="Output .html path or output directory")
     p.add_argument("--manifest", default=None)
     p.add_argument("--window", default=None, help="Optional TimeS window as START:END or around:CENTER:RADIUS")
+    p.add_argument("--armed-only", action="store_true", help="Record armed-only selector intent when using extracted armed-only tables")
+    p.add_argument("--around-msg", default=None, help="Select a window around the first matching MSG text")
+    p.add_argument("--around-event", default=None, help="Select a window around matching EV/MSG/MODE text")
+    p.add_argument("--around-error", action="store_true", help="Select a window around the first ERR message")
+    p.add_argument("--takeoff-only", action="store_true", help="Select an approximate takeoff climb window")
+    p.add_argument("--hover-candidates", action="store_true", help="Select an approximate stable hover candidate window")
+    p.add_argument("--high-throttle-only", action="store_true", help="Select a high-throttle output/demand window")
+    p.add_argument("--around-radius", type=float, default=10.0)
+    p.add_argument("--high-throttle-percentile", type=float, default=90.0)
+    p.add_argument("--high-throttle-threshold", type=float, default=None)
     p.add_argument("--events", action="store_true", help="Overlay MODE/ERR/EV/MSG markers")
     p.add_argument("--align-tolerance", type=float, default=None, help="Maximum timestamp gap in seconds when aligning fields in derived expressions")
     args = p.parse_args()
     try:
         tables = load_tables(args.tables)
-        window = parse_time_window(args.window)
-        tables = filter_tables_by_time(tables, **window)
+        plot_mode = args.plot_mode
+        flight_mode = args.mode
+        if args.mode in {"overlay", "subplots"}:
+            plot_mode = args.mode
+            flight_mode = None
+        selection = select_analysis_window(
+            tables,
+            window=args.window,
+            mode=flight_mode,
+            armed_only=args.armed_only,
+            around_msg=args.around_msg,
+            around_event=args.around_event,
+            around_error=args.around_error,
+            takeoff_only=args.takeoff_only,
+            hover_candidates=args.hover_candidates,
+            high_throttle_only=args.high_throttle_only,
+            around_radius_s=args.around_radius,
+            high_throttle_percentile=args.high_throttle_percentile,
+            high_throttle_threshold=args.high_throttle_threshold,
+        )
+        tables = filter_tables_by_time(tables, start_s=selection.get("start_s"), end_s=selection.get("end_s"))
         if args.align_tolerance is not None and args.align_tolerance < 0:
             raise AnalysisError("--align-tolerance must be non-negative")
         manifest = make_custom_plot(
@@ -276,8 +307,8 @@ def main() -> int:
             args.out,
             title=args.title,
             secondary=args.secondary,
-            mode=args.mode,
-            analysis_window=window,
+            mode=plot_mode,
+            analysis_window=selection,
             events=args.events,
             align_tolerance=args.align_tolerance,
         )

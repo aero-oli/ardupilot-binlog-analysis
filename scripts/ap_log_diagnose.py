@@ -14,6 +14,7 @@ from ap_common import (
 from ap_diag_helpers import add_motor_esc_findings, add_power_findings, vals
 from ap_diag_requirements import missing_by_tier
 from ap_symptom_map import requirement_spec
+from ap_window_select import select_analysis_window
 
 
 def add_event_markers(fig, markers):
@@ -642,11 +643,21 @@ def main() -> int:
     p.add_argument("--messages", default=None, help="Comma-separated message names to parse, or ALL. Defaults to symptom-relevant messages.")
     p.add_argument("--max-messages", type=int, default=None, help="Optional parse limit for quick diagnosis")
     p.add_argument("--armed-only", action="store_true", help="Collect rows only while ARM messages indicate armed state when available")
+    p.add_argument("--mode", default=None, help="Select the active interval for a flight mode name")
+    p.add_argument("--around-msg", default=None, help="Select a window around the first matching MSG text")
+    p.add_argument("--around-event", default=None, help="Select a window around matching EV/MSG/MODE text")
+    p.add_argument("--around-error", action="store_true", help="Select a window around the first ERR message")
+    p.add_argument("--takeoff-only", action="store_true", help="Select an approximate takeoff climb window")
+    p.add_argument("--hover-candidates", action="store_true", help="Select an approximate stable hover candidate window")
+    p.add_argument("--high-throttle-only", action="store_true", help="Select a high-throttle output/demand window")
+    p.add_argument("--around-radius", type=float, default=10.0, help="Seconds before/after around-msg/event/error selectors")
+    p.add_argument("--high-throttle-percentile", type=float, default=90.0)
+    p.add_argument("--high-throttle-threshold", type=float, default=None)
     p.add_argument("--events", action="store_true", help="Overlay MODE/ERR/EV/MSG markers on generated plots")
     args = p.parse_args()
     try:
         symptom_class = classify_symptom(args.symptom)
-        window = parse_time_window(args.window)
+        window = {"start_s": args.start_time, "end_s": args.end_time}
         if args.start_time is not None:
             window["start_s"] = args.start_time
         if args.end_time is not None:
@@ -661,6 +672,10 @@ def main() -> int:
             for msg in spec["required_messages"] + spec["strongly_recommended_messages"] + spec["optional_context_messages"] + ["PARM"]:
                 if msg not in include:
                     include.append(msg)
+            if any([args.mode, args.around_msg, args.around_event, args.around_error, args.takeoff_only, args.hover_candidates, args.high_throttle_only]):
+                for msg in ["MODE", "MSG", "EV", "ERR", "ARM", "CTUN", "ATT", "BARO", "GPS", "RCOU", "RCO2", "RCO3"]:
+                    if msg not in include:
+                        include.append(msg)
         rows, index, stats = collect_dataflash(
             args.log,
             include=include,
@@ -670,7 +685,27 @@ def main() -> int:
             armed_only=args.armed_only,
         )
         tables = {typ: rows_to_dataframe(data) for typ, data in rows.items() if data and typ not in {"FMT", "FMTU"}}
-        tables = filter_tables_by_time(tables, **window)
+        selection = select_analysis_window(
+            tables,
+            window=args.window,
+            mode=args.mode,
+            armed_only=args.armed_only,
+            around_msg=args.around_msg,
+            around_event=args.around_event,
+            around_error=args.around_error,
+            takeoff_only=args.takeoff_only,
+            hover_candidates=args.hover_candidates,
+            high_throttle_only=args.high_throttle_only,
+            around_radius_s=args.around_radius,
+            high_throttle_percentile=args.high_throttle_percentile,
+            high_throttle_threshold=args.high_throttle_threshold,
+            log_end_s=index.get("end_time_s"),
+        )
+        if args.start_time is not None or args.end_time is not None:
+            selection["start_s"] = window["start_s"] if window["start_s"] is not None else selection.get("start_s")
+            selection["end_s"] = window["end_s"] if window["end_s"] is not None else selection.get("end_s")
+            selection["rule"] = "start_end" if selection.get("rule") == "whole_log" else selection.get("rule")
+        tables = filter_tables_by_time(tables, start_s=selection.get("start_s"), end_s=selection.get("end_s"))
         if symptom_class == "yaw_misbehaviour":
             findings, context, checked, missing_required, missing_strongly, missing_optional = diagnose_yaw(tables, index)
         else:
@@ -688,7 +723,7 @@ def main() -> int:
         result = {
             "symptom_text": args.symptom,
             "symptom_class": symptom_class,
-            "analysis_window": window,
+            "analysis_window": selection,
             "log": {"file": args.log, "vehicle": index.get("vehicle"), "firmware": index.get("firmware"), "duration_s": index.get("duration_s")},
             "parser": stats,
             "warnings": warnings,

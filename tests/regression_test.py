@@ -26,6 +26,7 @@ from ap_log_plots import health_plots
 from ap_log_plots import main as plots_main
 from ap_log_validate import module_availability
 from ap_symptom_map import load_symptom_map
+from ap_window_select import select_analysis_window
 
 
 def assert_true(condition, message):
@@ -105,6 +106,55 @@ def test_time_window_filters_tables_inclusively():
     filtered = ap_common.filter_tables_by_time(tables, start_s=1.0, end_s=2.5)
     assert_true(filtered["RATE"]["R"].tolist() == [1, 2], "RATE should be clipped to requested window")
     assert_true(filtered["MSG"]["Message"].tolist() == ["inside"], "MSG should be clipped to requested window")
+
+
+def test_window_selector_mode_intervals():
+    tables = {"MODE": pd.DataFrame({"TimeS": [0.0, 10.0, 30.0], "Mode": ["STABILIZE", "LOITER", "RTL"]})}
+    selection = select_analysis_window(tables, mode="LOITER", log_end_s=40.0)
+    assert_true(selection["start_s"] == 10.0 and selection["end_s"] == 30.0, "mode selector should return active interval")
+    assert_true(selection["rule"] == "mode", "selection should record mode rule")
+
+
+def test_window_selector_around_msg_event_and_error():
+    tables = {
+        "MSG": pd.DataFrame({"TimeS": [5.0, 20.0], "Message": ["startup", "yaw issue seen"]}),
+        "EV": pd.DataFrame({"TimeS": [40.0], "Id": ["TAKEOFF"]}),
+        "ERR": pd.DataFrame({"TimeS": [60.0], "Subsys": [2], "ECode": [1]}),
+    }
+    msg = select_analysis_window(tables, around_msg="yaw issue", around_radius_s=3.0)
+    event = select_analysis_window(tables, around_event="takeoff", around_radius_s=5.0)
+    err = select_analysis_window(tables, around_error=True, around_radius_s=2.0)
+    assert_true(msg["start_s"] == 17.0 and msg["end_s"] == 23.0, "around-msg should center on matching MSG")
+    assert_true(event["start_s"] == 35.0 and event["end_s"] == 45.0, "around-event should center on matching EV")
+    assert_true(err["start_s"] == 58.0 and err["end_s"] == 62.0, "around-error should center on first ERR")
+
+
+def test_window_selector_takeoff_hover_and_high_throttle():
+    tables = {
+        "CTUN": pd.DataFrame({
+            "TimeS": [0, 5, 10, 15, 20, 25, 30],
+            "Alt": [0, 0.2, 2.0, 5.0, 5.1, 5.0, 5.1],
+            "ThO": [0.2, 0.35, 0.65, 0.55, 0.5, 0.52, 0.51],
+        }),
+        "GPS": pd.DataFrame({"TimeS": [15, 20, 25, 30], "Spd": [0.2, 0.1, 0.15, 0.1]}),
+        "ATT": pd.DataFrame({"TimeS": [15, 20, 25, 30], "Roll": [1, 2, 1, 2], "Pitch": [1, 1, 2, 1]}),
+        "RCOU": pd.DataFrame({"TimeS": [0, 5, 10, 15, 20], "C1": [1200, 1300, 1900, 1950, 1500]}),
+    }
+    takeoff = select_analysis_window(tables, takeoff_only=True)
+    hover = select_analysis_window(tables, hover_candidates=True)
+    high = select_analysis_window(tables, high_throttle_only=True, high_throttle_threshold=0.55)
+    assert_true(takeoff["start_s"] == 10.0 and takeoff["end_s"] == 15.0, f"unexpected takeoff window {takeoff}")
+    assert_true(hover["start_s"] >= 15.0 and hover["end_s"] <= 30.0, f"unexpected hover window {hover}")
+    assert_true(high["start_s"] == 10.0 and high["end_s"] == 15.0, f"unexpected high-throttle window {high}")
+
+
+def test_window_selector_fails_requested_missing_selector():
+    try:
+        select_analysis_window({}, mode="LOITER")
+    except AnalysisError as exc:
+        assert_true("MODE" in str(exc), f"unexpected mode selector error: {exc}")
+    else:
+        raise AssertionError("requested mode selector should fail when MODE is missing")
 
 
 def test_parse_time_window_accepts_start_end_and_around():
@@ -724,6 +774,10 @@ def main():
     test_stream_index_reports_logging_dropouts()
     test_load_tables_fails_on_unreadable_table()
     test_time_window_filters_tables_inclusively()
+    test_window_selector_mode_intervals()
+    test_window_selector_around_msg_event_and_error()
+    test_window_selector_takeoff_hover_and_high_throttle()
+    test_window_selector_fails_requested_missing_selector()
     test_parse_time_window_accepts_start_end_and_around()
     test_metrics_can_be_computed_from_filtered_window()
     test_output_mapping_reads_servo_function_parameters()
