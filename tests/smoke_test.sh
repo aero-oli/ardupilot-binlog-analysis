@@ -9,10 +9,12 @@ python - <<'PY'
 from pathlib import Path
 
 skill = Path("SKILL.md").read_text(encoding="utf-8")
-reference_path = Path("references/logging-configuration-for-investigation.md")
+how_to = Path("references/how-to-investigate.md").read_text(encoding="utf-8")
+logging_reference_path = Path("references/logging-configuration-for-investigation.md")
+evidence_reference_path = Path("references/evidence-gathering-flights.md")
 
-assert reference_path.exists()
-reference = reference_path.read_text(encoding="utf-8")
+assert logging_reference_path.exists()
+reference = logging_reference_path.read_text(encoding="utf-8")
 assert "references/logging-configuration-for-investigation.md" in skill
 for required in [
     "LOG_BITMASK",
@@ -29,6 +31,37 @@ for required in [
     "High-volume settings should normally be returned to normal",
 ]:
     assert required in reference, required
+
+assert evidence_reference_path.exists()
+evidence_reference = evidence_reference_path.read_text(encoding="utf-8")
+assert "references/evidence-gathering-flights.md" in skill
+assert "evidence-gathering-flights.md" in how_to
+for symptom_class in [
+    "yaw_misbehaviour",
+    "attitude_rate_issue",
+    "motor_esc_issue",
+    "vibration_issue",
+    "ekf_gps_issue",
+    "battery_power_issue",
+    "altitude_throttle_issue",
+    "crash_or_loss_of_control",
+    "general_investigation",
+]:
+    assert f"### {symptom_class}" in evidence_reference, symptom_class
+for required in [
+    "Minimum required evidence",
+    "Strongly recommended evidence",
+    "Useful optional context",
+    "Logging parameters to review",
+    "Suggested plots/signals",
+    "Bench checks before flight",
+    "Do not fly if",
+    "Cleanup",
+    "do not recommend repeat flight",
+    "LOG_DISARMED",
+    "INS_RAW_LOG_OPT",
+]:
+    assert required in evidence_reference, required
 PY
 python scripts/ap_symptom_classifier.py "the yaw seems to be misbehaving" | grep yaw_misbehaviour >/dev/null
 python scripts/ap_fault_tree.py yaw_misbehaviour | grep RATE.YDes >/dev/null

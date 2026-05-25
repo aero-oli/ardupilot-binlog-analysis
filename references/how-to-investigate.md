@@ -53,6 +53,7 @@ Use this as an operating sequence before forming conclusions. The scripts provid
 9. Always state missing data and confidence limits.
 
    Separate missing required data from missing strongly recommended or optional context. Explain when log dropouts, timestamp gaps, message sparsity, absent RCIN, absent ESC telemetry, or missing parameters limit confidence.
+   If the current log is insufficient, use `logging-configuration-for-investigation.md` to describe the missing logging/messages and `evidence-gathering-flights.md` to choose the safest next evidence-gathering activity. The next step may be a parameter dump, bench inspection, ground test, restrained test, or controlled flight.
 
 10. Do not recommend unsafe flight or disabling checks.
 
