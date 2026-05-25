@@ -17,6 +17,7 @@ from ap_diag_requirements import missing_by_tier
 from ap_symptom_map import requirement_spec
 from ap_window_select import select_analysis_window
 from ap_compass_yaw import build_compass_yaw_investigation, write_compass_yaw_plots
+from ap_vibration import add_vibration_assessment_findings, build_vibration_assessment
 
 
 def add_event_markers(fig, markers):
@@ -279,36 +280,9 @@ def add_event_findings(index, findings, checked):
         checked.append({"check": "Event timeline", "result": f"{len(events)} EV rows indexed; correlate with symptom time"})
 
 
-def add_vibration_findings(tables, findings, checked, rank=4):
-    if "VIBE" not in tables:
-        return
-    vibe = tables["VIBE"]
-    evidence = []
-    max_axis = None
-    for col in ["VibeX", "VibeY", "VibeZ"]:
-        if col in vibe.columns:
-            s = numeric_series(vibe, [col])
-            if s is not None and len(s.dropna()) > 0:
-                val = float(s.max())
-                max_axis = val if max_axis is None else max(max_axis, val)
-                if val > 30:
-                    evidence.append(f"{col} max={val:.1f} m/s/s")
-    for col in clip_columns(vibe):
-        clip = numeric_series(vibe, [col])
-        if clip is not None and len(clip.dropna()) > 1:
-            delta = float(clip.max() - clip.min())
-            if delta > 0:
-                evidence.append(f"VIBE.{col} increased by {delta:.0f}")
-    if evidence:
-        severity = "safety-critical"
-        confidence = "high" if (max_axis is not None and max_axis > 60) or any("increased" in e for e in evidence) else "medium"
-        add_finding(
-            findings, rank, "Vibration/clipping may be affecting estimator or control behaviour", severity, confidence, evidence,
-            "ArduPilot vibration guidance treats values above roughly 30 m/s/s and increasing clipping as evidence that estimator and control conclusions may be unreliable until the mechanical source is fixed.",
-            ["Inspect props, motor bearings, frame resonance, flight-controller mounting and loose wiring", "Use raw IMU or batch-sampling FFT when frequency-domain filter review is needed"],
-        )
-    else:
-        checked.append({"check": "VIBE vibration/clipping", "result": "No VIBE axis above 30 m/s/s and no clipping increase detected by heuristic"})
+def add_vibration_findings(tables, findings, checked, rank=4, vibration_assessment=None, symptom_class="general_investigation"):
+    assessment = vibration_assessment or build_vibration_assessment(tables, symptom_class)
+    add_vibration_assessment_findings(assessment, findings, checked, rank=rank, symptom_class=symptom_class)
 
 
 def add_ekf_gps_findings(tables, index, findings, checked, rank=2):
@@ -452,7 +426,7 @@ def add_altitude_findings(tables, findings, checked, context=None, rank=2):
         checked.append({"check": "Altitude/throttle", "result": "No CTUN/BARO altitude evidence available or no heuristic altitude issue detected"})
 
 
-def diagnose_yaw(tables, index):
+def diagnose_yaw(tables, index, vibration_assessment=None):
     findings = []
     context = []
     checked = []
@@ -560,7 +534,7 @@ def diagnose_yaw(tables, index):
     context.extend(compass_yaw["context"])
     checked.extend(compass_yaw["checked"])
 
-    add_vibration_findings(tables, findings, checked, rank=4)
+    add_vibration_findings(tables, findings, checked, rank=4, vibration_assessment=vibration_assessment, symptom_class="yaw_misbehaviour")
     add_power_findings(tables, findings, checked, context, rank=3)
 
     limit_confidence_for_missing_strong_evidence(findings, checked, missing_strongly)
@@ -568,7 +542,7 @@ def diagnose_yaw(tables, index):
     return findings, context, checked, missing_required, missing_strongly, missing_optional
 
 
-def diagnose_by_class(symptom_class, tables, index):
+def diagnose_by_class(symptom_class, tables, index, vibration_assessment=None):
     findings = []
     context = []
     checked = []
@@ -578,7 +552,7 @@ def diagnose_by_class(symptom_class, tables, index):
     if symptom_class == "attitude_rate_issue":
         add_attitude_rate_findings(tables, findings, checked, axes=("roll", "pitch"), rank=2)
         add_motor_esc_findings(tables, findings, checked, context, rank=3)
-        add_vibration_findings(tables, findings, checked, rank=3)
+        add_vibration_findings(tables, findings, checked, rank=3, vibration_assessment=vibration_assessment, symptom_class=symptom_class)
         add_power_findings(tables, findings, checked, context, rank=4)
     elif symptom_class == "ekf_gps_issue":
         add_ekf_gps_findings(tables, index, findings, checked, rank=1)
@@ -586,11 +560,11 @@ def diagnose_by_class(symptom_class, tables, index):
         findings.extend(compass_yaw["findings"])
         context.extend(compass_yaw["context"])
         checked.extend(compass_yaw["checked"])
-        add_vibration_findings(tables, findings, checked, rank=2)
+        add_vibration_findings(tables, findings, checked, rank=2, vibration_assessment=vibration_assessment, symptom_class=symptom_class)
         add_power_findings(tables, findings, checked, context, rank=3)
         add_attitude_rate_findings(tables, findings, checked, axes=("roll", "pitch", "yaw"), rank=4)
     elif symptom_class == "vibration_issue":
-        add_vibration_findings(tables, findings, checked, rank=1)
+        add_vibration_findings(tables, findings, checked, rank=1, vibration_assessment=vibration_assessment, symptom_class=symptom_class)
         add_attitude_rate_findings(tables, findings, checked, axes=("roll", "pitch", "yaw"), rank=2)
         add_ekf_gps_findings(tables, index, findings, checked, rank=3)
     elif symptom_class == "battery_power_issue":
@@ -601,17 +575,17 @@ def diagnose_by_class(symptom_class, tables, index):
         add_motor_esc_findings(tables, findings, checked, context, rank=1)
         add_attitude_rate_findings(tables, findings, checked, axes=("roll", "pitch", "yaw"), rank=2)
         add_power_findings(tables, findings, checked, context, rank=3)
-        add_vibration_findings(tables, findings, checked, rank=4)
+        add_vibration_findings(tables, findings, checked, rank=4, vibration_assessment=vibration_assessment, symptom_class=symptom_class)
     elif symptom_class == "crash_or_loss_of_control":
         add_motor_esc_findings(tables, findings, checked, context, rank=1)
         add_attitude_rate_findings(tables, findings, checked, axes=("roll", "pitch", "yaw"), rank=1)
         add_power_findings(tables, findings, checked, context, rank=2)
         add_ekf_gps_findings(tables, index, findings, checked, rank=2)
-        add_vibration_findings(tables, findings, checked, rank=3)
+        add_vibration_findings(tables, findings, checked, rank=3, vibration_assessment=vibration_assessment, symptom_class=symptom_class)
         add_altitude_findings(tables, findings, checked, context, rank=3)
     elif symptom_class == "altitude_throttle_issue":
         add_altitude_findings(tables, findings, checked, context, rank=1)
-        add_vibration_findings(tables, findings, checked, rank=2)
+        add_vibration_findings(tables, findings, checked, rank=2, vibration_assessment=vibration_assessment, symptom_class=symptom_class)
         add_power_findings(tables, findings, checked, context, rank=2)
         add_motor_esc_findings(tables, findings, checked, context, rank=3)
         add_ekf_gps_findings(tables, index, findings, checked, rank=3)
@@ -619,7 +593,7 @@ def diagnose_by_class(symptom_class, tables, index):
         add_attitude_rate_findings(tables, findings, checked, axes=("roll", "pitch", "yaw"), rank=2)
         add_motor_esc_findings(tables, findings, checked, context, rank=2)
         add_ekf_gps_findings(tables, index, findings, checked, rank=3)
-        add_vibration_findings(tables, findings, checked, rank=3)
+        add_vibration_findings(tables, findings, checked, rank=3, vibration_assessment=vibration_assessment, symptom_class=symptom_class)
         add_power_findings(tables, findings, checked, context, rank=4)
 
     limit_confidence_for_missing_strong_evidence(findings, checked, missing_strongly)
@@ -701,11 +675,18 @@ def main() -> int:
             selection["start_s"] = window["start_s"] if window["start_s"] is not None else selection.get("start_s")
             selection["end_s"] = window["end_s"] if window["end_s"] is not None else selection.get("end_s")
             selection["rule"] = "start_end" if selection.get("rule") == "whole_log" else selection.get("rule")
-        tables = filter_tables_by_time(tables, start_s=selection.get("start_s"), end_s=selection.get("end_s"))
+        full_tables = tables
+        tables = filter_tables_by_time(full_tables, start_s=selection.get("start_s"), end_s=selection.get("end_s"))
+        vibration_assessment = build_vibration_assessment(
+            full_tables,
+            symptom_class,
+            window_tables=tables,
+            analysis_window=selection,
+        )
         if symptom_class == "yaw_misbehaviour":
-            findings, context, checked, missing_required, missing_strongly, missing_optional = diagnose_yaw(tables, index)
+            findings, context, checked, missing_required, missing_strongly, missing_optional = diagnose_yaw(tables, index, vibration_assessment=vibration_assessment)
         else:
-            findings, context, checked, missing_required, missing_strongly, missing_optional = diagnose_by_class(symptom_class, tables, index)
+            findings, context, checked, missing_required, missing_strongly, missing_optional = diagnose_by_class(symptom_class, tables, index, vibration_assessment=vibration_assessment)
         plots = make_targeted_plots_from_tables(tables, symptom_class, args.plots, events=args.events) if args.plots else []
         warnings = []
         if stats.get("max_messages_reached"):
@@ -726,6 +707,9 @@ def main() -> int:
             "findings": findings,
             "context": context,
             "checked_but_not_supported": checked,
+            "vibration_context": vibration_assessment.get("vibration_context", {}),
+            "vibration_relevance_to_symptom": vibration_assessment.get("vibration_relevance_to_symptom", {}),
+            "vibration_confidence_limits": vibration_assessment.get("vibration_confidence_limits", []),
             "missing_required": missing_required,
             "missing_strongly_recommended": missing_strongly,
             "missing_optional": missing_optional,

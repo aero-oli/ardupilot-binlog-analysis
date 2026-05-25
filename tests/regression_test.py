@@ -27,6 +27,7 @@ from ap_log_plots import health_plots
 from ap_log_plots import main as plots_main
 from ap_log_validate import module_availability
 from ap_symptom_map import load_symptom_map
+from ap_vibration import build_vibration_assessment
 from ap_window_select import select_analysis_window
 
 
@@ -274,6 +275,49 @@ def test_vibe_clip_variants_are_detected():
     evidence = "\n".join("\n".join(f.get("evidence", [])) for f in findings)
     assert_true("VIBE.Clip0 increased by 3" in evidence, "diagnosis should include Clip0 clipping evidence")
     assert_true("RATE" in missing_strongly, "diagnosis should still report missing strongly recommended symptom messages")
+
+
+def test_high_vibration_outside_symptom_window_is_context_not_finding():
+    full_tables = {
+        "VIBE": pd.DataFrame({"TimeS": [0, 1, 2, 10, 11, 12], "VibeX": [55, 60, 58, 8, 9, 8], "VibeY": [5, 5, 5, 4, 4, 4], "VibeZ": [4, 4, 4, 3, 3, 3]}),
+        "ATT": pd.DataFrame({"TimeS": [10, 11, 12], "DesYaw": [0, 0, 0], "Yaw": [0, 25, 35]}),
+        "RATE": pd.DataFrame({"TimeS": [10, 11, 12], "YDes": [0, 0, 0], "Y": [0, 20, 30], "YOut": [0.1, 0.2, 0.2]}),
+    }
+    window_tables = ap_common.filter_tables_by_time(full_tables, start_s=10.0, end_s=12.0)
+    assessment = build_vibration_assessment(full_tables, "yaw_misbehaviour", window_tables=window_tables, analysis_window={"start_s": 10.0, "end_s": 12.0})
+    index = {"messages": {"ATT": {}, "RATE": {}, "VIBE": {}}, "errors": [], "events": [], "modes": []}
+    findings, _context, checked, *_ = diagnose_by_class("attitude_rate_issue", window_tables, index, vibration_assessment=assessment)
+    causes = "\n".join(f.get("possible_cause", "") for f in findings)
+    checked_text = "\n".join(c.get("result", "") for c in checked)
+    assert_true(assessment["vibration_context"]["above_warning_threshold"], "whole-log high VIBE should remain context")
+    assert_true(not assessment["vibration_relevance_to_symptom"]["evidence"], "outside-window high VIBE should not be symptom evidence")
+    assert_true("Vibration/clipping is relevant" not in causes, "outside-window high VIBE should not create a vibration finding")
+    assert_true("whole-log max axis" in checked_text, "diagnosis should explain that whole-log VIBE was retained as context")
+
+
+def test_high_vibration_during_symptom_window_becomes_supporting_evidence():
+    full_tables = {
+        "VIBE": pd.DataFrame({"TimeS": [0, 1, 2, 10, 11, 12], "VibeX": [8, 9, 8, 45, 55, 50], "VibeY": [5, 5, 5, 4, 4, 4], "VibeZ": [4, 4, 4, 3, 3, 3]}),
+        "ATT": pd.DataFrame({"TimeS": [10, 11, 12], "DesYaw": [0, 0, 0], "Yaw": [0, 25, 35]}),
+        "RATE": pd.DataFrame({"TimeS": [10, 11, 12], "YDes": [0, 0, 0], "Y": [0, 20, 30], "YOut": [0.1, 0.2, 0.2]}),
+    }
+    window_tables = ap_common.filter_tables_by_time(full_tables, start_s=10.0, end_s=12.0)
+    assessment = build_vibration_assessment(full_tables, "yaw_misbehaviour", window_tables=window_tables, analysis_window={"start_s": 10.0, "end_s": 12.0})
+    index = {"messages": {"ATT": {}, "RATE": {}, "VIBE": {}}, "errors": [], "events": [], "modes": []}
+    findings, _context, _checked, *_ = diagnose_by_class("attitude_rate_issue", window_tables, index, vibration_assessment=assessment)
+    evidence = "\n".join("\n".join(f.get("evidence", [])) for f in findings)
+    assert_true("within analysis window" in evidence, "windowed high VIBE should become supporting evidence")
+
+
+def test_missing_vibe_limits_vibration_confidence_without_guessing():
+    assessment = build_vibration_assessment({}, "yaw_misbehaviour", window_tables={}, analysis_window={"start_s": 1.0, "end_s": 2.0})
+    index = {"messages": {"ATT": {}, "RATE": {}}, "errors": [], "events": [], "modes": []}
+    findings, _context, checked, _missing_required, _missing_strongly, missing_optional = diagnose_yaw({}, index, vibration_assessment=assessment)
+    causes = "\n".join(f.get("possible_cause", "") for f in findings)
+    checked_text = "\n".join(c.get("result", "") for c in checked)
+    assert_true("VIBE" in missing_optional, "missing VIBE should remain optional evidence for yaw diagnosis")
+    assert_true("Vibration/clipping is relevant" not in causes, "missing VIBE must not create a guessed vibration conclusion")
+    assert_true("VIBE missing" in checked_text, "missing VIBE should be explicit in checked output")
 
 
 def test_non_yaw_symptoms_get_targeted_findings():
@@ -879,6 +923,9 @@ def main():
     test_mode_segments_are_derived_from_mode_rows()
     test_validate_marks_non_copter_scope_as_partial()
     test_vibe_clip_variants_are_detected()
+    test_high_vibration_outside_symptom_window_is_context_not_finding()
+    test_high_vibration_during_symptom_window_becomes_supporting_evidence()
+    test_missing_vibe_limits_vibration_confidence_without_guessing()
     test_non_yaw_symptoms_get_targeted_findings()
     test_toilet_bowling_prefers_ekf_gps_when_navigation_context_is_present()
     test_yaml_aliases_drive_symptom_classification()
