@@ -261,6 +261,21 @@ def limit_confidence_for_missing_strong_evidence(findings, checked, missing_stro
         })
 
 
+def limit_confidence_for_logging_health(findings, checked, logging_health):
+    if not logging_health or not logging_health.get("limits_diagnosis"):
+        return
+    changed = False
+    for finding in findings:
+        if finding.get("confidence") == "high":
+            finding["confidence"] = "medium"
+            finding["confidence_limited_by_logging_health"] = logging_health.get("confidence_impact")
+            changed = True
+    checked.append({
+        "check": "Logging health",
+        "result": logging_health.get("confidence_impact", "Log quality may limit diagnosis confidence."),
+    })
+
+
 def add_event_findings(index, findings, checked):
     errors = index.get("errors", [])
     events = index.get("events", [])
@@ -538,6 +553,7 @@ def diagnose_yaw(tables, index, vibration_assessment=None):
     add_power_findings(tables, findings, checked, context, rank=3)
 
     limit_confidence_for_missing_strong_evidence(findings, checked, missing_strongly)
+    limit_confidence_for_logging_health(findings, checked, index.get("logging_health"))
     findings = sorted(findings, key=lambda f: (f.get("rank", 99), 0 if f.get("severity") == "safety-critical" else 1))
     return findings, context, checked, missing_required, missing_strongly, missing_optional
 
@@ -597,6 +613,7 @@ def diagnose_by_class(symptom_class, tables, index, vibration_assessment=None):
         add_power_findings(tables, findings, checked, context, rank=4)
 
     limit_confidence_for_missing_strong_evidence(findings, checked, missing_strongly)
+    limit_confidence_for_logging_health(findings, checked, index.get("logging_health"))
     findings = sorted(findings, key=lambda f: (f.get("rank", 99), severity_rank(f.get("severity", ""))))
     return findings, context, checked, missing_required, missing_strongly, missing_optional
 
@@ -697,6 +714,9 @@ def main() -> int:
             warnings.append("--armed-only was requested, but ARM state could not be confirmed from ARM messages.")
         if index.get("logging_dropouts"):
             warnings.append("Possible logging dropout/drop count evidence was found; inspect logging_dropouts.")
+        logging_health = index.get("logging_health", {})
+        if logging_health.get("limits_diagnosis"):
+            warnings.append("Logging health limits diagnosis confidence: " + logging_health.get("confidence_impact", "inspect logging_health"))
         result = {
             "symptom_text": args.symptom,
             "symptom_class": symptom_class,
@@ -704,6 +724,7 @@ def main() -> int:
             "log": {"file": args.log, "vehicle": index.get("vehicle"), "firmware": index.get("firmware"), "duration_s": index.get("duration_s")},
             "parser": stats,
             "warnings": warnings,
+            "logging_health": logging_health,
             "findings": findings,
             "context": context,
             "checked_but_not_supported": checked,

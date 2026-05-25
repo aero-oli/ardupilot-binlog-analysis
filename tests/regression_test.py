@@ -78,6 +78,80 @@ def test_stream_index_reports_logging_dropouts():
 
     assert_true(index["logging_dropouts"], "DSF dropout evidence should be reported in the index")
     assert_true(index["logging_dropouts"][0]["fields"]["Dp"] == 3.0, "drop count field should be retained")
+    assert_true(index["logging_health"]["dropouts_detected"] is True, "logging health should flag DSF dropouts")
+    assert_true(index["logging_health"]["limits_diagnosis"] is True, "dropouts should limit diagnosis confidence")
+
+
+def test_logging_health_clean_log_has_no_limits():
+    messages = [FakeMsg("ATT", TimeUS=i * 1000000, Roll=i) for i in range(5)]
+    messages.extend(FakeMsg("RATE", TimeUS=i * 1000000, R=i) for i in range(5))
+
+    _rows, index, _stats = ap_common.collect_dataflash(messages, include=[], source="synthetic")
+    health = index["logging_health"]
+    assert_true(health["dropouts_detected"] is False, "clean log should not flag dropouts")
+    assert_true(health["limits_diagnosis"] is False, "clean log should not limit diagnosis")
+    assert_true(health["max_time_gap_s"] == 1.0, "clean log should still report max normal gap")
+
+
+def test_logging_health_detects_timestamp_gap_and_reset():
+    messages = [
+        FakeMsg("ATT", TimeUS=0, Roll=0),
+        FakeMsg("ATT", TimeUS=1000000, Roll=1),
+        FakeMsg("ATT", TimeUS=10000000, Roll=2),
+        FakeMsg("RATE", TimeUS=5000000, R=1),
+        FakeMsg("RATE", TimeUS=4000000, R=2),
+    ]
+
+    _rows, index, _stats = ap_common.collect_dataflash(messages, include=[], source="synthetic")
+    health = index["logging_health"]
+    affected = "\n".join(f"{m.get('message')} {m.get('reason')}" for m in health["affected_messages"])
+    assert_true(health["max_time_gap_s"] == 9.0, "logging health should report max timestamp gap")
+    assert_true("ATT timestamp_gap" in affected, "ATT gap should be listed as affected")
+    assert_true("RATE timestamp_reset" in affected, "RATE reset should be listed as affected")
+    assert_true(health["limits_diagnosis"] is True, "gaps/resets should limit diagnosis")
+
+
+def test_logging_health_detects_missing_core_messages_after_arm():
+    messages = [
+        FakeMsg("ARM", TimeUS=0, Armed=1),
+        FakeMsg("ATT", TimeUS=1000000, Roll=1),
+        FakeMsg("RATE", TimeUS=1000000, R=1),
+    ]
+
+    _rows, index, _stats = ap_common.collect_dataflash(messages, include=[], source="synthetic")
+    health = index["logging_health"]
+    assert_true("RCOU/RCO2/RCO3" in health["missing_core_messages_after_arm"], "missing actuator output messages after arm should be reported")
+    assert_true(health["limits_diagnosis"], "missing armed core messages should limit diagnosis")
+
+
+def test_logging_health_manifest_and_diagnosis_confidence_limit():
+    index = {
+        "messages": {"ATT": {}, "RATE": {}, "RCOU": {}},
+        "errors": [],
+        "events": [],
+        "modes": [],
+        "logging_health": {
+            "dropouts_detected": False,
+            "max_time_gap_s": 8.0,
+            "affected_messages": [{"message": "RATE", "reason": "timestamp_gap"}],
+            "confidence_impact": "Timestamp gaps may hide short events.",
+            "limits_diagnosis": True,
+        },
+    }
+    manifest = build_manifest_from_index(index, "yaw issue", "flight.bin")
+    assert_true(manifest["logging_health"]["limits_diagnosis"], "manifest should expose logging health")
+    assert_true(any("Logging health limits" in w for w in manifest["warnings"]), "manifest should warn about logging health")
+
+    tables = {
+        "ATT": pd.DataFrame({"TimeS": [0, 1, 2], "DesYaw": [0, 0, 0], "Yaw": [0, 30, 45]}),
+        "RATE": pd.DataFrame({"TimeS": [0, 1, 2], "YDes": [0, 0, 0], "Y": [0, 80, 90], "YOut": [0.8, 0.9, 0.95]}),
+        "RCOU": pd.DataFrame({"TimeS": [0, 1, 2], "C1": [1900, 1950, 1960]}),
+    }
+    findings, _context, checked, *_ = diagnose_yaw(tables, index)
+    yaw_finding = next(f for f in findings if "Yaw authority limited" in f.get("possible_cause", ""))
+    checked_text = "\n".join(c.get("result", "") for c in checked)
+    assert_true(yaw_finding["confidence"] == "medium", "logging health should lower high-confidence diagnosis")
+    assert_true("Timestamp gaps may hide short events" in checked_text, "diagnosis should state logging-health confidence impact")
 
 
 def test_load_tables_fails_on_unreadable_table():
@@ -907,6 +981,10 @@ def main():
     test_stream_dataflash_counts_without_storing_unselected_rows()
     test_stream_dataflash_respects_time_window_and_max_messages()
     test_stream_index_reports_logging_dropouts()
+    test_logging_health_clean_log_has_no_limits()
+    test_logging_health_detects_timestamp_gap_and_reset()
+    test_logging_health_detects_missing_core_messages_after_arm()
+    test_logging_health_manifest_and_diagnosis_confidence_limit()
     test_load_tables_fails_on_unreadable_table()
     test_time_window_filters_tables_inclusively()
     test_window_selector_mode_intervals()

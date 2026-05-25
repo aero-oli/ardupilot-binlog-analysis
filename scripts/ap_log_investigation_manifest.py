@@ -148,10 +148,14 @@ def build_manifest_from_index(index, symptom_text, log_path):
         warnings.append("--armed-only was requested, but ARM state could not be confirmed from ARM messages.")
     if index.get("logging_dropouts"):
         warnings.append("Possible logging dropout/drop count evidence was found; inspect index.logging_dropouts.")
+    logging_health = index.get("logging_health", {})
+    if logging_health.get("limits_diagnosis"):
+        warnings.append("Logging health limits diagnosis confidence: " + logging_health.get("confidence_impact", "inspect logging_health"))
     return {
         "symptom_text": symptom_text,
         "symptom_class": symptom_class,
         "warnings": warnings,
+        "logging_health": logging_health,
         "available_evidence": _available_evidence(index),
         "missing_evidence": missing,
         "recommended_next_commands": _recommended_commands(log_path, symptom_text, spec, present, missing),

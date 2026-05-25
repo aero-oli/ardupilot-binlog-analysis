@@ -81,6 +81,9 @@ def main() -> int:
             warnings.append("Validation stopped at --max-messages; message counts and module availability may be partial.")
         if index.get("logging_dropouts"):
             warnings.append("Possible logging dropout/drop count evidence was found; inspect index.logging_dropouts.")
+        logging_health = index.get("logging_health", {})
+        if logging_health.get("limits_diagnosis"):
+            warnings.append("Logging health limits diagnosis confidence: " + logging_health.get("confidence_impact", "inspect logging_health"))
         if index.get("duration_s") is None:
             warnings.append("No usable time base found; segmenting and time plots may be limited.")
         if modules["tuning"]["status"] != "available":
@@ -90,7 +93,7 @@ def main() -> int:
         elif modules["yaw_diagnosis"]["missing_strongly_recommended"]:
             warnings.append("Yaw diagnosis is available from ATT/RATE but confidence is reduced without yaw_diagnosis.missing_strongly_recommended messages.")
         warnings.extend(scope.get("notes", []))
-        result = {"file": str(path), "warnings": warnings, "vehicle_scope": scope, "modules": modules, "index": index}
+        result = {"file": str(path), "warnings": warnings, "vehicle_scope": scope, "modules": modules, "logging_health": logging_health, "index": index}
         write_json(args.json, result)
         if args.summary:
             lines = [f"# Validation: {path.name}\n"]
@@ -98,6 +101,10 @@ def main() -> int:
                 lines.append("## Warnings")
                 lines.extend(f"- {w}" for w in warnings)
                 lines.append("")
+            lines.append("## Logging Health")
+            lines.append(f"- Dropouts detected: {logging_health.get('dropouts_detected', False)}")
+            lines.append(f"- Max time gap: {logging_health.get('max_time_gap_s', 0)} s")
+            lines.append(f"- Confidence impact: {logging_health.get('confidence_impact', 'unknown')}\n")
             lines.append("## Module availability")
             lines.append(f"\n## Vehicle scope\n- Primary vehicle: {scope['primary_vehicle']}\n- Copter heuristic confidence: {scope['copter_heuristics_confidence']}\n")
             lines.append("| Module | Status | Missing |")

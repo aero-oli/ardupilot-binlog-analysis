@@ -256,6 +256,11 @@ class StreamingIndexBuilder:
         self.logging_dropouts: List[Dict[str, Any]] = []
         self.start_s: Optional[float] = None
         self.end_s: Optional[float] = None
+        self.first_armed_s: Optional[float] = None
+        self._last_time_by_message: Dict[str, float] = {}
+        self._max_gap_by_message: Dict[str, Dict[str, Any]] = {}
+        self._timestamp_resets: List[Dict[str, Any]] = []
+        self._after_arm_counts: Counter[str] = Counter()
 
     def add_row(self, typ: str, row: Dict[str, Any]) -> None:
         entry = self.messages.setdefault(typ, {"count": 0, "fields": []})
@@ -268,6 +273,18 @@ class StreamingIndexBuilder:
         if ts is not None:
             self.start_s = ts if self.start_s is None else min(self.start_s, ts)
             self.end_s = ts if self.end_s is None else max(self.end_s, ts)
+            previous = self._last_time_by_message.get(typ)
+            if previous is not None:
+                gap = ts - previous
+                if gap < -0.001 and len(self._timestamp_resets) < 100:
+                    self._timestamp_resets.append({"message": typ, "previous_time_s": previous, "time_s": ts, "delta_s": gap})
+                elif gap > 0:
+                    current = self._max_gap_by_message.get(typ)
+                    if current is None or gap > current["gap_s"]:
+                        self._max_gap_by_message[typ] = {"message": typ, "gap_s": float(gap), "from_s": previous, "to_s": ts}
+            self._last_time_by_message[typ] = ts
+            if self.first_armed_s is not None and ts >= self.first_armed_s:
+                self._after_arm_counts[typ] += 1
         if typ == "PARM":
             name = str(row.get("Name") or row.get("name") or "").strip()
             val = row.get("Value", row.get("value"))
@@ -283,9 +300,72 @@ class StreamingIndexBuilder:
             self.events.append({"time_s": ts, "id": row.get("Id"), "raw": strip_private(row)})
         elif typ == "ERR" and len(self.errors) < 500:
             self.errors.append({"time_s": ts, "subsys": row.get("Subsys"), "ecode": row.get("ECode"), "raw": strip_private(row)})
+        elif typ == "ARM":
+            arm = _armed_value(row)
+            if arm is True and ts is not None and self.first_armed_s is None:
+                self.first_armed_s = ts
+                self._after_arm_counts[typ] += 1
         dropout = _detect_dropout(typ, row)
         if dropout and len(self.logging_dropouts) < 200:
             self.logging_dropouts.append(dropout)
+
+    def logging_health(self) -> Dict[str, Any]:
+        duration = None if self.start_s is None or self.end_s is None else max(0.0, float(self.end_s - self.start_s))
+        affected = []
+        max_gap = 0.0
+        for typ, gap in sorted(self._max_gap_by_message.items(), key=lambda item: item[1]["gap_s"], reverse=True):
+            gap_s = float(gap["gap_s"])
+            max_gap = max(max_gap, gap_s)
+            threshold = 2.0 if typ in {"ATT", "RATE", "IMU", "GYR", "ACC", "VIBE", "RCOU"} else 10.0
+            if gap_s >= threshold:
+                affected.append({**gap, "reason": "timestamp_gap", "threshold_s": threshold})
+        sparse = []
+        if duration and duration > 5:
+            for typ, min_rate in {"ATT": 1.0, "RATE": 1.0, "VIBE": 0.2}.items():
+                count = self.messages.get(typ, {}).get("count", 0)
+                if count and count / duration < min_rate:
+                    sparse.append({"message": typ, "count": count, "duration_s": round(duration, 3), "rate_hz": count / duration, "expected_min_hz": min_rate})
+        missing_after_arm = []
+        if self.first_armed_s is not None:
+            for typ in ["ATT", "RATE"]:
+                if self._after_arm_counts.get(typ, 0) == 0:
+                    missing_after_arm.append(typ)
+            for typ in ["RCOU", "RCO2", "RCO3"]:
+                if self._after_arm_counts.get(typ, 0):
+                    break
+            else:
+                missing_after_arm.append("RCOU/RCO2/RCO3")
+        if sparse:
+            affected.extend({**item, "reason": "unexpected_message_sparsity"} for item in sparse)
+        if missing_after_arm:
+            affected.extend({"message": item, "reason": "missing_core_after_arm"} for item in missing_after_arm)
+        if self._timestamp_resets:
+            affected.extend({**item, "reason": "timestamp_reset"} for item in self._timestamp_resets[:20])
+        dropouts = bool(self.logging_dropouts)
+        limited = dropouts or bool(affected)
+        if dropouts:
+            impact = "Log dropout/drop-count evidence is present; conclusions that rely on exact timing or missing rows are reduced confidence."
+        elif self._timestamp_resets:
+            impact = "Timestamp resets were detected; time-window and correlation conclusions may be unreliable."
+        elif missing_after_arm:
+            impact = "Core evidence is missing after arming; absence of evidence must not be read as absence of a fault."
+        elif affected:
+            impact = "Timestamp gaps or sparse messages may hide short events; diagnosis confidence is reduced."
+        else:
+            impact = "No logging dropouts, timestamp resets, large gaps, or armed-core-message gaps detected by heuristic."
+        return {
+            "dropouts_detected": dropouts,
+            "dropout_count": len(self.logging_dropouts),
+            "dropouts": self.logging_dropouts[:50],
+            "max_time_gap_s": round(max_gap, 6) if max_gap else 0.0,
+            "affected_messages": affected[:100],
+            "timestamp_resets": self._timestamp_resets[:50],
+            "unexpected_message_sparsity": sparse,
+            "missing_core_messages_after_arm": missing_after_arm,
+            "first_armed_time_s": self.first_armed_s,
+            "confidence_impact": impact,
+            "limits_diagnosis": limited,
+        }
 
     def to_index(self, stats: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         vehicle = infer_vehicle(self.firmware_messages, self.parameters)
@@ -309,6 +389,7 @@ class StreamingIndexBuilder:
             "events": self.events[:500],
             "errors": self.errors[:500],
             "logging_dropouts": self.logging_dropouts[:200],
+            "logging_health": self.logging_health(),
             "parser_stats": stats or {},
         }
 
