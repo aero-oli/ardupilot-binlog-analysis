@@ -863,6 +863,50 @@ def test_yaw_diagnosis_separates_yaw_control_from_yaw_estimator_evidence():
     assert_true("mag field magnitude correlates" in evidence, "yaw estimator evidence should retain MAG/load correlation")
 
 
+def _yaw_authority_finding_for_output_message(output_message=None):
+    index_messages = {"RATE": {}, "PIDY": {}, "MODE": {}}
+    tables = {
+        "RATE": pd.DataFrame({
+            "TimeS": [0.0, 1.0, 2.0, 3.0],
+            "YDes": [0.0, 120.0, 120.0, 120.0],
+            "Y": [0.0, 0.0, 5.0, 0.0],
+            "YOut": [0.0, 0.9, 0.95, 0.9],
+        }),
+        "PIDY": pd.DataFrame({"TimeS": [1.0, 2.0, 3.0], "Err": [120.0, 115.0, 120.0]}),
+        "MODE": pd.DataFrame({"TimeS": [0.0], "Mode": ["LOITER"]}),
+    }
+    if output_message:
+        index_messages[output_message] = {}
+        tables[output_message] = pd.DataFrame({"TimeS": [1.0, 2.0, 3.0], "C1": [1900, 1950, 1960], "C2": [1100, 1050, 1040]})
+    findings, _context, _checked, *_ = diagnose_yaw(tables, {"messages": index_messages, "errors": [], "events": [], "modes": []})
+    return next(f for f in findings if f.get("possible_cause") == "Yaw authority limited or yaw controller output saturated")
+
+
+def test_yaw_authority_confidence_is_high_with_rcou_rco2_or_rco3_outputs():
+    for output_message in ["RCOU", "RCO2", "RCO3"]:
+        finding = _yaw_authority_finding_for_output_message(output_message)
+        assert_true(finding["confidence"] == "high", f"{output_message} output evidence should give high yaw-authority confidence")
+
+
+def test_yaw_authority_confidence_remains_medium_without_actuator_outputs():
+    finding = _yaw_authority_finding_for_output_message()
+    assert_true(finding["confidence"] == "medium", "missing actuator output evidence should keep yaw-authority confidence medium")
+
+
+def test_cannot_conclude_treats_rco2_as_actuator_output_evidence():
+    cannot = build_cannot_conclude(
+        "yaw_misbehaviour",
+        missing_required=[],
+        missing_strongly_recommended=["RCOU"],
+        missing_optional=[],
+        tables={"RCO2": pd.DataFrame({"TimeS": [1.0], "C9": [1900]})},
+        index={"messages": {"RCO2": {}}},
+    )
+    text = "\n".join(cannot)
+    assert_true("RCOU/RCO2/RCO3 is missing" not in text, "RCO2 output rows should avoid missing actuator-output caveat")
+    assert_true("Strongly recommended message `RCOU` is missing" not in text, "RCO2 output rows should avoid false RCOU-only missing tier wording")
+
+
 def test_rcin_summary_uses_parameter_channel_mapping():
     tables = {
         "PARM": pd.DataFrame({
@@ -1474,6 +1518,9 @@ def main():
     test_mag_offsets_are_context_not_field_magnitude_or_interference()
     test_magnetic_interference_hypothesis_requires_correlation()
     test_yaw_diagnosis_separates_yaw_control_from_yaw_estimator_evidence()
+    test_yaw_authority_confidence_is_high_with_rcou_rco2_or_rco3_outputs()
+    test_yaw_authority_confidence_remains_medium_without_actuator_outputs()
+    test_cannot_conclude_treats_rco2_as_actuator_output_evidence()
     test_rcin_summary_uses_parameter_channel_mapping()
     test_yaw_rcin_commanded_motion_is_context_not_fault()
     test_yaw_without_rcin_or_desired_command_flags_uncommanded_motion()

@@ -23,6 +23,37 @@ from ap_units import value_with_unit
 from ap_vibration import add_vibration_assessment_findings, build_vibration_assessment
 
 
+ACTUATOR_OUTPUT_MESSAGES = ("RCOU", "RCO2", "RCO3")
+
+
+def actuator_output_evidence_sources(tables):
+    sources = []
+    for name in ACTUATOR_OUTPUT_MESSAGES:
+        df = tables.get(name)
+        if df is None:
+            continue
+        try:
+            has_rows = len(df) > 0
+        except Exception:
+            has_rows = False
+        if has_rows and output_channel_columns(df):
+            sources.append(name)
+    if sources:
+        return sources
+    return ["RCOUT"] if combined_rcout_dataframe(tables) is not None else []
+
+
+def has_actuator_output_evidence(tables):
+    return bool(actuator_output_evidence_sources(tables))
+
+
+def missing_strongly_with_available_alternatives(missing_strongly, tables):
+    missing = list(missing_strongly or [])
+    if has_actuator_output_evidence(tables):
+        missing = [msg for msg in missing if msg not in ACTUATOR_OUTPUT_MESSAGES]
+    return missing
+
+
 def add_event_markers(fig, markers):
     if not markers:
         return
@@ -517,6 +548,7 @@ def diagnose_yaw(tables, index, vibration_assessment=None):
     context = []
     checked = []
     missing_required, missing_strongly, missing_optional = diagnosis_missing(index, "yaw_misbehaviour")
+    missing_strongly = missing_strongly_with_available_alternatives(missing_strongly, tables)
 
     command_response = build_command_response_investigation(tables, index, axes=("yaw",))
     findings.extend(command_response["findings"])
@@ -566,12 +598,19 @@ def diagnose_yaw(tables, index, vibration_assessment=None):
         else:
             out_p95 = None; out_max = None
         if rate_tracking_bad and output_high:
+            output_sources = actuator_output_evidence_sources(tables)
+            evidence = [
+                f"RATE yaw error p95 is {p95:.1f} deg/s; max {maxabs:.1f} deg/s",
+                f"RATE.YOut p95 abs is {out_p95:.2f} normalized; max abs {out_max:.2f} normalized",
+            ]
+            if output_sources:
+                evidence.append("Actuator output rows are available from " + "/".join(output_sources))
             findings.append({
                 "rank": 1,
                 "possible_cause": "Yaw authority limited or yaw controller output saturated",
                 "severity": "safety-critical",
-                "confidence": "high" if "RCOU" in tables else "medium",
-                "evidence": [f"RATE yaw error p95 is {p95:.1f} deg/s; max {maxabs:.1f} deg/s", f"RATE.YOut p95 abs is {out_p95:.2f} normalized; max abs {out_max:.2f} normalized"],
+                "confidence": "high" if output_sources else "medium",
+                "evidence": evidence,
                 "evidence_values": [
                     value_with_unit("RATE.yaw_p95_abs_error", p95, "deg/s"),
                     value_with_unit("RATE.yaw_max_abs_error", maxabs, "deg/s"),
@@ -878,6 +917,7 @@ def build_cannot_conclude(
 ):
     tables = tables or {}
     missing_required = missing_required or []
+    missing_strongly_recommended = missing_strongly_with_available_alternatives(missing_strongly_recommended, tables)
     missing_strongly_recommended = missing_strongly_recommended or []
     missing_optional = missing_optional or []
     out = []
@@ -885,7 +925,7 @@ def build_cannot_conclude(
         out.append("ESC-level motor/ESC confirmation is not possible because ESC/ESCX/EDT2 telemetry is missing.")
     elif "ESCX" in tables and "ESC" not in tables and "EDT2" not in tables:
         out.append("ESCX duty/power/flags are available, but ESC RPM/current/temperature/error and EDT2 status confirmation are not available because ESC and EDT2 telemetry are missing.")
-    if not any(name in tables for name in ["RCOU", "RCO2", "RCO3"]):
+    if not has_actuator_output_evidence(tables):
         out.append("Actuator output saturation cannot be confirmed because RCOU/RCO2/RCO3 is missing.")
     elif not output_mapping_from_tables(tables, index=index):
         out.append("Output mapping could not be confirmed from parameters; RCOU/RCO2/RCO3 channel interpretation is generic.")
