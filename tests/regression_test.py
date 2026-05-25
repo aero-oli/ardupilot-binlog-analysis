@@ -822,6 +822,13 @@ def test_rc_prearm_aliases_drive_symptom_classification():
     assert_true(symptom == "rc_failsafe_prearm_issue", f"expected rc_failsafe_prearm_issue, got {symptom}")
 
 
+def test_explicit_compass_and_baro_aliases_drive_symptom_classification():
+    symptom = ap_common.classify_symptom("compass interference during loiter")
+    assert_true(symptom == "compass_yaw_source_issue", f"expected compass_yaw_source_issue, got {symptom}")
+    symptom = ap_common.classify_symptom("rangefinder altitude jumps near the ground")
+    assert_true(symptom == "baro_rangefinder_altitude_issue", f"expected baro_rangefinder_altitude_issue, got {symptom}")
+
+
 def test_rc_prearm_required_messages_and_parameters():
     missing_required, _missing_strongly, _missing_optional = diagnosis_missing({"messages": {}}, "rc_failsafe_prearm_issue")
     assert_true(missing_required == ["MSG", "ERR"], f"MSG/ERR should be required for rc_failsafe_prearm_issue, got {missing_required}")
@@ -1275,6 +1282,22 @@ def test_manifest_recommends_mag_yaw_source_plot_for_ekf_gps_evidence():
 
     assert_true("mag" in manifest["recommended_plots"], "EKF/GPS manifest should expose the mag/yaw-source plot group when evidence exists")
     assert_true("EKF yaw/mag test ratios" in commands, "EKF/GPS manifest should recommend the intended mag/yaw-source custom plot")
+
+
+def test_manifest_recommends_targeted_plots_for_compass_and_baro_classes():
+    compass_index = {"messages": {"ATT": {}, "RATE": {}, "MAG": {}, "XKF3": {}, "XKF4": {}, "MODE": {}, "GPS": {}, "BAT": {}, "VIBE": {}}, "errors": [], "events": [], "modes": []}
+    compass_manifest = build_manifest_from_index(compass_index, "compass interference", "flight.bin")
+    compass_commands = "\n".join(compass_manifest["recommended_next_commands"])
+    assert_true(compass_manifest["symptom_class"] == "compass_yaw_source_issue", "compass prompt should use explicit compass/yaw-source class")
+    assert_true("mag" in compass_manifest["recommended_plots"], "compass/yaw-source manifest should recommend mag/yaw-source plots")
+    assert_true("EKF yaw/mag test ratios" in compass_commands, "compass/yaw-source commands should include yaw/mag test-ratio plotting")
+
+    baro_index = {"messages": {"CTUN": {}, "BARO": {}, "XKF4": {}, "VIBE": {}, "BAT": {}, "RCOU": {}}, "errors": [], "events": [], "modes": []}
+    baro_manifest = build_manifest_from_index(baro_index, "rangefinder altitude jumps", "flight.bin")
+    baro_commands = "\n".join(baro_manifest["recommended_next_commands"])
+    assert_true(baro_manifest["symptom_class"] == "baro_rangefinder_altitude_issue", "rangefinder prompt should use explicit baro/rangefinder class")
+    assert_true("baro_altitude" in baro_manifest["recommended_plots"], "baro/rangefinder manifest should recommend barometer altitude plots")
+    assert_true("Barometer and altitude estimate" in baro_commands, "baro/rangefinder commands should include barometer altitude plotting")
 
 
 def test_escx_generates_plots_and_avoids_missing_telemetry_caveat():
@@ -1822,6 +1845,7 @@ def main():
     test_toilet_bowling_prefers_ekf_gps_when_navigation_context_is_present()
     test_yaml_aliases_drive_symptom_classification()
     test_rc_prearm_aliases_drive_symptom_classification()
+    test_explicit_compass_and_baro_aliases_drive_symptom_classification()
     test_rc_prearm_required_messages_and_parameters()
     test_rc_prearm_diagnosis_routes_context_without_bypassing_checks()
     test_new_yaml_alias_does_not_need_python_change()
@@ -1849,6 +1873,7 @@ def main():
     test_manifest_plot_group_validation_covers_yaml_and_unknown_groups()
     test_manifest_recommends_fft_workflow_for_vibration_raw_imu_evidence()
     test_manifest_recommends_mag_yaw_source_plot_for_ekf_gps_evidence()
+    test_manifest_recommends_targeted_plots_for_compass_and_baro_classes()
     test_escx_generates_plots_and_avoids_missing_telemetry_caveat()
     test_normal_telemetry_is_context_not_findings()
     test_yaw_pid_error_below_threshold_is_checked_not_finding()

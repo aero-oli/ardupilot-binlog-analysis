@@ -168,6 +168,30 @@ way to collect that evidence.
   control is not already reliable.
 - Cleanup: disable disarmed logging if used for startup evidence.
 
+### compass_yaw_source_issue
+
+- Minimum required evidence: none, but do not claim a strong compass/yaw-source
+  cause without time-aligned attitude, magnetic, EKF, and mode evidence.
+- Strongly recommended evidence: `ATT`, `RATE`, `MAG`, `XKF3`, `XKF4`, `MODE`.
+- Useful optional context: `GPS`, `GPS2`, `GPA`, `RCIN`, `RCOU`, `BAT`, `POWR`,
+  `VIBE`, `MSG`, `ERR`, `EV`.
+- Logging parameters to review: `LOG_BITMASK`, `EK3_LOG_LEVEL`, compass logging,
+  `GPS_TYPE`, `GPS_TYPE2`, `GPS_AUTO_SWITCH`, `EK3_SRC1_YAW`, and
+  `LOG_DISARMED` only for boot/pre-arm yaw-source evidence.
+- Suggested plots/signals: `ATT`/`RATE` yaw, `MAG`, `XKF3`, `XKF4` yaw/mag test
+  ratios, GPS/GPA health for GPS yaw, mode/timeline messages, vibration, power.
+- Safe test pattern: only if manual and AltHold control are already stable,
+  capture a short open-area hover with small yaw inputs. Compare AltHold and
+  Loiter only when navigation behaviour is already safe.
+- Bench/ground checks before flight: compass mounting/orientation, magnetic
+  interference, GPS/yaw-source placement, moving-baseline GPS health if used,
+  EKF source parameters, vibration, power, and pre-arm messages.
+- Do not fly if: compass/EKF/yaw-source warnings persist, heading jumps appear
+  on the ground, manual control is unstable, or GPS yaw/moving-baseline health is
+  unresolved.
+- Cleanup: disable disarmed logging if used for startup evidence and restore any
+  temporary high-rate logging.
+
 ### battery_power_issue
 
 - Minimum required evidence: `BAT`.
@@ -212,6 +236,31 @@ way to collect that evidence.
 - Do not fly if: thrust loss, power sag, severe vibration, barometer/rangefinder
   fault, or uncontrolled climb/descent is suspected.
 - Cleanup: restore any high-rate logging used for vibration/height evidence.
+
+### baro_rangefinder_altitude_issue
+
+- Minimum required evidence: none, but `CTUN` and `BARO` are strongly
+  recommended for a useful altitude-estimate investigation.
+- Strongly recommended evidence: `CTUN`, `BARO`.
+- Useful optional context: `RNGF`, `GPS`, `XKF4`, `VIBE`, `BAT`, `POWR`,
+  `RCOU`/`RCO2`/`RCO3`, `MODE`, `MSG`, `ERR`, `EV`.
+- Logging parameters to review: `LOG_BITMASK`, `LOG_FILE_RATEMAX`,
+  barometer/rangefinder logging, `RNGFND1_TYPE`, `RNGFND1_ORIENT`,
+  `RNGFND1_MIN_CM`, `RNGFND1_MAX_CM`, `EK3_SRC1_POSZ`, `EK3_OGN_HGT_MASK`, and
+  altitude-controller parameters.
+- Suggested plots/signals: desired vs actual altitude, `BARO` altitude/pressure,
+  `RNGF`, GPS altitude, EKF height test ratios, vibration/clipping, battery and
+  board power, motor outputs.
+- Safe test pattern: after propulsion, power, height-sensor, and mechanical
+  checks, capture stable hover plus small gentle AltHold altitude changes. Use
+  terrain/rangefinder tests only in an appropriate environment.
+- Bench checks before flight: barometer foam/airflow exposure, rangefinder
+  mounting/orientation/cleanliness, wiring, terrain/range limits, vibration,
+  prop wash, power, and altitude-controller parameter sanity.
+- Do not fly if: uncontrolled climb/descent, thrust loss, power sag, severe
+  vibration, barometer fault, or rangefinder fault is suspected.
+- Cleanup: restore high-volume logging or temporary height-sensor logging
+  changes after the diagnostic capture.
 
 ### rc_failsafe_prearm_issue
 

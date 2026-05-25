@@ -181,7 +181,7 @@ def make_targeted_plots_from_tables(tables, symptom_class, plots_dir, events=Fal
             fig.update_layout(title="Rate tracking symptom plot", template="plotly_white", hovermode="x unified")
             add_event_markers(fig, markers)
             p = out / "rate_tracking_symptom.html"; fig.write_html(str(p), include_plotlyjs="cdn"); generated.append(str(p))
-    if symptom_class in {"ekf_gps_issue", "crash_or_loss_of_control", "general_investigation", "rc_failsafe_prearm_issue"}:
+    if symptom_class in {"ekf_gps_issue", "compass_yaw_source_issue", "crash_or_loss_of_control", "general_investigation", "rc_failsafe_prearm_issue"}:
         if "GPS" in tables or "GPS2" in tables or "XKF4" in tables or "NKF4" in tables:
             fig = make_subplots(rows=3, cols=1, shared_xaxes=True, subplot_titles=("GPS quality", "GPS satellites/status", "EKF test ratios"))
             for group in gps_instance_groups(tables):
@@ -205,7 +205,7 @@ def make_targeted_plots_from_tables(tables, symptom_class, plots_dir, events=Fal
             add_event_markers(fig, markers)
             p = out / "ekf_gps_symptom.html"; fig.write_html(str(p), include_plotlyjs="cdn"); generated.append(str(p))
             generated.extend(write_compass_yaw_plots(tables, out, events=events))
-    if symptom_class in {"vibration_issue", "crash_or_loss_of_control", "general_investigation"} and "VIBE" in tables:
+    if symptom_class in {"vibration_issue", "compass_yaw_source_issue", "baro_rangefinder_altitude_issue", "crash_or_loss_of_control", "general_investigation"} and "VIBE" in tables:
         vibe = tables["VIBE"]
         fig = make_subplots(rows=2, cols=1, shared_xaxes=True, subplot_titles=("Vibration", "Clipping"))
         x = vibe["TimeS"] if "TimeS" in vibe.columns else list(range(len(vibe)))
@@ -217,7 +217,7 @@ def make_targeted_plots_from_tables(tables, symptom_class, plots_dir, events=Fal
         fig.update_layout(title="Vibration symptom plot", template="plotly_white", hovermode="x unified")
         add_event_markers(fig, markers)
         p = out / "vibration_symptom.html"; fig.write_html(str(p), include_plotlyjs="cdn"); generated.append(str(p))
-    if symptom_class in {"battery_power_issue", "crash_or_loss_of_control", "general_investigation", "rc_failsafe_prearm_issue"}:
+    if symptom_class in {"battery_power_issue", "compass_yaw_source_issue", "baro_rangefinder_altitude_issue", "crash_or_loss_of_control", "general_investigation", "rc_failsafe_prearm_issue"}:
         if "BAT" in tables or "POWR" in tables:
             fig = make_subplots(rows=2, cols=1, shared_xaxes=True, subplot_titles=("Battery", "Board power"))
             for group in battery_instance_groups(tables):
@@ -289,7 +289,7 @@ def make_targeted_plots_from_tables(tables, symptom_class, plots_dir, events=Fal
             fig.update_layout(title="ESC/ESCX/EDT2 symptom plot", template="plotly_white", hovermode="x unified")
             add_event_markers(fig, markers)
             p = out / "esc_escx_edt2_symptom.html"; fig.write_html(str(p), include_plotlyjs="cdn"); generated.append(str(p))
-    if symptom_class in {"altitude_throttle_issue", "crash_or_loss_of_control"}:
+    if symptom_class in {"altitude_throttle_issue", "baro_rangefinder_altitude_issue", "crash_or_loss_of_control"}:
         if "CTUN" in tables or "BARO" in tables:
             fig = make_subplots(rows=2, cols=1, shared_xaxes=True, subplot_titles=("Altitude/throttle", "Barometer"))
             if "CTUN" in tables:
@@ -778,6 +778,15 @@ def diagnose_by_class(symptom_class, tables, index, vibration_assessment=None):
         add_vibration_findings(tables, findings, checked, rank=2, vibration_assessment=vibration_assessment, symptom_class=symptom_class)
         add_power_findings(tables, findings, checked, context, rank=3)
         add_attitude_rate_findings(tables, findings, checked, axes=("roll", "pitch", "yaw"), rank=4)
+    elif symptom_class == "compass_yaw_source_issue":
+        compass_yaw = build_compass_yaw_investigation(tables)
+        findings.extend(compass_yaw["findings"])
+        context.extend(compass_yaw["context"])
+        checked.extend(compass_yaw["checked"])
+        add_ekf_gps_findings(tables, index, findings, checked, rank=2)
+        add_attitude_rate_findings(tables, findings, checked, axes=("yaw",), rank=3)
+        add_vibration_findings(tables, findings, checked, rank=4, vibration_assessment=vibration_assessment, symptom_class=symptom_class)
+        add_power_findings(tables, findings, checked, context, rank=4)
     elif symptom_class == "vibration_issue":
         add_vibration_findings(tables, findings, checked, rank=1, vibration_assessment=vibration_assessment, symptom_class=symptom_class)
         add_attitude_rate_findings(tables, findings, checked, axes=("roll", "pitch", "yaw"), rank=2)
@@ -812,6 +821,12 @@ def diagnose_by_class(symptom_class, tables, index, vibration_assessment=None):
         add_power_findings(tables, findings, checked, context, rank=2)
         add_motor_esc_findings(tables, findings, checked, context, rank=3, index=index)
         add_ekf_gps_findings(tables, index, findings, checked, rank=3)
+    elif symptom_class == "baro_rangefinder_altitude_issue":
+        add_altitude_findings(tables, findings, checked, context, rank=1)
+        add_ekf_gps_findings(tables, index, findings, checked, rank=2)
+        add_vibration_findings(tables, findings, checked, rank=2, vibration_assessment=vibration_assessment, symptom_class=symptom_class)
+        add_power_findings(tables, findings, checked, context, rank=3)
+        add_motor_esc_findings(tables, findings, checked, context, rank=4, index=index)
     else:
         add_attitude_rate_findings(tables, findings, checked, axes=("roll", "pitch", "yaw"), rank=2)
         add_motor_esc_findings(tables, findings, checked, context, rank=2, index=index)

@@ -115,6 +115,42 @@ symptom_classes:
       - compass_or_yaw_source_error
       - navigation_mode_dependency
 
+  - name: compass_yaw_source_issue
+    aliases:
+      - compass issue
+      - compass interference
+      - bad heading
+      - heading jump
+      - mag interference
+      - magnetic interference
+      - GPS yaw
+      - moving baseline yaw
+    required_messages: []
+    strongly_recommended_messages: [ATT, RATE, MAG, XKF3, XKF4, MODE]
+    optional_context_messages: [GPS, GPS2, GPA, RCIN, RCOU, BAT, POWR, VIBE, MSG, ERR, EV]
+    relevant_parameters:
+      - COMPASS_USE
+      - COMPASS_USE2
+      - COMPASS_USE3
+      - COMPASS_ORIENT
+      - COMPASS_ORIENT2
+      - COMPASS_ORIENT3
+      - EK3_SRC1_YAW
+      - GPS_TYPE
+      - GPS_TYPE2
+      - GPS_AUTO_SWITCH
+    recommended_plot_groups: [mag, ekf_innovations, yaw_attitude, yaw_rate, gps_quality, vibration, power]
+    diagnostic_questions:
+      - Did the heading or yaw-source estimate jump without matching physical yaw?
+      - Did MAG field evidence or EKF yaw/mag test ratios change at the same time?
+      - Was GPS yaw or moving-baseline yaw configured and healthy if used?
+      - Did the symptom occur only in navigation modes or also in manual/AltHold?
+    likely_fault_branches:
+      - compass_interference_or_orientation
+      - yaw_source_configuration_or_switching
+      - ekf_yaw_innovation_rejection
+      - gps_yaw_or_moving_baseline_issue
+
   - name: motor_esc_issue
     aliases: [motor pulsing, esc desync, motor stopped, motor hot, rpm mismatch, prop, output]
     required_messages: []
@@ -310,6 +346,39 @@ symptom_classes:
       - throttle_saturation
       - barometer_or_rangefinder_issue
       - vibration_or_power_contribution
+
+  - name: baro_rangefinder_altitude_issue
+    aliases:
+      - barometer
+      - baro drift
+      - rangefinder
+      - lidar altitude
+      - terrain altitude
+      - altitude estimate
+    required_messages: []
+    strongly_recommended_messages: [CTUN, BARO]
+    optional_context_messages: [RNGF, GPS, XKF4, VIBE, BAT, POWR, RCOU, MODE, MSG, ERR, EV]
+    relevant_parameters:
+      - RNGFND1_TYPE
+      - RNGFND1_ORIENT
+      - RNGFND1_MIN_CM
+      - RNGFND1_MAX_CM
+      - EK3_SRC1_POSZ
+      - EK3_OGN_HGT_MASK
+      - PSC_POSZ_P
+      - PSC_VELZ_P
+      - PSC_ACCZ_P
+    recommended_plot_groups: [baro_altitude, altitude_throttle, ekf_innovations, vibration, power, motor_outputs]
+    diagnostic_questions:
+      - Did barometer, rangefinder, GPS altitude, or EKF height evidence jump before the altitude symptom?
+      - Did CTUN target-vs-actual altitude diverge, or did only the estimate move?
+      - Did vibration, prop wash, airflow, terrain following, or power/thrust limits coincide?
+      - Is the rangefinder orientation, min/max range, and terrain use appropriate for the test?
+    likely_fault_branches:
+      - barometer_drift_or_airflow
+      - rangefinder_dropout_or_bad_range
+      - ekf_height_source_issue
+      - vibration_or_thrust_contribution
 
   - name: general_investigation
     aliases: []

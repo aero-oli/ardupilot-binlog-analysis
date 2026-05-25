@@ -189,6 +189,8 @@ For symptom-led diagnosis, `references/symptom-diagnosis-map.yaml` is authoritat
 - roll/pitch wobble or oscillation: `references/attitude-rate-diagnosis.md`
 - motor/ESC issue: `references/motor-esc-diagnosis.md`
 - GPS/EKF/Loiter issue: `references/ekf-gps-diagnosis.md`
+- compass/yaw-source issue: `references/compass-yaw-source-diagnosis.md`
+- barometer/rangefinder altitude issue: `references/baro-rangefinder-altitude-diagnosis.md`
 - vibration/noise issue: `references/vibration-diagnosis.md`
 - battery/power issue: `references/battery-power-diagnosis.md`
 - RC/failsafe/pre-arm/arming issue: `references/rc-failsafe-prearm-diagnosis.md`

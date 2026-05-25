@@ -42,6 +42,7 @@ PLOT_COMMANDS = {
     "attitude_rate": ["--series ATT.DesRoll", "--series ATT.Roll", "--series ATT.DesPitch", "--series ATT.Pitch", "--title \"Attitude tracking\""],
     "pid_terms": ["--series PIDR.Err", "--series PIDP.Err", "--series PIDY.Err", "--title \"PID errors\""],
     "altitude_throttle": ["--series CTUN.DAlt", "--series CTUN.Alt", "--series CTUN.ThO", "--secondary CTUN.ThO", "--title \"Altitude and throttle\""],
+    "baro_altitude": ["--series CTUN.DAlt", "--series CTUN.Alt", "--series BARO.Alt", "--series BARO.Press", "--secondary BARO.Press", "--title \"Barometer and altitude estimate\""],
     "esc_telemetry": ["--series ESC.RPM", "--series ESC.Curr", "--series ESC.Err", "--secondary ESC.Err", "--title \"ESC telemetry\""],
     "mode_timeline": ["--series RATE.R", "--events", "--title \"Timeline context\""],
 }
@@ -145,6 +146,21 @@ SYMPTOM_EVIDENCE_PLANS = {
         ],
         "reset": ["Disable LOG_DISARMED if it was only enabled for startup EKF or sensor-init evidence."],
     },
+    "compass_yaw_source_issue": {
+        "default_step": "controlled_flight",
+        "safe_to_request_flight": True,
+        "bench_checks_first": [
+            "Check compass mounting/orientation, nearby current-carrying wiring, GPS/yaw-source placement, moving-baseline GPS health if used, EKF source parameters, vibration, and pre-arm messages before flight.",
+        ],
+        "logging_settings": BASE_LOGGING_SETTINGS + ["EK3_LOG_LEVEL", "LOG_DISARMED"],
+        "safe_capture": [
+            "Only if manual and AltHold control are stable, capture a short open-area hover with small yaw inputs and compare AltHold against Loiter only when navigation behaviour is already safe.",
+        ],
+        "do_not_attempt": [
+            "Do not fly if compass/EKF/yaw-source warnings persist, heading jumps appear on the ground, manual control is unstable, or GPS yaw/moving-baseline health is unresolved.",
+        ],
+        "reset": ["Disable LOG_DISARMED if it was only enabled for startup yaw-source evidence; restore any temporary high-rate logging."],
+    },
     "battery_power_issue": {
         "default_step": "bench_check",
         "safe_to_request_flight": False,
@@ -191,6 +207,21 @@ SYMPTOM_EVIDENCE_PLANS = {
             "Do not fly if thrust loss, power sag, severe vibration, barometer/rangefinder fault, or uncontrolled climb/descent is suspected.",
         ],
         "reset": ["Restore any high-rate logging used for vibration or height evidence."],
+    },
+    "baro_rangefinder_altitude_issue": {
+        "default_step": "controlled_flight",
+        "safe_to_request_flight": True,
+        "bench_checks_first": [
+            "Check barometer foam and airflow exposure, rangefinder mounting/orientation/cleanliness, wiring, terrain/range limits, vibration, prop wash, power, and altitude-controller parameter sanity before flight.",
+        ],
+        "logging_settings": BASE_LOGGING_SETTINGS + ["EK3_LOG_LEVEL"],
+        "safe_capture": [
+            "If thrust authority and height sensors are healthy, capture a stable hover plus small gentle AltHold altitude changes; include rangefinder/terrain behaviour only in an appropriate environment.",
+        ],
+        "do_not_attempt": [
+            "Do not fly if uncontrolled climb/descent, thrust loss, power sag, severe vibration, barometer fault, or rangefinder fault is suspected.",
+        ],
+        "reset": ["Restore high-volume logging or temporary height-sensor logging changes after the diagnostic capture."],
     },
     "crash_or_loss_of_control": {
         "default_step": "do_not_fly_until_checked",

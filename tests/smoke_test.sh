@@ -14,6 +14,8 @@ how_to = Path("references/how-to-investigate.md").read_text(encoding="utf-8")
 logging_reference_path = Path("references/logging-configuration-for-investigation.md")
 evidence_reference_path = Path("references/evidence-gathering-flights.md")
 rc_reference_path = Path("references/rc-failsafe-prearm-diagnosis.md")
+compass_reference_path = Path("references/compass-yaw-source-diagnosis.md")
+baro_reference_path = Path("references/baro-rangefinder-altitude-diagnosis.md")
 
 frontmatter = skill.split("---", 2)[1]
 assert "name: ardupilot-binlog-analysis" in frontmatter
@@ -116,8 +118,10 @@ for symptom_class in [
     "motor_esc_issue",
     "vibration_issue",
     "ekf_gps_issue",
+    "compass_yaw_source_issue",
     "battery_power_issue",
     "altitude_throttle_issue",
+    "baro_rangefinder_altitude_issue",
     "rc_failsafe_prearm_issue",
     "crash_or_loss_of_control",
     "general_investigation",
@@ -153,8 +157,36 @@ for required in [
     "Do not bypass arming checks",
 ]:
     assert required in rc_reference, required
+
+assert compass_reference_path.exists()
+compass_reference = compass_reference_path.read_text(encoding="utf-8")
+assert "references/compass-yaw-source-diagnosis.md" in skill
+for required in [
+    "MAG",
+    "XKF3",
+    "XKF4",
+    "EK3_SRC1_YAW",
+    "GPS yaw",
+    "Do not recommend disabling compass",
+]:
+    assert required in compass_reference, required
+
+assert baro_reference_path.exists()
+baro_reference = baro_reference_path.read_text(encoding="utf-8")
+assert "references/baro-rangefinder-altitude-diagnosis.md" in skill
+for required in [
+    "CTUN",
+    "BARO",
+    "RNGF",
+    "RNGFND1_TYPE",
+    "EK3_SRC1_POSZ",
+    "Do not suggest aggressive altitude testing",
+]:
+    assert required in baro_reference, required
 PY
 python scripts/ap_symptom_classifier.py "the yaw seems to be misbehaving" | grep yaw_misbehaviour >/dev/null
+python scripts/ap_symptom_classifier.py "compass interference" | grep compass_yaw_source_issue >/dev/null
+python scripts/ap_symptom_classifier.py "rangefinder altitude jumps" | grep baro_rangefinder_altitude_issue >/dev/null
 python scripts/ap_fault_tree.py yaw_misbehaviour | grep RATE.YDes >/dev/null
 python - <<'PY'
 import sys
