@@ -25,7 +25,7 @@ from ap_log_diagnose import diagnose_yaw
 from ap_log_extract import write_jsonl_stream
 from ap_log_diagnose import make_targeted_plots_from_tables
 from ap_log_fft import fft_from_isb_rows
-from ap_log_investigation_manifest import build_manifest_from_index
+from ap_log_investigation_manifest import build_manifest_from_index, validate_recommended_plot_groups
 from ap_log_metrics import compute_metrics
 from ap_log_plots import health_plots
 from ap_log_plots import main as plots_main
@@ -828,6 +828,41 @@ def test_manifest_includes_rcin_plot_presets_when_supported():
     assert_true("rcin_yaw_rate" in manifest["recommended_plots"], "RCIN yaw plot preset should be listed as recommended when data exists")
 
 
+def test_manifest_plot_group_validation_covers_yaml_and_unknown_groups():
+    validate_recommended_plot_groups()
+
+    try:
+        validate_recommended_plot_groups({
+            "synthetic_symptom": {
+                "recommended_plot_groups": ["does_not_exist"],
+            },
+        })
+    except AnalysisError as exc:
+        text = str(exc)
+        assert_true("unknown recommended_plot_groups" in text, "unknown plot group validation should explain the failure")
+        assert_true("synthetic_symptom" in text and "does_not_exist" in text, "unknown plot group validation should identify class and group")
+    else:
+        raise AssertionError("unknown recommended_plot_groups entry should fail validation")
+
+
+def test_manifest_recommends_fft_workflow_for_vibration_raw_imu_evidence():
+    index = {"messages": {"VIBE": {}, "RATE": {}, "ISBH": {}, "ISBD": {}}, "errors": [], "events": [], "modes": []}
+    manifest = build_manifest_from_index(index, "vibration problem", "flight.bin")
+    commands = "\n".join(manifest["recommended_next_commands"])
+
+    assert_true("fft" in manifest["recommended_plots"], "FFT plot group should be recommended when raw/batch IMU evidence exists")
+    assert_true("python scripts/ap_log_fft.py flight.bin --out out/fft --json out/fft.json" in commands, "vibration manifest should recommend the FFT workflow")
+
+
+def test_manifest_recommends_mag_yaw_source_plot_for_ekf_gps_evidence():
+    index = {"messages": {"GPS": {}, "XKF1": {}, "XKF3": {}, "XKF4": {}, "MODE": {}, "MAG": {}}, "errors": [], "events": [], "modes": []}
+    manifest = build_manifest_from_index(index, "gps glitch", "flight.bin")
+    commands = "\n".join(manifest["recommended_next_commands"])
+
+    assert_true("mag" in manifest["recommended_plots"], "EKF/GPS manifest should expose the mag/yaw-source plot group when evidence exists")
+    assert_true("EKF yaw/mag test ratios" in commands, "EKF/GPS manifest should recommend the intended mag/yaw-source custom plot")
+
+
 def test_escx_generates_plots_and_avoids_missing_telemetry_caveat():
     tables = {
         "ESCX": pd.DataFrame({
@@ -1293,6 +1328,9 @@ def main():
     test_yaw_without_rcin_or_desired_command_flags_uncommanded_motion()
     test_roll_pitch_rcin_command_response_checks_are_added()
     test_manifest_includes_rcin_plot_presets_when_supported()
+    test_manifest_plot_group_validation_covers_yaml_and_unknown_groups()
+    test_manifest_recommends_fft_workflow_for_vibration_raw_imu_evidence()
+    test_manifest_recommends_mag_yaw_source_plot_for_ekf_gps_evidence()
     test_escx_generates_plots_and_avoids_missing_telemetry_caveat()
     test_normal_telemetry_is_context_not_findings()
     test_yaw_pid_error_below_threshold_is_checked_not_finding()

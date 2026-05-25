@@ -8,7 +8,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from ap_common import AnalysisError, classify_symptom, collect_dataflash, missing_messages, write_json
 from ap_parameters import select_relevant_parameters
-from ap_symptom_map import requirement_spec
+from ap_symptom_map import diagnosis_requirements, requirement_spec
 
 
 EVIDENCE_GROUPS = {
@@ -32,6 +32,8 @@ PLOT_COMMANDS = {
     "motor_outputs": ["--series RCOU.C1", "--series RCOU.C2", "--series RCOU.C3", "--series RCOU.C4", "--title \"Motor outputs\""],
     "power": ["--series BAT.Volt", "--series BAT.Curr", "--secondary BAT.Curr", "--title \"Battery voltage and current\""],
     "vibration": ["--series VIBE.VibeX", "--series VIBE.VibeY", "--series VIBE.VibeZ", "--title \"Vibration\""],
+    "rate_tracking": ["--series RATE.RDes", "--series RATE.R", "--series RATE.PDes", "--series RATE.P", "--series RATE.YDes", "--series RATE.Y", "--title \"Rate tracking\""],
+    "mag": ["--series XKF4.SM", "--series XKF4.SH", "--title \"EKF yaw/mag test ratios\""],
     "ekf_mag": ["--series XKF4.SM", "--series XKF4.SH", "--title \"EKF yaw/mag test ratios\""],
     "ekf_gps": ["--series GPS.Status", "--series GPS.NSats", "--series GPS.HDop", "--secondary GPS.HDop", "--title \"GPS quality\""],
     "gps_quality": ["--series GPS.Status", "--series GPS.NSats", "--series GPS.HDop", "--secondary GPS.HDop", "--title \"GPS quality\""],
@@ -41,6 +43,14 @@ PLOT_COMMANDS = {
     "altitude_throttle": ["--series CTUN.DAlt", "--series CTUN.Alt", "--series CTUN.ThO", "--secondary CTUN.ThO", "--title \"Altitude and throttle\""],
     "esc_telemetry": ["--series ESC.RPM", "--series ESC.Curr", "--series ESC.Err", "--secondary ESC.Err", "--title \"ESC telemetry\""],
     "mode_timeline": ["--series RATE.R", "--events", "--title \"Timeline context\""],
+}
+
+SPECIAL_PLOT_GROUPS = {
+    "fft": {
+        "handled_by": "ap_log_fft.py",
+        "available_when_any": {"GYR", "ACC", "IMU", "IMU_FAST", "RAW_IMU", "ISBH", "ISBD"},
+        "command": "python scripts/ap_log_fft.py {log} --out out/fft --json out/fft.json",
+    },
 }
 
 
@@ -64,14 +74,32 @@ def _missing_evidence(index, spec):
     }
 
 
+def validate_recommended_plot_groups(symptom_specs=None):
+    specs = symptom_specs or diagnosis_requirements()
+    unknown = []
+    for class_name, spec in specs.items():
+        for group in spec.get("recommended_plot_groups", []):
+            if group not in PLOT_COMMANDS and group not in SPECIAL_PLOT_GROUPS:
+                unknown.append(f"{class_name}: {group}")
+    if unknown:
+        raise AnalysisError(
+            "unknown recommended_plot_groups entries; add PLOT_COMMANDS entries or SPECIAL_PLOT_GROUPS registrations: "
+            + ", ".join(unknown)
+        )
+
+
 def _available_plot_groups(spec, present):
     groups = []
     for group in spec.get("recommended_plot_groups", []):
         command_parts = PLOT_COMMANDS.get(group)
-        if not command_parts:
+        special = SPECIAL_PLOT_GROUPS.get(group)
+        if not command_parts and not special:
             continue
-        required_messages = {part.split()[1].split(".")[0] for part in command_parts if part.startswith("--series ") or part.startswith("--secondary ")}
-        if required_messages and not required_messages.issubset(present):
+        if command_parts:
+            required_messages = {part.split()[1].split(".")[0] for part in command_parts if part.startswith("--series ") or part.startswith("--secondary ")}
+            if required_messages and not required_messages.issubset(present):
+                continue
+        elif special.get("available_when_any") and not (special["available_when_any"] & present):
             continue
         groups.append(group)
     return groups
@@ -86,6 +114,13 @@ def _custom_plot_command(log_path, group):
         parts=" ".join(parts),
         out=out_name,
     )
+
+
+def _special_plot_command(log_path, group):
+    spec = SPECIAL_PLOT_GROUPS.get(group)
+    if not spec:
+        return None
+    return spec["command"].format(log=log_path)
 
 
 def _recommended_commands(log_path, symptom_text, spec, present, missing):
@@ -107,6 +142,8 @@ def _recommended_commands(log_path, symptom_text, spec, present, missing):
         commands.append(f"python scripts/ap_log_extract.py {log_path} --out out/tables --format csv")
     for group in _available_plot_groups(spec, present)[:5]:
         command = _custom_plot_command(log_path, group)
+        if command is None:
+            command = _special_plot_command(log_path, group)
         if command:
             commands.append(command)
     return commands
@@ -140,6 +177,7 @@ def _yaw_questions_first(symptom_class, questions):
 
 
 def build_manifest_from_index(index, symptom_text, log_path):
+    validate_recommended_plot_groups()
     symptom_class = classify_symptom(symptom_text)
     spec = requirement_spec(symptom_class)
     present = _present_messages(index)
