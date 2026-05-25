@@ -17,6 +17,7 @@ from ap_common import (
     percentile,
     safe_float,
 )
+from ap_units import value_with_unit
 
 
 def _vals(s):
@@ -28,12 +29,15 @@ def _vals(s):
         return []
 
 
-def _add_context(context, source, detail):
+def _add_context(context, source, detail, values=None):
     if detail:
-        context.append({"source": source, "detail": detail})
+        item = {"source": source, "detail": detail}
+        if values:
+            item["values"] = values
+        context.append(item)
 
 
-def _add_finding(findings, rank, cause, severity, confidence, evidence, interpretation, checks):
+def _add_finding(findings, rank, cause, severity, confidence, evidence, interpretation, checks, evidence_values=None):
     evidence = [e for e in evidence if e]
     if evidence:
         findings.append({
@@ -42,6 +46,7 @@ def _add_finding(findings, rank, cause, severity, confidence, evidence, interpre
             "severity": severity,
             "confidence": confidence,
             "evidence": evidence,
+            "evidence_values": evidence_values or [],
             "interpretation": interpretation,
             "recommended_checks": checks,
         })
@@ -230,7 +235,11 @@ def build_compass_yaw_investigation(tables: Dict[str, Any]) -> Dict[str, Any]:
         mmin = float(m.min())
         mmax = float(m.max())
         span_pct = ((mmax - mmin) / mmax * 100.0) if mmax > 0 else 0.0
-        _add_context(context, "MAG", f"MAG mag field magnitude min={mmin:.2f}, max={mmax:.2f}, span={span_pct:.1f}%")
+        _add_context(context, "MAG", f"MAG mag field magnitude min={mmin:.2f} unknown, max={mmax:.2f} unknown, span={span_pct:.1f}%", [
+            value_with_unit("MAG.mag_field_min", mmin, "unknown"),
+            value_with_unit("MAG.mag_field_max", mmax, "unknown"),
+            value_with_unit("MAG.mag_field_span_pct", span_pct, "%"),
+        ])
         if span_pct > 10.0:
             mag_span_detail = f"mag field magnitude changed {span_pct:.1f}%"
         else:
@@ -242,9 +251,11 @@ def build_compass_yaw_investigation(tables: Dict[str, Any]) -> Dict[str, Any]:
             if corr is None:
                 checked.append({"check": f"MAG correlation with {label}", "result": f"Could not correlate magnetic field with {label}; required aligned data was missing or sparse"})
                 continue
-            _add_context(context, "MAG", f"MAG field correlation with {label}: r={corr:.2f}")
+            _add_context(context, "MAG", f"MAG field correlation with {label}: r={corr:.2f} ratio", [
+                value_with_unit(f"MAG.correlation_with_{source}", corr, "ratio"),
+            ])
             if abs(corr) >= 0.70 and span_pct > 10.0 and source in {"throttle", "current"}:
-                mag_evidence.append(f"{mag_span_detail}; mag field magnitude correlates with {label} (r={corr:.2f})")
+                mag_evidence.append(f"{mag_span_detail}; mag field magnitude correlates with {label} (r={corr:.2f} ratio)")
     elif "MAG" in tables:
         checked.append({"check": "MAG axes", "result": "MAG present but no recognized MagX/MagY/MagZ-style axis fields for field magnitude"})
     else:
@@ -258,9 +269,12 @@ def build_compass_yaw_investigation(tables: Dict[str, Any]) -> Dict[str, Any]:
             if s is None or len(s.dropna()) == 0:
                 continue
             if col in {"SM", "SH", "SV", "SVT"} and float(s.max()) > 1.0:
-                estimator_evidence.append(f"{label}.{col} max={float(s.max()):.2f}, samples >1={int((s > 1.0).sum())}")
+                estimator_evidence.append(f"{label}.{col} max={float(s.max()):.2f} ratio, samples >1={int((s > 1.0).sum())} count")
             elif col not in {"SM", "SH", "SV", "SVT"}:
-                _add_context(context, label, f"{label}.{col}: min={float(s.min()):.2f}, max={float(s.max()):.2f}")
+                _add_context(context, label, f"{label}.{col}: min={float(s.min()):.2f} unknown, max={float(s.max()):.2f} unknown", [
+                    value_with_unit(f"{label}.{col}_min", float(s.min()), "unknown"),
+                    value_with_unit(f"{label}.{col}_max", float(s.max()), "unknown"),
+                ])
 
     att = tables.get("ATT")
     gps_yaw_seen = False
@@ -273,7 +287,10 @@ def build_compass_yaw_investigation(tables: Dict[str, Any]) -> Dict[str, Any]:
         gps_yaw_seen = True
         s = numeric_series(gps, [yaw_col])
         if s is not None and len(s.dropna()) > 0:
-            _add_context(context, label, f"{label}.{yaw_col}: min={float(s.min()):.2f}, max={float(s.max()):.2f}")
+            _add_context(context, label, f"{label}.{yaw_col}: min={float(s.min()):.2f} deg, max={float(s.max()):.2f} deg", [
+                value_with_unit(f"{label}.{yaw_col}_min", float(s.min()), "deg"),
+                value_with_unit(f"{label}.{yaw_col}_max", float(s.max()), "deg"),
+            ])
         if att is not None and "Yaw" in att.columns:
             p95 = _aligned_angle_error_p95(gps, yaw_col, att, "Yaw", tolerance=0.5)
             if p95 is not None:

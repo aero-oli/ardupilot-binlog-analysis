@@ -19,6 +19,7 @@ from ap_window_select import select_analysis_window
 from ap_compass_yaw import build_compass_yaw_investigation, write_compass_yaw_plots
 from ap_parameters import select_relevant_parameters
 from ap_rcin import build_command_response_investigation, rcin_channel_col, rc_channel_mapping, summarize_rcin
+from ap_units import value_with_unit
 from ap_vibration import add_vibration_assessment_findings, build_vibration_assessment
 
 
@@ -280,12 +281,15 @@ def diagnosis_missing(index, symptom_class):
     return missing_by_tier(index, symptom_class, missing_messages)
 
 
-def add_context(context, source, detail):
+def add_context(context, source, detail, values=None):
     if detail:
-        context.append({"source": source, "detail": detail})
+        item = {"source": source, "detail": detail}
+        if values:
+            item["values"] = values
+        context.append(item)
 
 
-def add_finding(findings, rank, possible_cause, severity, confidence, evidence, interpretation, recommended_checks):
+def add_finding(findings, rank, possible_cause, severity, confidence, evidence, interpretation, recommended_checks, evidence_values=None):
     evidence = [e for e in evidence if e]
     if not evidence:
         return
@@ -295,6 +299,7 @@ def add_finding(findings, rank, possible_cause, severity, confidence, evidence, 
         "severity": severity,
         "confidence": confidence,
         "evidence": evidence,
+        "evidence_values": evidence_values or [],
         "interpretation": interpretation,
         "recommended_checks": recommended_checks,
     })
@@ -418,6 +423,7 @@ def add_attitude_rate_findings(tables, findings, checked, axes=("roll", "pitch",
                     [f"ATT {axis} desired-vs-achieved p95 absolute error={p95:.1f} deg"],
                     "Desired attitude and achieved attitude diverge; use RATE, PID and actuator evidence to separate tune, authority, estimator and external-disturbance causes.",
                     ["Inspect ATT and RATE around the symptom", "Check PID flags/Dmod and mapped output-channel saturation before changing gains"],
+                    [value_with_unit(f"ATT.{axis}_p95_abs_error", p95, "deg")],
                 )
         if rate is not None and fields["rate_des"] in rate.columns and fields["rate"] in rate.columns:
             des = numeric_series(rate, [fields["rate_des"]])
@@ -432,12 +438,13 @@ def add_attitude_rate_findings(tables, findings, checked, axes=("roll", "pitch",
                 out = numeric_series(rate, [out_col])
                 out95 = percentile([abs(v) for v in vals(out)], 95)
                 if out95 is not None and out95 > 0.65:
-                    evidence.append(f"RATE.{out_col} p95 abs={out95:.2f}")
+                    evidence.append(f"RATE.{out_col} p95 abs={out95:.2f} normalized")
             if evidence:
                 add_finding(
                     findings, rank, f"{axis} rate tracking or controller authority issue", "likely-issue", "medium", evidence,
                     "Large rate tracking error, especially with high controller output, points toward authority/headroom, actuator, filter/noise or tune issues.",
                     ["Correlate RATE error with RCOU, PID flags/Dmod, vibration and battery/current", "Do not tune gains until actuator headroom and vibration are understood"],
+                    [value_with_unit(f"RATE.{axis}_p95_abs_error", p95, "deg/s")] + ([value_with_unit(f"RATE.{out_col}_p95_abs", out95, "normalized")] if out_col in rate.columns and out95 is not None else []),
                 )
         pid_name = fields["pid"]
         if pid_name in tables:
@@ -452,12 +459,13 @@ def add_attitude_rate_findings(tables, findings, checked, axes=("roll", "pitch",
                     evidence.append(f"{pid_name}.Flags limit count={limit_count}, PD-sum-limit count={pd_limit_count}")
             dmod = numeric_series(pid, ["Dmod"])
             if dmod is not None and len(dmod.dropna()) > 0 and float(dmod.min()) < 0.8:
-                evidence.append(f"{pid_name}.Dmod minimum={float(dmod.min()):.2f}")
+                evidence.append(f"{pid_name}.Dmod minimum={float(dmod.min()):.2f} normalized")
             if evidence:
                 add_finding(
                     findings, rank, f"{axis} PID limiting or D-term reduction", "likely-issue", "high", evidence,
                     "PID flags and Dmod identify saturation/anti-windup, PD-sum limiting, or dynamic D reduction; correlate before changing gains.",
                     ["Overlay PID flags/Dmod with RATE outputs, RCOU and vibration", "Review filter/noise and actuator headroom before gain changes"],
+                    ([value_with_unit(f"{pid_name}.Dmod_min", float(dmod.min()), "normalized")] if dmod is not None and len(dmod.dropna()) > 0 else []),
                 )
     if not any("RATE" in f.get("evidence", [""])[0] or "ATT" in f.get("evidence", [""])[0] for f in findings):
         checked.append({"check": "Attitude/rate tracking", "result": "No ATT/RATE tracking issue detected by heuristic for requested axes"})
@@ -473,7 +481,11 @@ def add_altitude_findings(tables, findings, checked, context=None, rank=2):
             if col in ctun.columns:
                 s = numeric_series(ctun, [col])
                 if s is not None and len(s.dropna()) > 0:
-                    add_context(context, "CTUN", f"CTUN.{col}: min={float(s.min()):.2f}, max={float(s.max()):.2f}")
+                    unit = "m" if col in {"Alt", "DAlt", "BAlt"} else ("normalized" if col in {"ThO", "ThH"} else "unknown")
+                    add_context(context, "CTUN", f"CTUN.{col}: min={float(s.min()):.2f} {unit}, max={float(s.max()):.2f} {unit}", [
+                        value_with_unit(f"CTUN.{col}_min", float(s.min()), unit),
+                        value_with_unit(f"CTUN.{col}_max", float(s.max()), unit),
+                    ])
         if "Alt" in ctun.columns and "DAlt" in ctun.columns:
             err = numeric_series(ctun, ["DAlt"]) - numeric_series(ctun, ["Alt"])
             p95 = percentile([abs(v) for v in vals(err)], 95)
@@ -485,7 +497,11 @@ def add_altitude_findings(tables, findings, checked, context=None, rank=2):
             if col in baro.columns:
                 s = numeric_series(baro, [col])
                 if s is not None and len(s.dropna()) > 0:
-                    add_context(context, "BARO", f"BARO.{col}: min={float(s.min()):.2f}, max={float(s.max()):.2f}")
+                    unit = "m" if col == "Alt" else ("unknown" if col == "Press" else "degC")
+                    add_context(context, "BARO", f"BARO.{col}: min={float(s.min()):.2f} {unit}, max={float(s.max()):.2f} {unit}", [
+                        value_with_unit(f"BARO.{col}_min", float(s.min()), unit),
+                        value_with_unit(f"BARO.{col}_max", float(s.max()), unit),
+                    ])
     if evidence:
         add_finding(
             findings, rank, "Altitude/throttle evidence requires vibration, power and estimator correlation", "likely-issue", "medium", evidence[:14],
@@ -522,11 +538,15 @@ def diagnose_yaw(tables, index, vibration_assessment=None):
                 "severity": "likely-issue",
                 "confidence": "medium",
                 "evidence": [f"ATT yaw desired-vs-achieved p95 absolute error is {p95:.1f} deg; max {maxabs:.1f} deg"],
+                "evidence_values": [
+                    value_with_unit("ATT.yaw_p95_abs_error", p95, "deg"),
+                    value_with_unit("ATT.yaw_max_abs_error", maxabs, "deg"),
+                ],
                 "interpretation": "The aircraft heading estimate/response diverges from desired yaw. RATE/PIDY/RCOU decide whether this is controller, actuator, or estimator related.",
                 "recommended_checks": ["Inspect RATE.YDes vs RATE.Y", "Inspect PIDY flags and motor output saturation", "Check compass/EKF yaw evidence if the physical aircraft did not actually yaw"],
             })
         else:
-            checked.append({"check": "ATT yaw tracking", "result": f"No large heading tracking error detected by heuristic; p95={p95}"})
+            checked.append({"check": "ATT yaw tracking", "result": f"No large heading tracking error detected by heuristic; p95={p95} deg", "values": [value_with_unit("ATT.yaw_p95_abs_error", p95, "deg")]})
 
     # Rate tracking and output authority
     rate_tracking_bad = False
@@ -551,7 +571,13 @@ def diagnose_yaw(tables, index, vibration_assessment=None):
                 "possible_cause": "Yaw authority limited or yaw controller output saturated",
                 "severity": "safety-critical",
                 "confidence": "high" if "RCOU" in tables else "medium",
-                "evidence": [f"RATE yaw error p95 is {p95:.1f} deg/s; max {maxabs:.1f} deg/s", f"RATE.YOut p95 abs is {out_p95:.2f}; max abs {out_max:.2f}"],
+                "evidence": [f"RATE yaw error p95 is {p95:.1f} deg/s; max {maxabs:.1f} deg/s", f"RATE.YOut p95 abs is {out_p95:.2f} normalized; max abs {out_max:.2f} normalized"],
+                "evidence_values": [
+                    value_with_unit("RATE.yaw_p95_abs_error", p95, "deg/s"),
+                    value_with_unit("RATE.yaw_max_abs_error", maxabs, "deg/s"),
+                    value_with_unit("RATE.YOut_p95_abs", out_p95, "normalized"),
+                    value_with_unit("RATE.YOut_max_abs", out_max, "normalized"),
+                ],
                 "interpretation": "The controller is asking for yaw response but achieved yaw rate is not following well. This points first to yaw authority, actuator saturation, motor/prop/ESC/frame setup, or severe power/throttle limitation rather than simply changing yaw P.",
                 "recommended_checks": ["Check motor order and prop direction", "Check frame class/type and motor mapping", "Check mapped output-channel saturation", "Check ESC/motor health and yaw torque asymmetry", "Do not continue flight tests until bench/ground checks are complete"],
             })
@@ -562,11 +588,15 @@ def diagnose_yaw(tables, index, vibration_assessment=None):
                 "severity": "likely-issue",
                 "confidence": "medium",
                 "evidence": [f"RATE yaw error p95 is {p95:.1f} deg/s; max {maxabs:.1f} deg/s"],
+                "evidence_values": [
+                    value_with_unit("RATE.yaw_p95_abs_error", p95, "deg/s"),
+                    value_with_unit("RATE.yaw_max_abs_error", maxabs, "deg/s"),
+                ],
                 "interpretation": "Yaw rate response is not following target. Output/saturation evidence is incomplete or not high by heuristic.",
                 "recommended_checks": ["Check PIDY terms", "Check mapped output channels", "Compare in hover vs high-throttle sections"],
             })
         else:
-            checked.append({"check": "RATE yaw tracking", "result": f"Yaw rate tracking not flagged by heuristic; p95={p95}, YOut p95={out_p95}"})
+            checked.append({"check": "RATE yaw tracking", "result": f"Yaw rate tracking not flagged by heuristic; p95={p95} deg/s, YOut p95={out_p95} normalized", "values": [value_with_unit("RATE.yaw_p95_abs_error", p95, "deg/s"), value_with_unit("RATE.YOut_p95_abs", out_p95, "normalized")]})
 
     # PIDY flags/noise
     if "PIDY" in tables:
@@ -583,12 +613,12 @@ def diagnose_yaw(tables, index, vibration_assessment=None):
         if err is not None and len(err.dropna()) > 0:
             err_p95 = percentile([abs(v) for v in vals(err)], 95)
             if err_p95 is not None and err_p95 > 30:
-                evidence.append(f"PIDY.Err p95 abs={err_p95:.2f}")
+                evidence.append(f"PIDY.Err p95 abs={err_p95:.2f} deg/s")
             else:
-                checked.append({"check": "PIDY.Err magnitude", "result": f"PIDY.Err p95 abs={err_p95:.2f} below heuristic threshold"})
+                checked.append({"check": "PIDY.Err magnitude", "result": f"PIDY.Err p95 abs={err_p95:.2f} deg/s below heuristic threshold", "values": [value_with_unit("PIDY.Err_p95_abs", err_p95, "deg/s")]})
         dmod = numeric_series(pid, ["Dmod"])
         if dmod is not None and len(dmod.dropna()) > 0 and float(dmod.min()) < 0.8:
-            evidence.append(f"PIDY.Dmod minimum={float(dmod.min()):.2f}")
+            evidence.append(f"PIDY.Dmod minimum={float(dmod.min()):.2f} normalized")
         if evidence:
             findings.append({
                 "rank": 2,
@@ -596,6 +626,7 @@ def diagnose_yaw(tables, index, vibration_assessment=None):
                 "severity": "likely-issue",
                 "confidence": "high",
                 "evidence": evidence,
+                "evidence_values": ([value_with_unit("PIDY.Dmod_min", float(dmod.min()), "normalized")] if dmod is not None and len(dmod.dropna()) > 0 else []),
                 "interpretation": "The yaw PID controller logged limiting or protective behaviour. Correlate with RCOU, vibration and power before changing gains.",
                 "recommended_checks": ["Overlay PIDY.Flags with RATE.YOut and RCOU", "Check notch/filter setup and vibration", "Check whether high throttle removes yaw authority"],
             })
@@ -788,7 +819,9 @@ def main() -> int:
             "symptom_text": args.symptom,
             "symptom_class": symptom_class,
             "analysis_window": selection,
+            "analysis_window_units": {"start_s": "s", "end_s": "s"},
             "log": {"file": args.log, "vehicle": index.get("vehicle"), "firmware": index.get("firmware"), "duration_s": index.get("duration_s")},
+            "units": {"log.duration_s": "s"},
             "parser": stats,
             "warnings": warnings,
             "logging_health": logging_health,

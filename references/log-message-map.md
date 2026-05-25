@@ -16,6 +16,27 @@
 | AutoTune | ATUN | Axis, tuning step, target/min/max and generated gains. |
 | System ID | SID, SIDD, SIDS | Frequency response / system identification analysis. |
 
+## Common units
+
+The scripts report units explicitly in JSON where numeric metrics, context values or finding evidence are generated. Use `unknown` when a field unit varies by firmware/message variant or cannot be inferred safely.
+
+| Value family | Unit used in script output |
+|---|---|
+| Time, duration, timestamp gaps | `s` |
+| Battery voltage and board Vcc | `V` |
+| Battery current | `A` |
+| Capacity consumed | `mAh` |
+| ATT attitude and heading fields | `deg` |
+| RATE and PID rate target/actual/error fields | `deg/s` |
+| Normalized controller outputs such as RATE.*Out, CTUN.ThO/ThH and Dmod | `normalized` |
+| RCOU/RCO2/RCO3 channel values and RCIN channel values | `PWM us` |
+| VIBE and accelerometer values | `m/s/s` |
+| Altitude fields such as CTUN.Alt/DAlt and BARO.Alt | `m` |
+| FFT and sample-rate values | `Hz` |
+| GPS HDOP/HAcc and EKF innovation test ratios | `ratio` |
+| Status and flag fields | `bitmask/enum` |
+| Counts and samples | `count` |
+
 Critical field meanings used by this skill:
 
 - ATT.DesYaw vs ATT.Yaw: desired vs achieved heading.

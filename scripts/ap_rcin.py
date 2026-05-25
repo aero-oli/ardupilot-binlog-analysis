@@ -5,6 +5,7 @@ from typing import Any, Dict, Optional, Sequence
 
 from ap_common import get_col, numeric_series, params_from_tables, percentile, safe_float, safe_int, wrap_angle_deg
 from ap_diag_helpers import vals
+from ap_units import value_with_unit
 
 
 AXIS_CHANNEL_PARAMS = {
@@ -102,6 +103,14 @@ def summarize_rcin(tables: Dict[str, Any], index: Optional[Dict[str, Any]] = Non
             "p95_abs_deflection_from_trim": percentile(deflections, 95),
             "command_threshold_us": threshold,
             "active_percent": 100.0 * sum(1 for v in deflections if v >= threshold) / len(deflections),
+            "units": {
+                "min": "PWM us",
+                "max": "PWM us",
+                "trim": "PWM us",
+                "p95_abs_deflection_from_trim": "PWM us",
+                "command_threshold_us": "PWM us",
+                "active_percent": "%",
+            },
         }
     return {"available": True, "mapping": mapping, "axes": axes, "limitation": mapping.get("limitation")}
 
@@ -189,10 +198,16 @@ def build_command_response_investigation(
             "source": "RCIN",
             "detail": (
                 f"RCIN {axis} channel {axis_summary['channel']} ({axis_summary['field']}): "
-                f"min={axis_summary['min']:.0f}, max={axis_summary['max']:.0f}, "
-                f"p95 abs deflection={axis_summary['p95_abs_deflection_from_trim']:.0f} us, "
+                f"min={axis_summary['min']:.0f} PWM us, max={axis_summary['max']:.0f} PWM us, "
+                f"p95 abs deflection={axis_summary['p95_abs_deflection_from_trim']:.0f} PWM us, "
                 f"active={axis_summary['active_percent']:.1f}%"
             ),
+            "values": [
+                value_with_unit(f"RCIN.{axis}.min", axis_summary["min"], "PWM us"),
+                value_with_unit(f"RCIN.{axis}.max", axis_summary["max"], "PWM us"),
+                value_with_unit(f"RCIN.{axis}.p95_abs_deflection_from_trim", axis_summary["p95_abs_deflection_from_trim"], "PWM us"),
+                value_with_unit(f"RCIN.{axis}.active_percent", axis_summary["active_percent"], "%"),
+            ],
         })
         rc_t = _first_rc_command_time(rcin, axis_summary["field"], axis_summary["trim"], axis_summary["command_threshold_us"])
         des_t = _first_desired_time(tables, axis)
@@ -222,6 +237,7 @@ def build_command_response_investigation(
                 "severity": "likely-issue",
                 "confidence": confidence,
                 "evidence": evidence or [f"No mapped RCIN or desired {axis} command detected before achieved motion"],
+                "evidence_values": [],
                 "interpretation": "Actual motion changed without matching pilot input or logged desired attitude/rate command. This supports uncommanded mechanical, estimator, disturbance, or logging-window hypotheses rather than a simple pilot manoeuvre.",
                 "recommended_checks": ["Check actuator outputs and saturation", "Check EKF/compass evidence", "Check vibration, power, and mechanical condition", "Confirm RC channel mapping from parameters"],
             })

@@ -13,6 +13,7 @@ from ap_common import (
     output_channel_columns,
     percentile,
 )
+from ap_units import units_for_keys, value_with_unit
 
 
 VIBE_WARN_THRESHOLD = 30.0
@@ -54,6 +55,7 @@ def _vibration_summary(tables) -> Dict[str, Any]:
             s = numeric_series(vibe, [col])
             if s is not None and len(s.dropna()) > 0:
                 summary[col] = {"max": float(s.max()), "p95": percentile(_vals(s), 95)}
+                summary.setdefault("units", {})[col] = {"max": "m/s/s", "p95": "m/s/s"}
     clip_delta = {}
     for col in clip_columns(vibe):
         clip = numeric_series(vibe, [col])
@@ -61,8 +63,10 @@ def _vibration_summary(tables) -> Dict[str, Any]:
             clip_delta[col] = float(clip.max() - clip.min())
     if clip_delta:
         summary["clip_delta"] = clip_delta
+        summary["clip_delta_units"] = units_for_keys(clip_delta.keys(), message="VIBE")
     max_axis = max([v["max"] for k, v in summary.items() if isinstance(v, dict) and "max" in v] or [0.0])
     summary["max_axis"] = float(max_axis)
+    summary.setdefault("units", {})["max_axis"] = "m/s/s"
     summary["above_warning_threshold"] = bool(max_axis > VIBE_WARN_THRESHOLD)
     return summary
 
@@ -230,7 +234,7 @@ def build_vibration_assessment(
         item = {"target": label, "correlation": corr}
         assessment["vibration_relevance_to_symptom"]["correlations"].append(item)
         if abs(corr) >= 0.70 and window_summary.get("above_warning_threshold"):
-            assessment["vibration_relevance_to_symptom"]["evidence"].append(f"VIBE max-axis correlates with {label} (r={corr:.2f})")
+            assessment["vibration_relevance_to_symptom"]["evidence"].append(f"VIBE max-axis correlates with {label} (r={corr:.2f} ratio)")
 
     if assessment["vibration_context"].get("above_warning_threshold") and not assessment["vibration_relevance_to_symptom"]["evidence"]:
         assessment["vibration_confidence_limits"].append("High whole-log VIBE values are present, but no analysis-window or correlation support ties them to the selected symptom.")
@@ -251,6 +255,9 @@ def add_vibration_assessment_findings(assessment, findings, checked, *, rank=4, 
             "severity": "safety-critical",
             "confidence": "medium",
             "evidence": evidence[:12],
+            "evidence_values": [
+                value_with_unit("VIBE.max_axis", relevance.get("event_window_summary", {}).get("max_axis"), "m/s/s")
+            ] if relevance.get("event_window_summary", {}).get("max_axis") is not None else [],
             "interpretation": "Vibration is only treated as symptom-relevant because it occurs in the selected/event window or correlates with control, altitude, estimator, throttle, or current evidence. This supports correlation, not proof of causation.",
             "recommended_checks": ["Inspect props, motor bearings, frame resonance, flight-controller mounting and loose wiring", "Use raw IMU or batch-sampling FFT when frequency-domain filter review is needed"],
         })
@@ -261,6 +268,7 @@ def add_vibration_assessment_findings(assessment, findings, checked, *, rank=4, 
             "severity": "likely-issue",
             "confidence": "medium",
             "evidence": [f"Whole-log VIBE max axis {context.get('max_axis'):.1f} m/s/s exceeds warning threshold"],
+            "evidence_values": [value_with_unit("VIBE.whole_log_max_axis", context.get("max_axis"), "m/s/s")],
             "interpretation": "The selected symptom is vibration/noise itself, so whole-log VIBE warning levels are directly relevant. For other symptoms, timing/correlation support is required.",
             "recommended_checks": ["Inspect mechanical vibration sources", "Use raw IMU or batch-sampling FFT if available"],
         })

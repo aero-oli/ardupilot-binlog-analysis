@@ -9,6 +9,7 @@ from ap_common import (
     AXIS_MAP, AnalysisError, ensure_dir, filter_tables_by_time, get_col, load_tables, numeric_series,
     output_mapping_from_tables, parse_time_window, percentile, rms, write_json
 )
+from ap_units import units_for_keys
 
 def vals(s):
     if s is None:
@@ -29,6 +30,10 @@ def classify_axis(axis, data):
             "severity": "safety-critical",
             "finding": f"{axis} rate tracking error is high while controller output is high",
             "confidence": "medium",
+            "evidence_values": [
+                {"name": "rate_error_p95_abs", "value": p95, "unit": "deg/s"},
+                {"name": "output_abs_p95", "value": out95, "unit": "normalized"},
+            ],
             "interpretation": "This can indicate actuator authority limitation, saturation, frame/motor issue, or a tune unable to command enough response.",
             "recommended_checks": ["Check motor outputs for saturation", "Check frame class/type and motor order", "Check props/motors/ESC health before tuning gains"],
         })
@@ -47,13 +52,14 @@ def classify_axis(axis, data):
             "severity": "worth-checking",
             "finding": f"{axis} Dmod reduced below 0.8",
             "confidence": "medium",
+            "evidence_values": [{"name": "Dmod_min", "value": dmod.get("min"), "unit": "normalized"}],
             "interpretation": "Dynamic D-term reduction occurred; this can be associated with noise or limit-cycle protection.",
             "recommended_checks": ["Review gyro noise/filtering", "Check harmonic notch setup before increasing D gain"],
         })
     return findings
 
 def analyze_tuning(tables, analysis_window=None):
-    out = {"analysis_window": analysis_window or {"start_s": None, "end_s": None}, "axis": {}, "findings": [], "autotune": {}, "confidence": {"overall": "medium", "reasons": []}}
+    out = {"analysis_window": analysis_window or {"start_s": None, "end_s": None}, "analysis_window_units": {"start_s": "s", "end_s": "s"}, "axis": {}, "findings": [], "autotune": {}, "confidence": {"overall": "medium", "reasons": []}}
     if "RATE" not in tables:
         out["confidence"]["overall"] = "low"
         out["confidence"]["reasons"].append("RATE missing; rate tracking cannot be evaluated")
@@ -70,6 +76,7 @@ def analyze_tuning(tables, analysis_window=None):
             s = numeric_series(rate, [f["out"]])
             axis_m["output_abs_p95"] = percentile([abs(x) for x in vals(s)], 95)
             axis_m["output_abs_max"] = max([abs(x) for x in vals(s)] or [0.0])
+        axis_m["units"] = units_for_keys([k for k, v in axis_m.items() if isinstance(v, (int, float))], message="RATE")
         pid_name = f["pid"]
         if pid_name in tables:
             pid = tables[pid_name]
@@ -83,6 +90,7 @@ def analyze_tuning(tables, analysis_window=None):
                 if col in pid.columns:
                     s = numeric_series(pid, [col])
                     pid_m["terms"][col] = {"min": float(s.min()), "max": float(s.max()), "mean": float(s.mean()), "p95_abs": percentile([abs(x) for x in vals(s)], 95)}
+            pid_m["term_units"] = {field: units_for_keys(values.keys(), message=pid_name) for field, values in pid_m["terms"].items()}
             axis_m["pid"] = pid_m
         out["axis"][axis] = axis_m
         for finding in classify_axis(axis, axis_m):

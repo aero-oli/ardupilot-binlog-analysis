@@ -12,6 +12,7 @@ from ap_common import (
     output_channel_columns, output_mapping_from_tables, parse_time_window,
     percentile, rms, summarise_numeric, write_json
 )
+from ap_units import add_units, unit_for_name, units_for_keys, value_with_unit
 
 
 def series_values(s):
@@ -54,7 +55,7 @@ def _gps_instance_summary(group):
         out["nsats_min"] = float(nsats.min())
         out["nsats_mean"] = float(nsats.mean())
         out["samples_lt_12"] = int((nsats < 12).sum())
-    return out
+    return add_units(out, message=group["message"])
 
 
 def _battery_instance_summary(group):
@@ -74,13 +75,14 @@ def _battery_instance_summary(group):
         out["mean_current"] = float(curr.mean())
     if currtot is not None and len(currtot.dropna()) > 0:
         out["capacity_used_mah_max"] = float(currtot.max())
-    return out
+    return add_units(out, message=group["message"])
 
 
 def _esc_instance_summary(group):
     df = group["df"]
     out = _instance_base(group)
     out["numeric"] = summarise_numeric(df, ["RPM", "RawRPM", "Volt", "Curr", "Temp", "MotTemp", "Err", "Status", "ErrCnt", "Stress", "MaxStress", "inpct", "outpct", "flags", "Pwr"])
+    out["numeric_units"] = {field: units_for_keys(values.keys(), message=field) for field, values in out["numeric"].items()}
     for name, fields in {
         "rpm": ["RPM", "RawRPM"],
         "current": ["Curr"],
@@ -102,7 +104,7 @@ def _esc_instance_summary(group):
     flags = numeric_series(df, ["flags"])
     if flags is not None and len(flags.dropna()) > 0:
         out["nonzero_flags_count"] = int((flags.fillna(0).astype(int) != 0).sum())
-    return out
+    return add_units(out, message=group["message"])
 
 
 def _ekf_instance_summary(group):
@@ -117,13 +119,14 @@ def _ekf_instance_summary(group):
             out["test_ratio_gt_1_counts"][col] = int((s > 1.0).sum())
             out[f"{col}_gt_1_count"] = int((s > 1.0).sum())
             out[f"{col}_max"] = float(s.max())
-    return out
+    return add_units(out, message=group["message"])
 
 
 def _imu_instance_summary(group):
     df = group["df"]
     out = _instance_base(group)
     out["numeric"] = summarise_numeric(df, [c for c in ["GyrX", "GyrY", "GyrZ", "AccX", "AccY", "AccZ", "T", "Temp"] if c in df.columns])
+    out["numeric_units"] = {field: units_for_keys(values.keys(), message="IMU",) for field, values in out["numeric"].items()}
     return out
 
 
@@ -131,6 +134,7 @@ def compute_metrics(tables, analysis_window=None):
     metrics = {
         "messages_present": sorted(tables.keys()),
         "analysis_window": analysis_window or {"start_s": None, "end_s": None},
+        "analysis_window_units": {"start_s": "s", "end_s": "s"},
         "flight": {},
         "health": {},
         "tuning": {},
@@ -186,12 +190,18 @@ def compute_metrics(tables, analysis_window=None):
             battery["mean_current_across_instances"] = float(sum(mean_current_values) / len(mean_current_values))
         if capacity_values:
             battery["capacity_used_mah_max"] = float(max(capacity_values))
+        battery["units"] = units_for_keys([k for k, v in battery.items() if isinstance(v, (int, float))], message="BAT")
+        battery["values"] = [
+            value_with_unit(key, value, battery["units"].get(key))
+            for key, value in battery.items()
+            if isinstance(value, (int, float)) and not isinstance(value, bool)
+        ]
         metrics["health"]["battery"] = battery
     if "POWR" in tables:
         powr = tables["POWR"]
         vcc = numeric_series(powr, ["Vcc", "VCC"])
         if vcc is not None and len(vcc.dropna()) > 0:
-            metrics["health"]["board_power"] = {"vcc_min": float(vcc.min()), "vcc_max": float(vcc.max()), "vcc_span": float(vcc.max()-vcc.min())}
+            metrics["health"]["board_power"] = add_units({"vcc_min": float(vcc.min()), "vcc_max": float(vcc.max()), "vcc_span": float(vcc.max()-vcc.min())}, message="POWR")
 
     # GPS
     gps_instances = metrics["health"]["instances"]["gps"]
@@ -211,6 +221,7 @@ def compute_metrics(tables, analysis_window=None):
             gps_m["nsats_min"] = float(min(nsats_values))
             gps_m["nsats_min_instance"] = min(gps_instances, key=lambda k: gps_instances[k].get("nsats_min", math.inf))
             gps_m["samples_lt_12"] = int(sum(v.get("samples_lt_12", 0) for v in gps_instances.values()))
+        gps_m["units"] = units_for_keys([k for k, v in gps_m.items() if isinstance(v, (int, float))], message="GPS")
         metrics["health"]["gps"] = gps_m
 
     # EKF innovation ratios
@@ -224,6 +235,7 @@ def compute_metrics(tables, analysis_window=None):
                     d["test_ratio_gt_1_counts"][col] = int((s > 1.0).sum())
                     d[f"{col}_max"] = float(s.max()) if len(s.dropna()) else None
             metrics["health"]["ekf"] = d
+            d["units"] = units_for_keys([k for k, v in d.items() if isinstance(v, (int, float))], message=ekf_name)
             break
 
     # Vibration
@@ -238,6 +250,8 @@ def compute_metrics(tables, analysis_window=None):
                 clip_delta[col] = float(clip.max() - clip.min())
         if clip_delta:
             d["clip_delta"] = clip_delta
+            d["clip_delta_units"] = units_for_keys(clip_delta.keys(), message="VIBE")
+        d["units"] = {field: units_for_keys(values.keys(), message="VIBE") for field, values in d.items() if isinstance(values, dict) and field != "clip_delta"}
         metrics["health"]["vibration"] = d
 
     # Motor outputs saturation/asymmetry
@@ -252,7 +266,13 @@ def compute_metrics(tables, analysis_window=None):
             s = numeric_series(rcou, [c])
             if s is None or len(s.dropna()) == 0:
                 continue
-            sat[c] = {"pct_low_le_1100": float((s <= 1100).mean()*100), "pct_high_ge_1900": float((s >= 1900).mean()*100), "min": float(s.min()), "max": float(s.max())}
+            sat[c] = {
+                "pct_low_le_1100": float((s <= 1100).mean()*100),
+                "pct_high_ge_1900": float((s >= 1900).mean()*100),
+                "min": float(s.min()),
+                "max": float(s.max()),
+                "units": {"pct_low_le_1100": "%", "pct_high_ge_1900": "%", "min": "PWM us", "max": "PWM us"},
+            }
             means[c] = float(s.mean())
         metrics["health"]["motor_outputs"] = {
             "channels": channels,
@@ -261,6 +281,7 @@ def compute_metrics(tables, analysis_window=None):
             "output_mapping": output_mapping,
             "saturation": sat,
             "mean_outputs": means,
+            "mean_output_units": {c: "PWM us" for c in means},
         }
         if not output_mapping:
             metrics["confidence"]["reasons"].append("Output mapping could not be confirmed from parameters; RCOU/RCO2/RCO3 channel interpretation is generic")
@@ -273,11 +294,13 @@ def compute_metrics(tables, analysis_window=None):
         if inst_col:
             esc_summary["instances"] = sorted([int(x) for x in esc[inst_col].dropna().unique().tolist() if str(x) != "nan"])
         esc_summary["numeric"] = summarise_numeric(esc, ["RPM", "RawRPM", "Volt", "Curr", "Temp", "MotTemp", "Err"])
+        esc_summary["numeric_units"] = {field: units_for_keys(values.keys(), message=field) for field, values in esc_summary["numeric"].items()}
         metrics["health"]["esc"] = esc_summary
     if "EDT2" in tables:
         edt2 = tables["EDT2"]
         status = numeric_series(edt2, ["Status"])
         edt2_summary = {"rows": int(len(edt2)), "numeric": summarise_numeric(edt2, ["Status", "ErrCnt", "Stress", "MaxStress"])}
+        edt2_summary["numeric_units"] = {field: units_for_keys(values.keys(), message=field) for field, values in edt2_summary["numeric"].items()}
         if status is not None and len(status.dropna()) > 0:
             s_i = status.fillna(0).astype(int)
             edt2_summary["status_alert_count"] = int(((s_i & 4) != 0).sum())
@@ -291,6 +314,7 @@ def compute_metrics(tables, analysis_window=None):
         if inst_col:
             escx_summary["instances"] = sorted([int(x) for x in escx[inst_col].dropna().unique().tolist() if str(x) != "nan"])
         escx_summary["numeric"] = summarise_numeric(escx, ["inpct", "outpct", "flags", "Pwr"])
+        escx_summary["numeric_units"] = {field: units_for_keys(values.keys(), message=field) for field, values in escx_summary["numeric"].items()}
         flags = numeric_series(escx, ["flags"])
         if flags is not None and len(flags.dropna()) > 0:
             escx_summary["nonzero_flags_count"] = int((flags.fillna(0).astype(int) != 0).sum())
@@ -302,6 +326,7 @@ def compute_metrics(tables, analysis_window=None):
         if name in tables:
             df = tables[name]
             sysid[name] = {"rows": int(len(df)), "fields": [str(c) for c in df.columns if c != "TimeS"], "numeric": summarise_numeric(df, [c for c in df.columns if c != "TimeS"])}
+            sysid[name]["numeric_units"] = {field: units_for_keys(values.keys(), message=name) for field, values in sysid[name]["numeric"].items()}
     if sysid:
         metrics["system_id"] = {"present": True, **sysid}
     else:
@@ -325,12 +350,14 @@ def compute_metrics(tables, analysis_window=None):
                     out = numeric_series(rate, [out_col])
                     axis_m["output_abs_p95"] = percentile([abs(v) for v in series_values(out)], 95)
                     axis_m["output_abs_max"] = max([abs(v) for v in series_values(out)] or [0.0])
+                axis_m["units"] = units_for_keys([k for k, v in axis_m.items() if isinstance(v, (int, float))], message="RATE")
                 metrics["tuning"].setdefault(axis, {}).update(axis_m)
     for axis, fields in AXIS_MAP.items():
         pid_name = fields["pid"]
         if pid_name in tables:
             pid = tables[pid_name]
             pid_m = {"message": pid_name, "terms": summarise_numeric(pid, ["Err", "P", "I", "D", "FF", "DFF", "Dmod", "SRate"])}
+            pid_m["term_units"] = {field: units_for_keys(values.keys(), message=pid_name, ) for field, values in pid_m["terms"].items()}
             flags = numeric_series(pid, ["Flags"])
             if flags is not None and len(flags.dropna()) > 0:
                 pid_m["flag_limit_count"] = int(((flags.astype(int) & 1) != 0).sum())
@@ -349,7 +376,7 @@ def compute_metrics(tables, analysis_window=None):
         numeric_cols = [c for c in df.columns if c not in {"TimeS", "TimeUS", "_type"}]
         summary = summarise_numeric(df, numeric_cols[:20])
         if summary:
-            metrics["generic_messages"][name] = {"rows": int(len(df)), "numeric": summary}
+            metrics["generic_messages"][name] = {"rows": int(len(df)), "numeric": summary, "numeric_units": {field: units_for_keys(values.keys(), message=name) for field, values in summary.items()}}
 
     # Confidence gating
     if "ATT" not in tables or "RATE" not in tables:

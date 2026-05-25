@@ -12,6 +12,7 @@ from ap_common import (
     AnalysisError, ensure_dir, event_markers_from_tables, filter_tables_by_time, get_col, load_tables,
     require_package, write_json
 )
+from ap_units import unit_for_name
 from ap_window_select import select_analysis_window
 
 FIELD_TOKEN_RE = re.compile(r"\b[A-Za-z][A-Za-z0-9_]*\.[A-Za-z_][A-Za-z0-9_]*\b")
@@ -88,7 +89,7 @@ def resolve_series(tables, specs, align_tolerance=None):
             suffix = "..." if len(df.columns) > 30 else ""
             missing.append(f"{item['target']}: field not found in {message}; available: {available}{suffix}")
             continue
-        resolved.append({**item, "df": df, "column": col})
+        resolved.append({**item, "df": df, "column": col, "unit": unit_for_name(col, message=message, field=col)})
     if missing:
         raise AnalysisError("Could not resolve requested plot series:\n" + "\n".join(f"- {m}" for m in missing))
     return resolved
@@ -149,6 +150,7 @@ def resolve_expression_series(tables, item, align_tolerance=None):
         **item,
         "df": out,
         "column": "value",
+        "unit": "unknown",
         "fields": fields,
         "alignment": {
             "align_tolerance_s": align_tolerance,
@@ -234,13 +236,16 @@ def make_custom_plot(tables, series_specs, out, title="Custom ArduPilot plot", s
         "title": title,
         "mode": mode,
         "analysis_window": analysis_window or {"start_s": None, "end_s": None},
+        "analysis_window_units": {"start_s": "s", "end_s": "s"},
         "events_overlay": bool(events),
         "align_tolerance_s": align_tolerance,
+        "units": {"align_tolerance_s": "s", "x_axis": "s"},
         "series": [
             {
                 "message": s.get("message"),
                 "field": s.get("column"),
                 "label": s["label"],
+                "unit": s.get("unit", "unknown"),
                 "expression": s.get("expression"),
                 "fields": s.get("fields", []),
                 "alignment": s.get("alignment"),

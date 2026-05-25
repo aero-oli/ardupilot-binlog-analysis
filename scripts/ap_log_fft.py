@@ -101,12 +101,12 @@ def fft_from_isb_rows(rows, max_points=200000):
             y = np.nan_to_num(y)
             spec = np.abs(np.fft.rfft(y))
             freq = np.fft.rfftfreq(len(y), 1.0 / sample_rate)
-            series.append({"sensor": sensor, "axis": axis, "frequency_hz": freq.tolist(), "amplitude": spec.tolist()})
+            series.append({"sensor": sensor, "axis": axis, "frequency_hz": freq.tolist(), "amplitude": spec.tolist(), "units": {"frequency_hz": "Hz", "amplitude": "unknown"}})
             valid = freq > 5
             if valid.any():
                 idx = np.argsort(spec[valid])[-5:]
                 for f, a in sorted(zip(freq[valid][idx], spec[valid][idx]), key=lambda x: x[1], reverse=True):
-                    peaks.append({"field": f"{sensor}.{axis}", "frequency_hz": float(f), "amplitude": float(a)})
+                    peaks.append({"field": f"{sensor}.{axis}", "frequency_hz": float(f), "amplitude": float(a), "units": {"frequency_hz": "Hz", "amplitude": "unknown"}})
 
     if not series:
         return {"available": False, "message": "ISBH/ISBD", "reason": "ISBH/ISBD messages were present but no complete batch with usable sample rate and axis data was found.", "plots": [], "peaks": []}
@@ -119,6 +119,7 @@ def fft_from_isb_rows(rows, max_points=200000):
         "available": True,
         "message": "ISBH/ISBD",
         "sample_rate_hz_estimate": float(max(sample_rates)) if sample_rates else None,
+        "units": {"sample_rate_hz_estimate": "Hz", "peaks.frequency_hz": "Hz", "peaks.amplitude": "unknown"},
         "fields": sorted({s["field"] for s in peaks}),
         "plots": [],
         "peaks": peaks[:30],
@@ -222,11 +223,11 @@ def main() -> int:
                     vf = freq[valid][idx]
                     va = spec[valid][idx]
                     for f, a in sorted(zip(vf, va), key=lambda x: x[1], reverse=True):
-                        peaks.append({"field": col, "frequency_hz": float(f), "amplitude": float(a)})
+                        peaks.append({"field": col, "frequency_hz": float(f), "amplitude": float(a), "units": {"frequency_hz": "Hz", "amplitude": "unknown"}})
         fig.update_layout(title=f"FFT spectrum from {typ} ({fs:.1f} Hz estimated sample rate)", template="plotly_white", xaxis_title="Frequency (Hz)", yaxis_title="Amplitude")
         plot_path = out / "11_fft_noise_spectrum.html"
         fig.write_html(str(plot_path), include_plotlyjs="cdn")
-        result.update({"available": True, "message": typ, "sample_rate_hz_estimate": float(fs), "fields": candidates, "plots": [str(plot_path)], "peaks": peaks[:30]})
+        result.update({"available": True, "message": typ, "sample_rate_hz_estimate": float(fs), "units": {"sample_rate_hz_estimate": "Hz", "peaks.frequency_hz": "Hz", "peaks.amplitude": "unknown"}, "fields": candidates, "plots": [str(plot_path)], "peaks": peaks[:30]})
         write_json(args.json, result)
         print(f"FFT generated from {typ}; sample rate estimate {fs:.1f} Hz")
         return 0

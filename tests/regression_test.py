@@ -397,6 +397,8 @@ def test_vibe_clip_variants_are_detected():
     vibration = metrics["health"]["vibration"]
     assert_true("Clip0" in vibration and "Clip1" in vibration, "metrics should summarize Clip0/Clip1 fields")
     assert_true(vibration["clip_delta"]["Clip0"] == 3.0, "metrics should report Clip0 delta")
+    assert_true(vibration["units"]["VibeX"]["max"] == "m/s/s", "VIBE metrics should carry acceleration units")
+    assert_true(vibration["clip_delta_units"]["Clip0"] == "count", "clip deltas should carry count units")
 
     index = {"messages": {"VIBE": {}}, "errors": [], "events": [], "modes": []}
     findings, _context, _checked, missing, missing_strongly, _missing_optional = diagnose_by_class("vibration_issue", tables, index)
@@ -567,7 +569,7 @@ def test_escx_is_used_for_motor_esc_metrics_and_findings():
     evidence = "\n".join("\n".join(f.get("evidence", [])) for f in findings)
     context_text = "\n".join(c.get("detail", "") for c in context)
     assert_true("ESCX flags nonzero samples=1" in evidence, "ESCX flags should be diagnostic evidence")
-    assert_true("ESCX inpct: min=15.00, max=60.00" in context_text, "ESCX duty cycle should be retained as context")
+    assert_true("ESCX inpct: min=15.00 %, max=60.00 %" in context_text, "ESCX duty cycle should be retained as context with units")
     assert_true("ESC" not in missing_optional, "ESCX should satisfy ESC-status confirmation for motor diagnostics")
 
 
@@ -585,6 +587,8 @@ def test_multi_instance_gps_battery_esc_and_ekf_are_summarized_separately():
     assert_true(instances["gps"]["GPS[1]"]["status_min"] == 2.0, "GPS2 degraded status should be retained")
     assert_true("BAT[0]" in instances["battery"] and "BAT[1]" in instances["battery"], "BAT instances should be separate")
     assert_true(instances["battery"]["BAT[1]"]["min_voltage"] == 13.9, "battery instance sag should be retained")
+    assert_true(instances["battery"]["BAT[1]"]["units"]["min_voltage"] == "V", "battery voltage metrics should carry units")
+    assert_true(metrics["health"]["battery"]["units"]["max_current"] == "A", "aggregate battery current should carry units")
     assert_true(instances["esc"]["ESC[1]"]["err_max"] == 2.0, "ESC instance error should be retained")
     assert_true(instances["ekf"]["XKF4[1]"]["SV_gt_1_count"] == 2, "EKF core instance should retain test-ratio exceedances")
 
@@ -780,8 +784,8 @@ def test_normal_telemetry_is_context_not_findings():
     assert_true("ESC RPM" not in evidence, "normal ESC ranges should not be findings")
     assert_true("CTUN.Alt" not in evidence, "normal CTUN ranges should not be findings")
     assert_true("BAT voltage min=16.40 V, max=16.80 V" in context_text, "battery range should be retained as context")
-    assert_true("ESC RPM: min=4100.00, max=4300.00" in context_text, "ESC range should be retained as context")
-    assert_true("CTUN.Alt: min=10.00, max=10.20" in context_text, "altitude range should be retained as context")
+    assert_true("ESC RPM: min=4100.00 rpm, max=4300.00 rpm" in context_text, "ESC range should be retained as context with units")
+    assert_true("CTUN.Alt: min=10.00 m, max=10.20 m" in context_text, "altitude range should be retained as context with units")
     assert_true(checked, "normal telemetry checks should still be recorded as checked")
 
 
@@ -972,6 +976,8 @@ def test_batch_sampler_isb_fft_rows_are_processed():
     assert_true(result["available"] is True, "ISBH/ISBD batch data should produce FFT results")
     assert_true(result["message"] == "ISBH/ISBD", "batch FFT should identify ISBH/ISBD source")
     assert_true(result["sample_rate_hz_estimate"] == 1000.0, "batch FFT should use ISBH sample rate")
+    assert_true(result["units"]["sample_rate_hz_estimate"] == "Hz", "FFT sample rate should carry Hz units")
+    assert_true(result["peaks"][0]["units"]["frequency_hz"] == "Hz", "FFT peak frequencies should carry Hz units")
     assert_true(result["peaks"], "batch FFT should report dominant peaks")
 
 
@@ -1003,6 +1009,9 @@ def test_custom_plot_supports_arbitrary_fields_and_secondary_axis():
         assert_true(out.exists(), "custom plot should write the requested HTML file")
         assert_true("GPS altitude" in html and "Barometric pressure" in html, "custom plot should include requested series labels")
         assert_true(manifest["secondary"] == ["BARO.PRESS"], "custom plot should record right-axis series")
+        units = {series["label"]: series["unit"] for series in manifest["series"]}
+        assert_true(units["GPS altitude"] == "m", "custom plot manifest should unit GPS altitude")
+        assert_true(units["Barometric pressure"] == "unknown", "custom plot should mark uncertain pressure units unknown")
 
 
 def test_custom_plot_rejects_secondary_series_not_in_plot():
