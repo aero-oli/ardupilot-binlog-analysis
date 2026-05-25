@@ -480,7 +480,11 @@ def _next_evidence_gathering(symptom_class, symptom_text, spec, present, missing
         suggested_safe_capture.append("For filtering/FFT questions, collect a short raw/high-rate IMU or batch-sampler capture only if the vehicle is otherwise controllable.")
         suggested_safe_capture.append("Warn that raw/high-rate IMU and batch sampling can create large logs or dropouts; check DSF/DMS after capture.")
         reset_after_test.append("Reset high-volume raw/batch IMU logging after the short capture.")
-        confidence.append("FFT/filter confidence is limited until raw IMU, high-rate IMU, or batch-sampler evidence is available.")
+        confidence.append("FFT/filter confidence is limited because no usable FFT evidence is available until raw IMU, high-rate IMU, or batch-sampler data is captured.")
+
+    if symptom_class == "vibration_issue":
+        suggested_safe_capture.append("If ap_log_fft.py reports fft_available=false, use its reason, sample_interval_diagnostics, and next_capture_guidance before requesting any new capture.")
+        confidence.append("FFT is only a diagnostic aid; if FFT evidence is unavailable or timing diagnostics fail, rely on VIBE/clipping/rate evidence and state the filter/noise confidence limit.")
 
     if not (present & ESC_TELEMETRY_MESSAGES):
         if symptom_class in {"motor_esc_issue", "yaw_misbehaviour", "attitude_rate_issue", "battery_power_issue", "crash_or_loss_of_control"}:

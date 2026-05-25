@@ -25,7 +25,7 @@ from ap_log_diagnose import diagnose_by_class
 from ap_log_diagnose import diagnose_yaw
 from ap_log_extract import write_jsonl_stream
 from ap_log_diagnose import make_targeted_plots_from_tables
-from ap_log_fft import fft_from_isb_rows
+from ap_log_fft import fft_from_isb_rows, fft_from_tables
 from ap_log_investigation_manifest import build_manifest_from_index, validate_recommended_plot_groups
 from ap_log_metrics import compute_metrics
 from ap_log_mode_compare import compare_modes
@@ -1757,6 +1757,8 @@ def test_manifest_next_evidence_vibration_missing_raw_imu_short_controlled_captu
     assert_true("INS_RAW_LOG_OPT" in plan["logging_settings_to_review"], "vibration plan should review raw IMU logging")
     assert_true(any("short" in item and "raw/high-rate IMU" in item for item in plan["suggested_safe_capture"]), "vibration plan should recommend short high-rate capture cautiously")
     assert_true(any("dropouts" in item for item in plan["suggested_safe_capture"]), "vibration plan should require dropout checks")
+    assert_true(any("fft_available=false" in item for item in plan["suggested_safe_capture"]), "vibration plan should route unusable FFT diagnostics back to ap_log_fft output")
+    assert_true(any("usable FFT evidence" in item for item in plan["confidence_limits"]), "vibration plan should state missing usable FFT evidence")
     assert_true(any("Reset high-volume" in item or "Clear INS_RAW_LOG_OPT" in item for item in plan["reset_after_test"]), "vibration plan should reset high-volume logging")
 
 
@@ -1886,6 +1888,44 @@ def test_batch_sampler_isb_fft_rows_are_processed():
     assert_true(result["units"]["sample_rate_hz_estimate"] == "Hz", "FFT sample rate should carry Hz units")
     assert_true(result["peaks"][0]["units"]["frequency_hz"] == "Hz", "FFT peak frequencies should carry Hz units")
     assert_true(result["peaks"], "batch FFT should report dominant peaks")
+
+
+def test_fft_reports_no_raw_or_high_rate_imu_messages():
+    result = fft_from_tables({"VIBE": pd.DataFrame({"TimeS": [0.0, 1.0], "VibeX": [1.0, 2.0]})})
+    assert_true(result["fft_available"] is False, "FFT should be marked unavailable without raw/high-rate IMU evidence")
+    assert_true(result["reason"] == "no_raw_or_high_rate_imu_messages", f"unexpected FFT reason: {result}")
+    assert_true(result["messages_checked"] == [], "no candidate IMU messages should produce an empty checked list")
+    assert_true(any("raw/high-rate IMU" in item for item in result["next_capture_guidance"]), "failure output should include capture guidance")
+
+
+def test_fft_reports_sparse_or_insufficient_timestamps():
+    result = fft_from_tables({"GYR": pd.DataFrame({"TimeS": [0.0, 0.5, 1.0], "GyrX": [0.0, 1.0, 0.0]})})
+    assert_true(result["fft_available"] is False, "FFT should not run on sparse short evidence")
+    assert_true(result["reason"] in {"insufficient_rows", "could_not_determine_sample_interval"}, f"unexpected sparse FFT reason: {result}")
+    diag = result["sample_interval_diagnostics"]["GYR"]
+    assert_true(diag["rows"] == 3, "diagnostics should include checked row count")
+    assert_true(diag["usable"] is False, "sparse input should be unusable")
+
+
+def test_fft_reports_non_monotonic_timestamps():
+    times = [i * 0.01 for i in range(140)]
+    times[80] = times[79] - 0.01
+    result = fft_from_tables({"GYR": pd.DataFrame({"TimeS": times, "GyrX": [0.0, 1.0] * 70})})
+    assert_true(result["fft_available"] is False, "FFT should reject non-monotonic timestamps")
+    assert_true(result["reason"] == "non_monotonic_timestamps", f"unexpected non-monotonic FFT reason: {result}")
+    assert_true(result["sample_interval_diagnostics"]["GYR"]["monotonic"] is False, "diagnostics should record monotonic=false")
+
+
+def test_fft_valid_synthetic_high_rate_data_is_available():
+    times = [i * 0.01 for i in range(256)]
+    signal = [0.0, 1.0, 0.0, -1.0] * 64
+    with tempfile.TemporaryDirectory() as tmp:
+        result = fft_from_tables({"GYR": pd.DataFrame({"TimeS": times, "GyrX": signal, "GyrY": signal})}, out=tmp)
+    assert_true(result["fft_available"] is True, f"valid high-rate data should produce FFT: {result}")
+    assert_true(result["available"] is True, "legacy available flag should remain true")
+    assert_true(abs(result["sample_rate_hz_estimate"] - 100.0) < 1e-6, "synthetic sample rate should be 100 Hz")
+    assert_true(result["plots"], "valid FFT should write an HTML plot when output directory is provided")
+    assert_true(result["sample_interval_diagnostics"]["GYR"]["usable"] is True, "diagnostics should mark valid GYR data usable")
 
 
 def test_non_yaw_symptom_plots_are_generated_when_data_exists():
@@ -2184,6 +2224,10 @@ def main():
     test_metrics_flag_missing_flight_context()
     test_metrics_include_generic_numeric_summary_for_extra_messages()
     test_batch_sampler_isb_fft_rows_are_processed()
+    test_fft_reports_no_raw_or_high_rate_imu_messages()
+    test_fft_reports_sparse_or_insufficient_timestamps()
+    test_fft_reports_non_monotonic_timestamps()
+    test_fft_valid_synthetic_high_rate_data_is_available()
     test_non_yaw_symptom_plots_are_generated_when_data_exists()
     test_skill_doctor_passes_with_current_test_environment()
     test_skill_doctor_cli_writes_json()

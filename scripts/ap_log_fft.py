@@ -7,8 +7,19 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from ap_common import AnalysisError, ensure_dir, numeric_series, parse_dataflash, rows_to_dataframe, safe_float, safe_int, write_json
 
 
+CANDIDATE_IMU_MESSAGES = ["GYR", "ACC", "IMU", "IMU_FAST", "RAW_IMU"]
+FFT_MIN_ROWS = 128
+MAX_JITTER_RATIO = 1.0
+MAX_SPARSE_DT_S = 0.05
+NEXT_CAPTURE_GUIDANCE = [
+    "Use raw/high-rate IMU or batch-sampler logging only for short controlled captures when the aircraft is otherwise stable and controllable.",
+    "Check DSF/DMS/logging health after capture for dropouts, gaps, or sparse data before trusting FFT evidence.",
+    "Disable high-volume raw/high-rate IMU or batch-sampler logging afterward.",
+]
+
+
 def pick_imu_table(rows):
-    for typ in ["GYR", "ACC", "IMU", "IMU_FAST", "RAW_IMU"]:
+    for typ in CANDIDATE_IMU_MESSAGES:
         if typ in rows and rows[typ]:
             return typ, rows_to_dataframe(rows[typ])
     return None, None
@@ -46,7 +57,162 @@ def _sensor_label(sensor_type, instance):
     return f"{prefix}[{instance}]"
 
 
+def _time_column(df):
+    for col in ["TimeS", "TimeUS", "TimeMS"]:
+        if col in df.columns:
+            return col
+    return None
+
+
+def _time_seconds(df, col):
+    values = numeric_series(df, [col])
+    if values is None:
+        values = df[col]
+    values = values.dropna()
+    if col == "TimeUS":
+        values = values / 1_000_000.0
+    elif col == "TimeMS":
+        values = values / 1_000.0
+    return values
+
+
+def _message_diagnostics(name, df):
+    diag = {
+        "message": name,
+        "rows": int(len(df)) if df is not None else 0,
+        "time_column_found": None,
+        "start_time": None,
+        "end_time": None,
+        "median_dt": None,
+        "dt_p95": None,
+        "dt_jitter_estimate": None,
+        "monotonic": None,
+        "usable": False,
+        "problem": None,
+    }
+    if df is None or df.empty:
+        diag["problem"] = "insufficient_rows"
+        return diag
+    col = _time_column(df)
+    diag["time_column_found"] = col
+    if col is None:
+        diag["problem"] = "unsupported_message_schema"
+        return diag
+    try:
+        import numpy as np
+    except Exception as exc:
+        raise AnalysisError("numpy is required for FFT. Install dependencies with pip install -r requirements.txt") from exc
+
+    t = _time_seconds(df, col).to_numpy(dtype=float)
+    t = t[np.isfinite(t)]
+    if len(t):
+        diag["start_time"] = float(t[0])
+        diag["end_time"] = float(t[-1])
+    if len(t) < FFT_MIN_ROWS:
+        diag["problem"] = "insufficient_rows"
+        return diag
+    dt = np.diff(t)
+    if len(dt) == 0:
+        diag["problem"] = "could_not_determine_sample_interval"
+        return diag
+    monotonic = bool(np.all(dt > 0))
+    diag["monotonic"] = monotonic
+    positive_dt = dt[np.isfinite(dt) & (dt > 0)]
+    if len(positive_dt):
+        median_dt = float(np.median(positive_dt))
+        dt_p95 = float(np.percentile(positive_dt, 95))
+        diag["median_dt"] = median_dt
+        diag["dt_p95"] = dt_p95
+        diag["dt_jitter_estimate"] = float((dt_p95 - median_dt) / median_dt) if median_dt > 0 else None
+    if not monotonic:
+        diag["problem"] = "non_monotonic_timestamps"
+        return diag
+    if diag["median_dt"] is None or not np.isfinite(diag["median_dt"]) or diag["median_dt"] <= 0:
+        diag["problem"] = "could_not_determine_sample_interval"
+        return diag
+    if diag["dt_jitter_estimate"] is not None and diag["dt_jitter_estimate"] > MAX_JITTER_RATIO:
+        diag["problem"] = "excessive_timestamp_jitter"
+        return diag
+    if diag["median_dt"] > MAX_SPARSE_DT_S:
+        diag["problem"] = "logging_dropouts_or_sparse_data"
+        return diag
+    diag["usable"] = True
+    return diag
+
+
+def _has_signal_fields(df):
+    candidates = [c for c in ["GyrX", "GyrY", "GyrZ", "AccX", "AccY", "AccZ", "GX", "GY", "GZ", "AX", "AY", "AZ"] if c in df.columns]
+    if candidates:
+        return True
+    return any(any(k in c.lower() for k in ["gyr", "gyro", "acc"]) and c != "TimeS" for c in df.columns)
+
+
+def _failure_result(reason, messages_checked=None, data_quality=None, message=None, detail=None):
+    return {
+        "available": False,
+        "fft_available": False,
+        "message": message,
+        "reason": reason,
+        "reason_detail": detail,
+        "messages_checked": messages_checked or [],
+        "sample_interval_diagnostics": {d["message"]: d for d in messages_checked or []},
+        "data_quality": data_quality or {},
+        "next_capture_guidance": list(NEXT_CAPTURE_GUIDANCE),
+        "plots": [],
+        "peaks": [],
+    }
+
+
+def _choose_failure_reason(diagnostics):
+    if not diagnostics:
+        return "no_raw_or_high_rate_imu_messages"
+    problems = [d.get("problem") for d in diagnostics if d.get("problem")]
+    for reason in [
+        "unsupported_message_schema",
+        "non_monotonic_timestamps",
+        "could_not_determine_sample_interval",
+        "excessive_timestamp_jitter",
+        "logging_dropouts_or_sparse_data",
+        "insufficient_rows",
+    ]:
+        if reason in problems:
+            return reason
+    return "could_not_determine_sample_interval"
+
+
+def diagnose_fft_inputs(tables):
+    diagnostics = []
+    data_quality = {"messages_present": sorted(tables), "candidate_messages_present": []}
+    for name in CANDIDATE_IMU_MESSAGES:
+        df = tables.get(name)
+        if df is None or df.empty:
+            continue
+        data_quality["candidate_messages_present"].append(name)
+        diag = _message_diagnostics(name, df)
+        if diag["usable"] and not _has_signal_fields(df):
+            diag["usable"] = False
+            diag["problem"] = "unsupported_message_schema"
+        diagnostics.append(diag)
+    if not diagnostics:
+        return _failure_result(
+            "no_raw_or_high_rate_imu_messages",
+            [],
+            data_quality,
+            detail="No GYR, ACC, IMU, IMU_FAST, RAW_IMU, or usable ISBH/ISBD batch-sampler messages were present. VIBE-only logs are insufficient for frequency-domain FFT.",
+        )
+    usable = [d for d in diagnostics if d.get("usable")]
+    if usable:
+        return {"available": True, "fft_available": True, "messages_checked": diagnostics, "data_quality": data_quality}
+    reason = _choose_failure_reason(diagnostics)
+    return _failure_result(reason, diagnostics, data_quality, detail="Raw/high-rate IMU messages were present, but none had enough clean, monotonic, high-rate timing and recognized gyro/accel fields for FFT.")
+
+
 def fft_from_isb_rows(rows, max_points=200000):
+    messages_checked = []
+    if rows.get("ISBH"):
+        messages_checked.append({"message": "ISBH", "rows": len(rows.get("ISBH", [])), "time_column_found": None, "start_time": None, "end_time": None, "median_dt": None, "dt_p95": None, "dt_jitter_estimate": None, "monotonic": None, "usable": bool(rows.get("ISBD")), "problem": None if rows.get("ISBD") else "insufficient_rows"})
+    if rows.get("ISBD"):
+        messages_checked.append({"message": "ISBD", "rows": len(rows.get("ISBD", [])), "time_column_found": None, "start_time": None, "end_time": None, "median_dt": None, "dt_p95": None, "dt_jitter_estimate": None, "monotonic": None, "usable": bool(rows.get("ISBH")), "problem": None if rows.get("ISBH") else "unsupported_message_schema"})
     headers = {}
     for row in rows.get("ISBH", []):
         n = safe_int(_row_get(row, ["N", "fftnum"]))
@@ -54,7 +220,13 @@ def fft_from_isb_rows(rows, max_points=200000):
             continue
         headers[n] = row
     if not headers or not rows.get("ISBD"):
-        return {"available": False, "message": "ISBH/ISBD", "reason": "ISBH/ISBD batch-sampler messages are not both present.", "plots": [], "peaks": []}
+        return _failure_result(
+            "no_raw_or_high_rate_imu_messages",
+            messages_checked,
+            {"messages_present": sorted(k for k, v in rows.items() if v), "candidate_messages_present": [name for name in ["ISBH", "ISBD"] if rows.get(name)]},
+            message="ISBH/ISBD",
+            detail="ISBH/ISBD batch-sampler messages are not both present.",
+        )
 
     batches = {}
     holes = set()
@@ -109,7 +281,13 @@ def fft_from_isb_rows(rows, max_points=200000):
                     peaks.append({"field": f"{sensor}.{axis}", "frequency_hz": float(f), "amplitude": float(a), "units": {"frequency_hz": "Hz", "amplitude": "unknown"}})
 
     if not series:
-        return {"available": False, "message": "ISBH/ISBD", "reason": "ISBH/ISBD messages were present but no complete batch with usable sample rate and axis data was found.", "plots": [], "peaks": []}
+        return _failure_result(
+            "unsupported_message_schema",
+            messages_checked,
+            {"messages_present": sorted(k for k, v in rows.items() if v), "candidate_messages_present": ["ISBH", "ISBD"], "incomplete_batches": sorted(holes)},
+            message="ISBH/ISBD",
+            detail="ISBH/ISBD messages were present but no complete batch with usable sample rate and axis data was found.",
+        )
     sample_rates = []
     for row in headers.values():
         sr = safe_float(_row_get(row, ["smp_rate", "SmpRate", "sample_rate_hz"]))
@@ -117,7 +295,12 @@ def fft_from_isb_rows(rows, max_points=200000):
             sample_rates.append(sr)
     return {
         "available": True,
+        "fft_available": True,
         "message": "ISBH/ISBD",
+        "messages_checked": messages_checked,
+        "sample_interval_diagnostics": {d["message"]: d for d in messages_checked},
+        "data_quality": {"messages_present": sorted(k for k, v in rows.items() if v), "candidate_messages_present": ["ISBH", "ISBD"]},
+        "next_capture_guidance": [],
         "sample_rate_hz_estimate": float(max(sample_rates)) if sample_rates else None,
         "units": {"sample_rate_hz_estimate": "Hz", "peaks.frequency_hz": "Hz", "peaks.amplitude": "unknown"},
         "fields": sorted({s["field"] for s in peaks}),
@@ -141,6 +324,89 @@ def write_isb_plot(result, out):
     fig.write_html(str(plot_path), include_plotlyjs="cdn")
     result["plots"] = [str(plot_path)]
     result.pop("_series", None)
+    return result
+
+
+def _signal_candidates(df):
+    candidates = [c for c in ["GyrX", "GyrY", "GyrZ", "AccX", "AccY", "AccZ", "GX", "GY", "GZ", "AX", "AY", "AZ"] if c in df.columns]
+    if not candidates:
+        candidates = [c for c in df.columns if any(k in c.lower() for k in ["gyr", "gyro", "acc"]) and c != "TimeS"][:6]
+    return candidates
+
+
+def fft_from_tables(tables, out=None, max_points=200000):
+    diagnostics = diagnose_fft_inputs(tables)
+    if not diagnostics.get("available"):
+        return diagnostics
+    try:
+        import numpy as np
+    except Exception as exc:
+        raise AnalysisError("numpy is required for FFT. Install dependencies with pip install -r requirements.txt") from exc
+
+    typ = next((d["message"] for d in diagnostics["messages_checked"] if d.get("usable")), None)
+    df = tables[typ].copy()
+    time_col = _time_column(df)
+    candidates = _signal_candidates(df)
+    if not candidates:
+        return _failure_result("unsupported_message_schema", diagnostics["messages_checked"], diagnostics.get("data_quality"), message=typ, detail=f"{typ} present, but no gyro/accel fields were recognized.")
+
+    df = df.dropna(subset=[time_col])
+    if len(df) > max_points:
+        df = df.iloc[-max_points:]
+    t_series = _time_seconds(df, time_col)
+    t = t_series.to_numpy(dtype=float)
+    dt = float(np.median(np.diff(t)))
+    if not np.isfinite(dt) or dt <= 0:
+        return _failure_result("could_not_determine_sample_interval", diagnostics["messages_checked"], diagnostics.get("data_quality"), message=typ, detail="Could not determine valid sample interval.")
+    fs = 1.0 / dt
+    peaks = []
+    traces = []
+    for col in candidates:
+        y = df[col].to_numpy(dtype=float)
+        y = y - np.nanmean(y)
+        y = np.nan_to_num(y)
+        if len(y) < FFT_MIN_ROWS:
+            continue
+        window = np.hanning(len(y))
+        spec = np.abs(np.fft.rfft(y * window))
+        freq = np.fft.rfftfreq(len(y), d=dt)
+        traces.append({"field": col, "frequency_hz": freq.tolist(), "amplitude": spec.tolist()})
+        if len(spec) > 5:
+            valid = freq > 5
+            if valid.any():
+                idx = np.argsort(spec[valid])[-5:]
+                vf = freq[valid][idx]
+                va = spec[valid][idx]
+                for f, a in sorted(zip(vf, va), key=lambda x: x[1], reverse=True):
+                    peaks.append({"field": col, "frequency_hz": float(f), "amplitude": float(a), "units": {"frequency_hz": "Hz", "amplitude": "unknown"}})
+    result = {
+        "available": True,
+        "fft_available": True,
+        "message": typ,
+        "reason": None,
+        "messages_checked": diagnostics["messages_checked"],
+        "sample_interval_diagnostics": {d["message"]: d for d in diagnostics["messages_checked"]},
+        "data_quality": diagnostics.get("data_quality", {}),
+        "next_capture_guidance": [],
+        "sample_rate_hz_estimate": float(fs),
+        "units": {"sample_rate_hz_estimate": "Hz", "peaks.frequency_hz": "Hz", "peaks.amplitude": "unknown"},
+        "fields": candidates,
+        "plots": [],
+        "peaks": peaks[:30],
+    }
+    if out:
+        try:
+            import plotly.graph_objects as go
+        except Exception as exc:
+            raise AnalysisError("plotly is required for HTML plots. Install dependencies with pip install -r requirements.txt") from exc
+        out = ensure_dir(out)
+        fig = go.Figure()
+        for trace in traces:
+            fig.add_trace(go.Scatter(x=trace["frequency_hz"], y=trace["amplitude"], mode="lines", name=trace["field"]))
+        fig.update_layout(title=f"FFT spectrum from {typ} ({fs:.1f} Hz estimated sample rate)", template="plotly_white", xaxis_title="Frequency (Hz)", yaxis_title="Amplitude")
+        plot_path = out / "11_fft_noise_spectrum.html"
+        fig.write_html(str(plot_path), include_plotlyjs="cdn")
+        result["plots"] = [str(plot_path)]
     return result
 
 
@@ -169,67 +435,15 @@ def main() -> int:
             if result.get("available"):
                 result = write_isb_plot(result, args.out)
             write_json(args.json, result)
-            print("FFT generated from ISBH/ISBD batch sampler" if result.get("available") else result.get("reason"))
+            print("FFT generated from ISBH/ISBD batch sampler" if result.get("available") else f"FFT unavailable: {result.get('reason')}")
             return 0
-        typ, df = pick_imu_table(rows)
-        result = {"available": False, "message": typ, "reason": None, "plots": [], "peaks": []}
-        if typ is None or df is None or len(df) < 100:
-            result["reason"] = "No suitable high-rate IMU/raw gyro/accelerometer table found. VIBE-only logs are insufficient for frequency-domain FFT."
-            write_json(args.json, result)
-            print(result["reason"])
-            return 0
-        import numpy as np
-        import plotly.graph_objects as go
-        out = ensure_dir(args.out)
-        if "TimeS" not in df.columns or len(df["TimeS"].dropna()) < 100:
-            result["reason"] = "IMU table lacks a usable time base."
-            write_json(args.json, result)
-            return 0
-        # Pick gyro or accel fields dynamically.
-        candidates = [c for c in ["GyrX", "GyrY", "GyrZ", "AccX", "AccY", "AccZ", "GX", "GY", "GZ", "AX", "AY", "AZ"] if c in df.columns]
-        if not candidates:
-            candidates = [c for c in df.columns if any(k in c.lower() for k in ["gyr", "gyro", "acc"]) and c != "TimeS"][:6]
-        if not candidates:
-            result["reason"] = f"{typ} present, but no gyro/accel fields were recognized."
-            write_json(args.json, result)
-            return 0
-        df = df.dropna(subset=["TimeS"]).sort_values("TimeS")
-        if len(df) > args.max_points:
-            df = df.iloc[-args.max_points:]
-        t = df["TimeS"].to_numpy(dtype=float)
-        dt = np.median(np.diff(t))
-        if not np.isfinite(dt) or dt <= 0:
-            result["reason"] = "Could not determine valid sample interval."
-            write_json(args.json, result)
-            return 0
-        fs = 1.0 / dt
-        fig = go.Figure()
-        peaks = []
-        for col in candidates:
-            y = df[col].to_numpy(dtype=float)
-            y = y - np.nanmean(y)
-            y = np.nan_to_num(y)
-            if len(y) < 128:
-                continue
-            window = np.hanning(len(y))
-            spec = np.abs(np.fft.rfft(y * window))
-            freq = np.fft.rfftfreq(len(y), d=dt)
-            fig.add_trace(go.Scatter(x=freq, y=spec, mode="lines", name=col))
-            if len(spec) > 5:
-                # Exclude near-DC.
-                valid = freq > 5
-                if valid.any():
-                    idx = np.argsort(spec[valid])[-5:]
-                    vf = freq[valid][idx]
-                    va = spec[valid][idx]
-                    for f, a in sorted(zip(vf, va), key=lambda x: x[1], reverse=True):
-                        peaks.append({"field": col, "frequency_hz": float(f), "amplitude": float(a), "units": {"frequency_hz": "Hz", "amplitude": "unknown"}})
-        fig.update_layout(title=f"FFT spectrum from {typ} ({fs:.1f} Hz estimated sample rate)", template="plotly_white", xaxis_title="Frequency (Hz)", yaxis_title="Amplitude")
-        plot_path = out / "11_fft_noise_spectrum.html"
-        fig.write_html(str(plot_path), include_plotlyjs="cdn")
-        result.update({"available": True, "message": typ, "sample_rate_hz_estimate": float(fs), "units": {"sample_rate_hz_estimate": "Hz", "peaks.frequency_hz": "Hz", "peaks.amplitude": "unknown"}, "fields": candidates, "plots": [str(plot_path)], "peaks": peaks[:30]})
+        tables = {name: rows_to_dataframe(values) for name, values in rows.items() if values}
+        result = fft_from_tables(tables, out=args.out, max_points=args.max_points)
         write_json(args.json, result)
-        print(f"FFT generated from {typ}; sample rate estimate {fs:.1f} Hz")
+        if result.get("available"):
+            print(f"FFT generated from {result.get('message')}; sample rate estimate {result.get('sample_rate_hz_estimate'):.1f} Hz")
+        else:
+            print(f"FFT unavailable: {result.get('reason')}")
         return 0
     except AnalysisError as exc:
         print(f"error: {exc}", file=sys.stderr)
