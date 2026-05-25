@@ -19,6 +19,7 @@ from ap_log_compare import metric_differences
 from ap_compass_yaw import build_compass_yaw_investigation
 from ap_log_custom_plot import make_custom_plot
 from ap_log_diagnose import diagnosis_missing
+from ap_log_diagnose import build_cannot_conclude
 from ap_log_diagnose import diagnose_by_class
 from ap_log_diagnose import diagnose_yaw
 from ap_log_extract import write_jsonl_stream
@@ -928,6 +929,45 @@ def test_yaw_diagnosis_requires_only_att_and_rate():
     assert_true(checked, "ATT/RATE-only yaw should still run checks")
 
 
+def test_cannot_conclude_preserves_missing_evidence_tiers_for_yaw():
+    index = {"messages": {"ATT": {}, "RATE": {}, "RCOU": {}, "MODE": {}, "ESCX": {}, "XKF4": {}}, "errors": [], "events": [], "modes": []}
+    tables = {
+        "ATT": pd.DataFrame({"TimeS": [0.0], "DesYaw": [0.0], "Yaw": [0.0]}),
+        "RATE": pd.DataFrame({"TimeS": [0.0], "YDes": [0.0], "Y": [0.0], "YOut": [0.0]}),
+        "RCOU": pd.DataFrame({"TimeS": [0.0], "C1": [1500]}),
+        "ESCX": pd.DataFrame({"TimeS": [0.0], "Instance": [0], "Pwr": [0.0]}),
+        "XKF4": pd.DataFrame({"TimeS": [0.0], "SV": [0.1]}),
+    }
+    missing_required, missing_strongly, missing_optional = diagnosis_missing(index, "yaw_misbehaviour")
+    cannot = build_cannot_conclude(
+        "yaw_misbehaviour",
+        missing_required=missing_required,
+        missing_strongly_recommended=missing_strongly,
+        missing_optional=missing_optional,
+        tables=tables,
+        index=index,
+    )
+    text = "\n".join(cannot)
+
+    assert_true("Strongly recommended message `PIDY` is missing; confidence is reduced." in text, "PIDY should be described as strongly recommended")
+    assert_true("Required message `PIDY`" not in text, "PIDY should not be overstated as required")
+    assert_true("Optional context message `VIBE` is missing; this limits supporting context only." in text, "VIBE should be described as optional context")
+    assert_true("Required message `VIBE`" not in text, "VIBE should not be overstated as required")
+    assert_true("ESC-level motor/ESC confirmation is not possible because ESC/ESCX/EDT2 telemetry is missing." not in text, "ESCX should avoid the all-ESC-telemetry-missing caveat")
+
+    missing_required, missing_strongly, missing_optional = diagnosis_missing({"messages": {"RATE": {}}}, "yaw_misbehaviour")
+    cannot = build_cannot_conclude(
+        "yaw_misbehaviour",
+        missing_required=missing_required,
+        missing_strongly_recommended=missing_strongly,
+        missing_optional=missing_optional,
+        tables={"RATE": tables["RATE"]},
+        index={"messages": {"RATE": {}}},
+    )
+    text = "\n".join(cannot)
+    assert_true("Required message `ATT` is missing; core diagnosis may not be possible." in text, "ATT should remain required yaw evidence")
+
+
 def test_yaw_with_pidy_missing_other_strong_data_downgrades_confidence():
     index = {"messages": {"ATT": {}, "RATE": {}, "PIDY": {}}, "errors": [], "events": [], "modes": []}
     tables = {
@@ -1257,6 +1297,7 @@ def main():
     test_normal_telemetry_is_context_not_findings()
     test_yaw_pid_error_below_threshold_is_checked_not_finding()
     test_yaw_diagnosis_requires_only_att_and_rate()
+    test_cannot_conclude_preserves_missing_evidence_tiers_for_yaw()
     test_yaw_with_pidy_missing_other_strong_data_downgrades_confidence()
     test_yaw_full_evidence_has_no_missing_evidence_tiers()
     test_investigation_manifest_yaw_inventory_plans_next_steps()

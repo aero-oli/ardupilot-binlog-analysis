@@ -846,7 +846,14 @@ def main() -> int:
             "plots": plots,
             "logging_dropouts": index.get("logging_dropouts", []),
             "safety_note": "Do not treat this diagnosis as clearance to fly. Bench and ground checks are required after any configuration, mechanical, power, or tuning changes.",
-            "what_cannot_be_concluded": build_cannot_conclude(symptom_class, missing_required + missing_strongly + missing_optional, tables, index=index),
+            "what_cannot_be_concluded": build_cannot_conclude(
+                symptom_class,
+                missing_required=missing_required,
+                missing_strongly_recommended=missing_strongly,
+                missing_optional=missing_optional,
+                tables=tables,
+                index=index,
+            ),
         }
         write_json(args.out, result)
         print(f"Diagnosis class={symptom_class}; findings={len(findings)}; plots={len(plots)}")
@@ -856,8 +863,18 @@ def main() -> int:
         return 2
 
 
-def build_cannot_conclude(symptom_class, missing, tables=None, index=None):
+def build_cannot_conclude(
+    symptom_class,
+    missing_required=None,
+    missing_strongly_recommended=None,
+    missing_optional=None,
+    tables=None,
+    index=None,
+):
     tables = tables or {}
+    missing_required = missing_required or []
+    missing_strongly_recommended = missing_strongly_recommended or []
+    missing_optional = missing_optional or []
     out = []
     if "ESC" not in tables and "ESCX" not in tables and "EDT2" not in tables:
         out.append("ESC-level motor/ESC confirmation is not possible because ESC/ESCX/EDT2 telemetry is missing.")
@@ -873,8 +890,12 @@ def build_cannot_conclude(symptom_class, missing, tables=None, index=None):
         out.append("EKF test-ratio evidence may be incomplete because XKF4/NKF4 is missing.")
     if "VIBE" not in tables:
         out.append("Vibration contribution cannot be assessed from VIBE because VIBE is missing.")
-    for msg in missing:
-        out.append(f"Required message `{msg}` is missing for the selected symptom workflow.")
+    for msg in missing_required:
+        out.append(f"Required message `{msg}` is missing; core diagnosis may not be possible.")
+    for msg in missing_strongly_recommended:
+        out.append(f"Strongly recommended message `{msg}` is missing; confidence is reduced.")
+    for msg in missing_optional:
+        out.append(f"Optional context message `{msg}` is missing; this limits supporting context only.")
     return out
 
 if __name__ == "__main__":
