@@ -1,11 +1,16 @@
 from __future__ import annotations
 
 import fnmatch
+import json
 import re
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
 
 from ap_common import params_from_tables, safe_float
 from ap_symptom_map import requirement_spec
+
+METADATA_CAVEAT = "Parameter metadata may not exactly match the firmware that produced the log. Latest-source metadata may include unreleased, renamed, or removed parameters. Use metadata as explanatory context, not proof of firmware-specific behaviour or automatic parameter-change advice."
+METADATA_DIR = Path(__file__).resolve().parents[1] / "references" / "parameter-metadata"
 
 
 def _combined_parameter_values(index: Optional[Dict[str, Any]] = None, tables: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -60,10 +65,102 @@ def _numeric_flags(value: Any, default: Any) -> Dict[str, Any]:
     return {"is_zero": bool(is_zero), "is_default": is_default}
 
 
+def load_parameter_metadata(vehicle: str = "ArduCopter", metadata_path: Optional[str | Path] = None) -> Dict[str, Any]:
+    path = Path(metadata_path) if metadata_path else METADATA_DIR / f"{vehicle}-latest.min.json"
+    try:
+        with path.open("r", encoding="utf-8") as f:
+            data = json.load(f)
+    except FileNotFoundError:
+        return {"metadata_version": None, "source_vehicle": vehicle, "caveat": METADATA_CAVEAT, "parameters": [], "metadata_missing": True}
+    data.setdefault("caveat", METADATA_CAVEAT)
+    data["_path"] = str(path)
+    return data
+
+
+def _metadata_entries(metadata: Dict[str, Any]) -> List[Dict[str, Any]]:
+    return list(metadata.get("parameters", []) or [])
+
+
+def find_parameter_metadata(name: str, metadata: Optional[Dict[str, Any]] = None, vehicle: str = "ArduCopter") -> Optional[Dict[str, Any]]:
+    metadata = metadata or load_parameter_metadata(vehicle)
+    name = str(name)
+    entries = _metadata_entries(metadata)
+    for entry in entries:
+        if entry.get("name") == name:
+            return dict(entry)
+    wildcard_matches = []
+    for entry in entries:
+        pattern = str(entry.get("name", ""))
+        if "*" in pattern and fnmatch.fnmatchcase(name, pattern):
+            wildcard_matches.append(entry)
+    if wildcard_matches:
+        return dict(sorted(wildcard_matches, key=lambda item: len(str(item.get("name", ""))), reverse=True)[0])
+    if re.match(r"SERVO\d+_FUNCTION$", name):
+        for entry in entries:
+            if entry.get("name") == "SERVO*_FUNCTION":
+                return dict(entry)
+    return None
+
+
+def _decode_enum(value: Any, metadata_entry: Optional[Dict[str, Any]]) -> Optional[str]:
+    if not metadata_entry:
+        return None
+    values = metadata_entry.get("values") or {}
+    if value is None or not values:
+        return None
+    value_f = safe_float(value)
+    keys = [str(value)]
+    if value_f is not None:
+        keys.extend([str(int(value_f)), str(float(value_f))])
+    for key in keys:
+        if key in values:
+            return values[key]
+    return None
+
+
+def _decode_bitmask(value: Any, metadata_entry: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    if not metadata_entry:
+        return []
+    bitmask = metadata_entry.get("bitmask") or {}
+    value_f = safe_float(value)
+    if value_f is None or not bitmask:
+        return []
+    value_i = int(value_f)
+    decoded = []
+    for bit, label in sorted(bitmask.items(), key=lambda item: int(item[0]) if str(item[0]).isdigit() else str(item[0])):
+        try:
+            bit_i = int(bit)
+        except Exception:
+            continue
+        decoded.append({"bit": bit_i, "label": label, "set": bool(value_i & (1 << bit_i))})
+    return decoded
+
+
+def enrich_parameter_entry(entry: Dict[str, Any], metadata: Optional[Dict[str, Any]] = None, vehicle: str = "ArduCopter") -> Dict[str, Any]:
+    metadata = metadata or load_parameter_metadata(vehicle)
+    meta = find_parameter_metadata(entry.get("name"), metadata=metadata, vehicle=vehicle)
+    out = dict(entry)
+    out["metadata_caveat"] = metadata.get("caveat") or METADATA_CAVEAT
+    if not meta:
+        out["metadata_missing"] = True
+        return out
+    out["metadata_missing"] = False
+    for key in ["display_name", "description", "units", "range", "values", "bitmask", "user_level", "reboot_required", "source_vehicle", "metadata_version", "source_url", "source_note"]:
+        if key in meta:
+            out[key] = meta.get(key)
+    out["enum_value"] = _decode_enum(out.get("value"), meta)
+    bitmask_decode = _decode_bitmask(out.get("value"), meta)
+    if bitmask_decode:
+        out["bitmask_decode"] = bitmask_decode
+    return out
+
+
 def select_relevant_parameters(
     symptom_class: str,
     index: Optional[Dict[str, Any]] = None,
     tables: Optional[Dict[str, Any]] = None,
+    enrich_metadata: bool = True,
+    vehicle: str = "ArduCopter",
 ) -> Dict[str, Any]:
     """Return concise symptom-relevant parameter context.
 
@@ -98,6 +195,7 @@ def select_relevant_parameters(
         else:
             missing.append(selector)
 
+    metadata = load_parameter_metadata(vehicle) if enrich_metadata else None
     selected = []
     default_or_zero = []
     for name in sorted(selected_names, key=_parameter_sort_key):
@@ -111,6 +209,8 @@ def select_relevant_parameters(
             "is_zero": flags["is_zero"],
             "is_default": flags["is_default"],
         }
+        if metadata is not None:
+            entry = enrich_parameter_entry(entry, metadata=metadata, vehicle=vehicle)
         selected.append(entry)
         reasons = []
         if flags["is_zero"]:
@@ -136,4 +236,5 @@ def select_relevant_parameters(
         "parameter_count_available": len(params),
         "limitation": limitation,
         "note": "Parameter values are context for investigation only; this tool does not recommend parameter changes automatically.",
+        "metadata_caveat": (metadata or {}).get("caveat") if metadata is not None else METADATA_CAVEAT,
     }

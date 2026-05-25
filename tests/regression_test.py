@@ -29,7 +29,9 @@ from ap_log_fft import fft_from_isb_rows, fft_from_tables
 from ap_log_investigation_manifest import build_manifest_from_index, validate_recommended_plot_groups
 from ap_log_metrics import compute_metrics
 from ap_log_mode_compare import compare_modes
+from ap_param_lookup import lookup_parameters
 from ap_log_plots import health_plots
+from update_parameter_metadata import compact_from_raw
 from ap_log_plots import main as plots_main
 from ap_parameters import select_relevant_parameters
 from ap_rcin import build_command_response_investigation, rc_channel_mapping, summarize_rcin
@@ -785,6 +787,9 @@ def test_parameter_context_uses_yaml_selectors_and_servo_wildcards():
     flagged = {item["name"]: item["reasons"] for item in context["default_or_zero"]}
     assert_true(flagged["INS_HNTCH_ENABLE"] == ["zero", "matches_default"], "zero/default parameters should be flagged separately from missing")
     assert_true("SERVO3_FUNCTION" not in context["missing"], "wildcard selectors should not generate noisy missing servo slots")
+    servo = next(item for item in context["selected"] if item["name"] == "SERVO1_FUNCTION")
+    assert_true(servo["metadata_missing"] is False, "SERVO wildcard metadata should enrich concrete SERVO function parameters")
+    assert_true(servo["enum_value"] == "Motor1", "SERVO function metadata should decode known motor function values")
 
 
 def test_stream_index_preserves_parameter_defaults_for_context():
@@ -813,6 +818,87 @@ def test_manifest_includes_symptom_parameter_context():
     assert_true("SERVO1_FUNCTION" in names, "manifest should include selected servo function context")
     assert_true("MOT_SPIN_MIN" in params["missing"], "manifest should list missing exact relevant parameters")
     assert_true(params["note"].startswith("Parameter values are context"), "manifest should not turn parameters into tuning advice")
+    assert_true("metadata_caveat" in params and "may not exactly match" in params["metadata_caveat"], "manifest parameter context should include metadata caveat")
+
+
+def test_param_lookup_known_parameter_returns_metadata():
+    index = {"parameters": {"WP_YAW_BEHAVIOR": 2}, "parameter_defaults": {"WP_YAW_BEHAVIOR": 1}}
+    with tempfile.TemporaryDirectory() as tmp:
+        index_path = Path(tmp) / "index.json"
+        index_path.write_text(json.dumps(index), encoding="utf-8")
+        result = lookup_parameters(index_path=index_path, names="WP_YAW_BEHAVIOR")
+    entry = result["parameters"][0]
+    assert_true(entry["metadata_missing"] is False, "known parameter should return metadata")
+    assert_true(entry["display_name"] == "Yaw behaviour during missions", "known parameter should include display name")
+    assert_true(entry["enum_value"] == "Face next waypoint except RTL", "known enum value should be decoded")
+    assert_true("metadata_caveat" in result and "may not exactly match" in result["metadata_caveat"], "lookup result should always include metadata caveat")
+
+
+def test_param_lookup_unknown_parameter_preserves_logged_value():
+    index = {"parameters": {"MY_CUSTOM_PARAM": 42}, "parameter_defaults": {"MY_CUSTOM_PARAM": 0}}
+    with tempfile.TemporaryDirectory() as tmp:
+        index_path = Path(tmp) / "index.json"
+        index_path.write_text(json.dumps(index), encoding="utf-8")
+        result = lookup_parameters(index_path=index_path, names="MY_CUSTOM_PARAM")
+    entry = result["parameters"][0]
+    assert_true(entry["logged_value"] == 42, "unknown parameter should preserve logged value")
+    assert_true(entry["metadata_missing"] is True, "unknown parameter should be marked metadata_missing")
+    assert_true(entry["metadata_caveat"], "unknown lookup should still include caveat")
+
+
+def test_param_lookup_symptom_returns_enriched_relevant_parameters():
+    index = {"parameters": {"WP_YAW_BEHAVIOR": 3, "ATC_RATE_Y_MAX": 120, "MOT_YAW_HEADROOM": 200}, "parameter_defaults": {}}
+    with tempfile.TemporaryDirectory() as tmp:
+        index_path = Path(tmp) / "index.json"
+        index_path.write_text(json.dumps(index), encoding="utf-8")
+        result = lookup_parameters(index_path=index_path, symptom="yaw_misbehaviour")
+    names = {entry["name"] for entry in result["parameters"]}
+    wp = next(entry for entry in result["parameters"] if entry["name"] == "WP_YAW_BEHAVIOR")
+    assert_true({"WP_YAW_BEHAVIOR", "ATC_RATE_Y_MAX", "MOT_YAW_HEADROOM"}.issubset(names), "symptom lookup should include relevant logged yaw parameters")
+    assert_true(wp["enum_value"] == "Face along GPS course", "symptom lookup should enrich relevant parameters")
+    assert_true(result["symptom_context"]["selected"][0]["metadata_caveat"], "symptom context should include metadata caveat")
+
+
+def test_parameter_metadata_fetch_compactor_uses_machine_readable_shape():
+    raw = {
+        "Copter": {
+            "WP_YAW_BEHAVIOR": {
+                "DisplayName": "Yaw behaviour during missions",
+                "Description": "Determines how yaw is controlled in missions",
+                "Values": {"0": "Never change yaw", "1": "Face next waypoint"},
+                "User": "Standard",
+            },
+            "LOG_BITMASK": {
+                "DisplayName": "Log bitmask",
+                "Description": "Bitmap of onboard log types",
+                "Bitmask": {"0": "Fast Attitude"},
+                "User": "Standard",
+            },
+        },
+        "ATC_": {
+            "ATC_RATE_Y_MAX": {
+                "DisplayName": "Maximum yaw rate",
+                "Description": "Maximum yaw rate target",
+                "Units": "deg/s",
+                "Range": {"low": "0", "high": "500"},
+                "User": "Standard",
+            },
+        },
+        "RCMAP_": {
+            "RCMAP_YAW": {
+                "DisplayName": "Yaw channel",
+                "Description": "Yaw RC input channel",
+                "Range": {"low": "1", "high": "16"},
+            }
+        },
+    }
+    compact = compact_from_raw(raw, vehicle="ArduCopter", source_url="https://example.test/apm.pdef.json", docs_url="https://example.test/params.html")
+    entries = {entry["name"]: entry for entry in compact["parameters"]}
+    assert_true(entries["WP_YAW_BEHAVIOR"]["values"]["1"] == "Face next waypoint", "compactor should retain enum values from apm.pdef.json")
+    assert_true(entries["LOG_BITMASK"]["bitmask"]["0"] == "Fast Attitude", "compactor should retain bitmask values")
+    assert_true(entries["ATC_RATE_Y_MAX"]["range"] == [0.0, 500.0], "compactor should normalize range dictionaries")
+    assert_true("RCMAP_*" in entries, "compactor should synthesize wildcard family metadata")
+    assert_true("may not exactly match" in compact["caveat"], "compacted web metadata should retain firmware caveat")
 
 
 def test_parameter_context_yaw_includes_mission_yaw_parameters():
@@ -2175,6 +2261,10 @@ def main():
     test_parameter_context_uses_yaml_selectors_and_servo_wildcards()
     test_stream_index_preserves_parameter_defaults_for_context()
     test_manifest_includes_symptom_parameter_context()
+    test_param_lookup_known_parameter_returns_metadata()
+    test_param_lookup_unknown_parameter_preserves_logged_value()
+    test_param_lookup_symptom_returns_enriched_relevant_parameters()
+    test_parameter_metadata_fetch_compactor_uses_machine_readable_shape()
     test_parameter_context_yaw_includes_mission_yaw_parameters()
     test_parameter_context_mission_yaw_includes_rate_accel_and_headroom()
     test_manifest_questions_include_mission_yaw_context_for_auto_symptom()
