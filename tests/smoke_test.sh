@@ -12,6 +12,7 @@ skill = Path("SKILL.md").read_text(encoding="utf-8")
 how_to = Path("references/how-to-investigate.md").read_text(encoding="utf-8")
 logging_reference_path = Path("references/logging-configuration-for-investigation.md")
 evidence_reference_path = Path("references/evidence-gathering-flights.md")
+rc_reference_path = Path("references/rc-failsafe-prearm-diagnosis.md")
 
 assert logging_reference_path.exists()
 reference = logging_reference_path.read_text(encoding="utf-8")
@@ -44,6 +45,7 @@ for symptom_class in [
     "ekf_gps_issue",
     "battery_power_issue",
     "altitude_throttle_issue",
+    "rc_failsafe_prearm_issue",
     "crash_or_loss_of_control",
     "general_investigation",
 ]:
@@ -62,6 +64,22 @@ for required in [
     "INS_RAW_LOG_OPT",
 ]:
     assert required in evidence_reference, required
+
+assert rc_reference_path.exists()
+rc_reference = rc_reference_path.read_text(encoding="utf-8")
+assert "references/rc-failsafe-prearm-diagnosis.md" in skill
+for required in [
+    "MSG",
+    "ERR",
+    "RCIN",
+    "RCMAP_ROLL",
+    "BATT_ARM_VOLT",
+    "GPS",
+    "XKF4",
+    "LOG_DISARMED",
+    "Do not bypass arming checks",
+]:
+    assert required in rc_reference, required
 PY
 python scripts/ap_symptom_classifier.py "the yaw seems to be misbehaving" | grep yaw_misbehaviour >/dev/null
 python scripts/ap_fault_tree.py yaw_misbehaviour | grep RATE.YDes >/dev/null

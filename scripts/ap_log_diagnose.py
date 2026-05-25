@@ -140,7 +140,7 @@ def make_targeted_plots_from_tables(tables, symptom_class, plots_dir, events=Fal
             add_event_markers(fig, markers)
             p = out / "motor_outputs_during_yaw_error.html"; fig.write_html(str(p), include_plotlyjs="cdn"); generated.append(str(p))
         generated.extend(write_compass_yaw_plots(tables, out, events=events))
-    if symptom_class in {"attitude_rate_issue", "crash_or_loss_of_control", "general_investigation"}:
+    if symptom_class in {"attitude_rate_issue", "crash_or_loss_of_control", "general_investigation", "rc_failsafe_prearm_issue"}:
         if "RCIN" in tables and "ATT" in tables:
             mapping = rc_channel_mapping(tables, index)
             rcin = tables["RCIN"]
@@ -181,7 +181,7 @@ def make_targeted_plots_from_tables(tables, symptom_class, plots_dir, events=Fal
             fig.update_layout(title="Rate tracking symptom plot", template="plotly_white", hovermode="x unified")
             add_event_markers(fig, markers)
             p = out / "rate_tracking_symptom.html"; fig.write_html(str(p), include_plotlyjs="cdn"); generated.append(str(p))
-    if symptom_class in {"ekf_gps_issue", "crash_or_loss_of_control", "general_investigation"}:
+    if symptom_class in {"ekf_gps_issue", "crash_or_loss_of_control", "general_investigation", "rc_failsafe_prearm_issue"}:
         if "GPS" in tables or "GPS2" in tables or "XKF4" in tables or "NKF4" in tables:
             fig = make_subplots(rows=3, cols=1, shared_xaxes=True, subplot_titles=("GPS quality", "GPS satellites/status", "EKF test ratios"))
             for group in gps_instance_groups(tables):
@@ -217,7 +217,7 @@ def make_targeted_plots_from_tables(tables, symptom_class, plots_dir, events=Fal
         fig.update_layout(title="Vibration symptom plot", template="plotly_white", hovermode="x unified")
         add_event_markers(fig, markers)
         p = out / "vibration_symptom.html"; fig.write_html(str(p), include_plotlyjs="cdn"); generated.append(str(p))
-    if symptom_class in {"battery_power_issue", "crash_or_loss_of_control", "general_investigation"}:
+    if symptom_class in {"battery_power_issue", "crash_or_loss_of_control", "general_investigation", "rc_failsafe_prearm_issue"}:
         if "BAT" in tables or "POWR" in tables:
             fig = make_subplots(rows=2, cols=1, shared_xaxes=True, subplot_titles=("Battery", "Board power"))
             for group in battery_instance_groups(tables):
@@ -384,6 +384,70 @@ def add_event_findings(index, findings, checked):
         checked.append({"check": "Mode timeline", "result": f"{len(modes)} mode rows indexed; inspect exact transitions around the symptom"})
     if events:
         checked.append({"check": "Event timeline", "result": f"{len(events)} EV rows indexed; correlate with symptom time"})
+
+
+def _table_text_rows(table, fields):
+    if table is None or not hasattr(table, "to_dict"):
+        return []
+    rows = []
+    for row in table.to_dict(orient="records"):
+        text_parts = []
+        for field in fields:
+            value = row.get(field)
+            if value is not None and str(value).strip() and str(value).lower() != "nan":
+                text_parts.append(str(value).strip())
+        if text_parts:
+            time_s = safe_float(row.get("TimeS"))
+            prefix = f"{time_s:.2f}s " if time_s is not None else ""
+            rows.append(prefix + " ".join(text_parts))
+    return rows
+
+
+def add_rc_failsafe_prearm_findings(tables, index, findings, checked, context, rank=1):
+    timeline_evidence = []
+    timeline_evidence.extend(_table_text_rows(tables.get("MSG"), ["Message", "Msg", "message"])[:12])
+    timeline_evidence.extend("ERR " + str(e) for e in index.get("errors", [])[:10])
+    timeline_evidence.extend(_table_text_rows(tables.get("ARM"), ["ArmState", "Armed", "Reason", "Method", "State"])[:10])
+    keywords = (
+        "prearm", "pre-arm", "arm", "arming", "failsafe", "radio", "rc", "throttle",
+        "gcs", "safety", "switch", "battery", "gps", "ekf", "compass", "baro", "hardware"
+    )
+    relevant_timeline = [item for item in timeline_evidence if any(k in item.lower() for k in keywords)]
+    if relevant_timeline:
+        add_finding(
+            findings, rank, "Pre-arm, arming, or failsafe timeline evidence", "safety-critical", "high",
+            relevant_timeline[:14],
+            "MSG/ERR/EV/ARM/MODE timing is the primary evidence for arming failures and failsafe behaviour. Correlate the exact message with RC input, power, GPS/EKF/compass, and safety-switch context before changing parameters.",
+            ["Identify the exact GCS/logged pre-arm or failsafe message", "Determine whether it occurred before arming, during arming, or after arming", "Resolve the implicated check rather than bypassing safety protections"],
+        )
+    else:
+        checked.append({"check": "Pre-arm/failsafe timeline", "result": "No specific pre-arm, arming, or failsafe text was found in MSG/ERR/ARM by heuristic"})
+
+    rcin_summary = summarize_rcin(tables, index)
+    if rcin_summary.get("limitation"):
+        add_context(context, "RCIN", rcin_summary["limitation"])
+    if rcin_summary.get("available"):
+        for axis, info in rcin_summary.get("axes", {}).items():
+            if not info.get("available"):
+                checked.append({"check": f"RCIN {axis}", "result": info.get("limitation", f"RCIN {axis} unavailable")})
+                continue
+            add_context(context, "RCIN", (
+                f"RCIN {axis} channel {info['channel']} ({info['field']}): "
+                f"min={info['min']:.0f} PWM us, max={info['max']:.0f} PWM us, "
+                f"active={info['active_percent']:.1f}%"
+            ), [
+                value_with_unit(f"RCIN.{axis}.min", info["min"], "PWM us"),
+                value_with_unit(f"RCIN.{axis}.max", info["max"], "PWM us"),
+                value_with_unit(f"RCIN.{axis}.active_percent", info["active_percent"], "%"),
+            ])
+        checked.append({"check": "RCIN command/link context", "result": "RCIN is available; inspect mapped channel ranges and whether inputs disappear or become invalid around the event"})
+    else:
+        add_finding(
+            findings, rank + 1, "RC input evidence is missing for RC/failsafe investigation", "safety-critical", "medium",
+            ["RCIN message is missing"],
+            "Without RCIN, the log cannot confirm whether the receiver/link disappeared, throttle input went invalid, or mapped channels behaved as expected.",
+            ["Capture RCIN in the next ground or bench evidence run", "Review RC_OPTIONS, RC_PROTOCOLS, receiver wiring, receiver failsafe output, and RCMAP_* parameters"],
+        )
 
 
 def add_vibration_findings(tables, findings, checked, rank=4, vibration_assessment=None, symptom_class="general_investigation"):
@@ -722,6 +786,14 @@ def diagnose_by_class(symptom_class, tables, index, vibration_assessment=None):
         add_power_findings(tables, findings, checked, context, rank=1)
         add_motor_esc_findings(tables, findings, checked, context, rank=2, index=index)
         add_attitude_rate_findings(tables, findings, checked, axes=("roll", "pitch", "yaw"), rank=3)
+    elif symptom_class == "rc_failsafe_prearm_issue":
+        add_rc_failsafe_prearm_findings(tables, index, findings, checked, context, rank=1)
+        add_power_findings(tables, findings, checked, context, rank=2)
+        add_ekf_gps_findings(tables, index, findings, checked, rank=3)
+        compass_yaw = build_compass_yaw_investigation(tables)
+        findings.extend(compass_yaw["findings"])
+        context.extend(compass_yaw["context"])
+        checked.extend(compass_yaw["checked"])
     elif symptom_class == "motor_esc_issue":
         add_motor_esc_findings(tables, findings, checked, context, rank=1, index=index)
         add_attitude_rate_findings(tables, findings, checked, axes=("roll", "pitch", "yaw"), rank=2)

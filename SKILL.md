@@ -53,6 +53,8 @@ Use when the user says something like:
 - “GPS glitch”
 - “EKF error”
 - “battery sag”
+- “would not arm”
+- “radio failsafe”
 - “crashed”
 - “loss of control”
 
@@ -74,6 +76,7 @@ python scripts/ap_log_diagnose.py LOG.BIN --symptom "USER SYMPTOM" --out out/dia
 - `context`: useful ranges and summaries that exist but are not fault evidence by themselves, such as normal BAT voltage/current ranges, ESC RPM/current/temperature ranges, CTUN/BARO ranges, or ESCX duty/power ranges.
 - `checked_but_not_supported`: checks that ran but did not cross the diagnostic threshold.
 - `missing_required`, `missing_strongly_recommended`, and `missing_optional`: unavailable messages separated by diagnostic importance. For yaw, only `ATT` and `RATE` are required; `PIDY`, `RCOU`, and `MODE` strengthen confidence, while timeline/context messages such as `MSG`, `EV`, and `ERR` are optional evidence.
+- `next_evidence_gathering`: structured planning guidance for what to collect next when evidence is missing. Read this before recommending a parameter review, bench check, ground test, restrained test, controlled flight, or no-fly-until-checked path. It is a safety planning aid, not a diagnosis.
 
 When required or strongly recommended evidence is missing, load `references/logging-configuration-for-investigation.md` and `references/evidence-gathering-flights.md` before writing the missing-data section. Explain the confidence limit and, when appropriate, give conservative guidance for a future diagnostic capture. Do not turn missing evidence into automatic parameter changes or a recommendation to repeat unsafe flight.
 
@@ -170,6 +173,7 @@ For symptom-led diagnosis, `references/symptom-diagnosis-map.yaml` is authoritat
 - GPS/EKF/Loiter issue: `references/ekf-gps-diagnosis.md`
 - vibration/noise issue: `references/vibration-diagnosis.md`
 - battery/power issue: `references/battery-power-diagnosis.md`
+- RC/failsafe/pre-arm/arming issue: `references/rc-failsafe-prearm-diagnosis.md`
 - crash/loss of control: `references/crash-or-loss-of-control-diagnosis.md`
 - missing log evidence or future capture setup: `references/logging-configuration-for-investigation.md`
 - safe next evidence-gathering activity: `references/evidence-gathering-flights.md`
@@ -218,7 +222,7 @@ Required yaw evidence sources, if present:
 
 ## What to do when evidence is missing
 
-If required or strongly recommended messages are missing, state what cannot be concluded from the current log, then use `references/logging-configuration-for-investigation.md` to describe the minimum future logging needed and `references/evidence-gathering-flights.md` to choose a safe next activity. Never treat absent evidence as proof that the issue did not happen, and never recommend disabling safety checks or intentionally reproducing dangerous loss of control to get better data.
+If required or strongly recommended messages are missing, state what cannot be concluded from the current log, then inspect `next_evidence_gathering` in the manifest. Use `references/logging-configuration-for-investigation.md` to describe the minimum future logging needed and `references/evidence-gathering-flights.md` to choose a safe next activity. Never treat absent evidence as proof that the issue did not happen, and never recommend disabling safety checks or intentionally reproducing dangerous loss of control to get better data.
 
 ## Output standard
 

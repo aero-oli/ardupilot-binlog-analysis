@@ -213,6 +213,35 @@ way to collect that evidence.
   fault, or uncontrolled climb/descent is suspected.
 - Cleanup: restore any high-rate logging used for vibration/height evidence.
 
+### rc_failsafe_prearm_issue
+
+- Minimum required evidence: `MSG`, `ERR`.
+- Strongly recommended evidence: `EV`, `ARM`, `MODE`, `RCIN`, `PARM`.
+- Useful optional context: `GPS`, `XKF4`, `MAG`, `BAT`, `POWR`, `VIBE`,
+  `RCOU`/`RCO2`/`RCO3`.
+- Logging parameters to review: `LOG_DISARMED`, `LOG_BITMASK`,
+  `LOG_FILE_RATEMAX`, `LOG_DARM_RATEMAX`, `ARMING_CHECK`,
+  `BRD_SAFETYENABLE`, `FS_THR_ENABLE`, `FS_OPTIONS`, `FS_GCS_ENABLE`,
+  `RC_OPTIONS`, `RC_PROTOCOLS`, `RCMAP_ROLL`, `RCMAP_PITCH`,
+  `RCMAP_THROTTLE`, `RCMAP_YAW`, `BATT_ARM_VOLT`, `BATT_ARM_MAH`,
+  `GPS_TYPE`, `COMPASS_USE`, `EK3_SRC1_POSXY`, and `EK3_SRC1_YAW`.
+- Suggested plots/signals: `MSG`/`ERR`/`EV`/`ARM`/`MODE` timeline, `RCIN`
+  mapped roll/pitch/throttle/yaw channels, battery and board power,
+  GPS quality, EKF test ratios, compass/yaw-source context.
+- Safe test pattern: ground-only boot/pre-arm/arming attempt. Use
+  `LOG_DISARMED` if the event occurs before arming, record the exact GCS
+  message, and capture stick movement in `RCIN` with the vehicle made safe for
+  bench checks.
+- Bench checks before flight: receiver binding/link quality, transmitter model,
+  receiver failsafe output, RC wiring, channel mapping, hardware safety switch,
+  battery voltage, board power, GPS/EKF/compass pre-arm messages, parameter
+  dump, and any recent parameter or firmware changes.
+- Do not fly if: arming checks fail, RC input is missing/invalid, radio/GCS or
+  throttle failsafe is unresolved, battery/power is implicated, GPS/EKF/compass
+  pre-arm warnings persist, or the safety switch state is not understood.
+- Cleanup: disable `LOG_DISARMED` after the boot/pre-arm/failsafe evidence
+  capture if it is not normally needed.
+
 ### crash_or_loss_of_control
 
 - Minimum required evidence: no single message is mandatory because any available

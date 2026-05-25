@@ -42,20 +42,24 @@ Use this as an operating sequence before forming conclusions. The scripts provid
 
    Use `GPS`, `MAG`, `XKF3`, `XKF4`, mode/timeline messages, and yaw-source helpers where available. Do not infer compass interference from MAG ranges alone; require timing, correlation, or estimator evidence.
 
-7. Check battery/power and vibration as time-correlated contributors.
+7. For arming, pre-arm, RC, or failsafe symptoms, follow `rc-failsafe-prearm-diagnosis.md`.
+
+   Start with the `MSG`/`ERR`/`EV`/`ARM`/`MODE` timeline, then inspect `RCIN`, `RCMAP_*`, failsafe parameters, battery/board power, and GPS/EKF/compass pre-arm evidence. If the issue happened before arming and the log lacks timeline evidence, ask for a ground-only `LOG_DISARMED` capture rather than a flight.
+
+8. Check battery/power and vibration as time-correlated contributors.
 
    Battery sag, high current, board power flags, high vibration, and clipping are relevant when they occur in the symptom window or correlate with the affected signal. Whole-log maxima are context unless timing supports relevance.
 
-8. Treat script findings as hypotheses.
+9. Treat script findings as hypotheses.
 
    A finding means a threshold or rule fired. Confirm it against plots, timing, available messages, and missing evidence before ranking it as a likely cause.
 
-9. Always state missing data and confidence limits.
+10. Always state missing data and confidence limits.
 
    Separate missing required data from missing strongly recommended or optional context. Explain when log dropouts, timestamp gaps, message sparsity, absent RCIN, absent ESC telemetry, or missing parameters limit confidence.
    If the current log is insufficient, use `logging-configuration-for-investigation.md` to describe the missing logging/messages and `evidence-gathering-flights.md` to choose the safest next evidence-gathering activity. The next step may be a parameter dump, bench inspection, ground test, restrained test, or controlled flight.
 
-10. Do not recommend unsafe flight or disabling checks.
+11. Do not recommend unsafe flight or disabling checks.
 
     Never declare the aircraft safe from a log alone. Do not recommend disabling arming, EKF, GPS, compass, battery, logging, or failsafe checks as a routine fix. Prefer targeted inspection, bench verification, and conservative ground checks.
 

@@ -815,6 +815,75 @@ def test_yaml_aliases_drive_symptom_classification():
     assert_true(symptom == "yaw_misbehaviour", f"expected yaw_misbehaviour from YAML alias, got {symptom}")
 
 
+def test_rc_prearm_aliases_drive_symptom_classification():
+    symptom = ap_common.classify_symptom("it would not arm")
+    assert_true(symptom == "rc_failsafe_prearm_issue", f"expected rc_failsafe_prearm_issue, got {symptom}")
+    symptom = ap_common.classify_symptom("radio failsafe in flight")
+    assert_true(symptom == "rc_failsafe_prearm_issue", f"expected rc_failsafe_prearm_issue, got {symptom}")
+
+
+def test_rc_prearm_required_messages_and_parameters():
+    missing_required, _missing_strongly, _missing_optional = diagnosis_missing({"messages": {}}, "rc_failsafe_prearm_issue")
+    assert_true(missing_required == ["MSG", "ERR"], f"MSG/ERR should be required for rc_failsafe_prearm_issue, got {missing_required}")
+
+    manifest = build_manifest_from_index({"messages": {}, "parameters": {}, "errors": [], "events": [], "modes": []}, "pre-arm error", "flight.bin")
+    params = manifest["parameter_context"]
+    assert_true("LOG_DISARMED" in params["selectors"], "LOG_DISARMED should be in parameter selectors")
+    assert_true("LOG_DISARMED" in params["missing"], "LOG_DISARMED should appear as missing when not logged")
+    plan = manifest["next_evidence_gathering"]
+    assert_true(plan["recommended_next_step_type"] == "ground_test", "pre-arm evidence should be a ground capture, not a flight requirement")
+    assert_true(plan["safe_to_request_flight"] is False, "pre-arm evidence should not request flight")
+
+
+def test_rc_prearm_diagnosis_routes_context_without_bypassing_checks():
+    index = {
+        "messages": {"MSG": {}, "ERR": {}, "EV": {}, "ARM": {}, "MODE": {}, "RCIN": {}, "PARM": {}, "BAT": {}, "POWR": {}, "GPS": {}, "XKF4": {}, "MAG": {}},
+        "errors": [{"time_s": 1.2, "subsys": 2, "ecode": 4}],
+        "events": [{"time_s": 1.0, "id": 10}],
+        "modes": [{"time_s": 0.0, "mode": "STABILIZE"}],
+        "parameters": {
+            "LOG_DISARMED": 1,
+            "ARMING_CHECK": 1,
+            "BRD_SAFETYENABLE": 1,
+            "RCMAP_ROLL": 1,
+            "RCMAP_PITCH": 2,
+            "RCMAP_THROTTLE": 3,
+            "RCMAP_YAW": 4,
+        },
+    }
+    tables = {
+        "MSG": pd.DataFrame({"TimeS": [0.5], "Message": ["PreArm: Hardware safety switch"]}),
+        "ERR": pd.DataFrame({"TimeS": [1.2], "Subsys": [2], "ECode": [4]}),
+        "ARM": pd.DataFrame({"TimeS": [1.3], "ArmState": [0], "Reason": ["prearm failed"]}),
+        "MODE": pd.DataFrame({"TimeS": [0.0], "Mode": ["STABILIZE"]}),
+        "RCIN": pd.DataFrame({
+            "TimeS": [0.0, 1.0, 2.0],
+            "C1": [1500, 1600, 1500],
+            "C2": [1500, 1500, 1400],
+            "C3": [1000, 1050, 1100],
+            "C4": [1500, 1500, 1550],
+        }),
+        "BAT": pd.DataFrame({"TimeS": [0.0, 1.0], "Volt": [16.2, 15.9], "Curr": [0.1, 0.2]}),
+        "POWR": pd.DataFrame({"TimeS": [0.0, 1.0], "Vcc": [5.1, 5.0], "Flags": [0, 0]}),
+        "GPS": pd.DataFrame({"TimeS": [0.0, 1.0], "Status": [3, 3], "NSats": [14, 14], "HDop": [1.1, 1.0]}),
+        "XKF4": pd.DataFrame({"TimeS": [0.0, 1.0], "SV": [0.2, 0.3], "SP": [0.2, 0.3], "SH": [0.2, 0.3], "SM": [0.2, 0.3]}),
+        "MAG": pd.DataFrame({"TimeS": [0.0, 1.0], "MagX": [100, 101], "MagY": [20, 20], "MagZ": [300, 300]}),
+    }
+    findings, context, checked, missing_required, _missing_strongly, _missing_optional = diagnose_by_class("rc_failsafe_prearm_issue", tables, index)
+    causes = "\n".join(f.get("possible_cause", "") for f in findings)
+    evidence = "\n".join("\n".join(f.get("evidence", [])) for f in findings)
+    context_text = "\n".join(c.get("detail", "") for c in context)
+    checked_text = "\n".join(c.get("result", "") for c in checked)
+    recommendation_text = "\n".join("\n".join(f.get("recommended_checks", [])) for f in findings)
+
+    assert_true(missing_required == [], "MSG/ERR should not be missing in synthetic rc/prearm diagnosis")
+    assert_true("Pre-arm, arming, or failsafe timeline evidence" in causes, "rc/prearm diagnosis should produce timeline finding")
+    assert_true("PreArm: Hardware safety switch" in evidence, "MSG pre-arm text should be evidence")
+    assert_true("RCIN roll channel" in context_text and "RCIN throttle channel" in context_text, "RCIN context should be summarized")
+    assert_true("No GPS fix" in checked_text or "GPS/EKF health" in checked_text, "GPS/EKF context should be checked")
+    assert_true("disable ARMING_CHECK" not in recommendation_text, "diagnosis must not recommend disabling ARMING_CHECK as a routine fix")
+
+
 def test_new_yaml_alias_does_not_need_python_change():
     source = Path("references/symptom-diagnosis-map.yaml")
     data = yaml.safe_load(source.read_text(encoding="utf-8"))
@@ -1410,6 +1479,91 @@ def test_investigation_manifest_suggests_extract_when_core_evidence_missing():
     assert_true(any("Cannot answer core diagnosis" in limit for limit in manifest["confidence_limits"]), "manifest should state required evidence limit")
 
 
+def test_manifest_next_evidence_yaw_missing_pidy_outputs():
+    index = {"messages": {"ATT": {}, "RATE": {}}, "errors": [], "events": [], "modes": []}
+    manifest = build_manifest_from_index(index, "yaw issue", "flight.bin")
+    plan = manifest["next_evidence_gathering"]
+    assert_true(plan["safe_to_request_flight"] is True, "yaw missing strong evidence can allow controlled capture after checks")
+    assert_true(plan["recommended_next_step_type"] == "controlled_flight", f"unexpected yaw next step: {plan}")
+    assert_true("PIDY" in plan["messages_to_capture"], "yaw plan should ask for missing PIDY")
+    assert_true("RCOU" in plan["messages_to_capture"], "yaw plan should ask for actuator outputs")
+    assert_true(any("stable hover" in item for item in plan["suggested_safe_capture"]), "yaw plan should suggest a cautious hover capture")
+    assert_true(plan["recommended_next_step_type"] != "do_not_fly_until_checked", "ordinary yaw missing-evidence plan should not become crash no-fly guidance")
+
+
+def test_manifest_next_evidence_motor_esc_missing_outputs_prefers_bench():
+    index = {"messages": {"RATE": {}, "BAT": {}}, "errors": [], "events": [], "modes": []}
+    manifest = build_manifest_from_index(index, "motor pulsing", "flight.bin")
+    plan = manifest["next_evidence_gathering"]
+    assert_true(plan["safe_to_request_flight"] is False, "motor/ESC missing evidence should not request flight first")
+    assert_true(plan["recommended_next_step_type"] == "bench_check", f"unexpected motor/ESC next step: {plan}")
+    assert_true("RCOU" in plan["messages_to_capture"], "motor/ESC plan should request actuator output evidence")
+    assert_true(any("Enable ESC telemetry" in item for item in plan["suggested_safe_capture"]), "missing ESC telemetry should be called out")
+    assert_true(any("proxy evidence" in item for item in plan["suggested_safe_capture"]), "plan should identify RCOU/BAT/POWR proxy evidence when ESC telemetry is unavailable")
+
+
+def test_manifest_next_evidence_crash_is_do_not_fly():
+    index = {"messages": {"MSG": {}, "BAT": {}}, "errors": [], "events": [], "modes": []}
+    manifest = build_manifest_from_index(index, "crash loss of control", "flight.bin")
+    plan = manifest["next_evidence_gathering"]
+    assert_true(plan["safe_to_request_flight"] is False, "crash manifest should not request flight")
+    assert_true(plan["recommended_next_step_type"] == "do_not_fly_until_checked", f"unexpected crash next step: {plan}")
+    assert_true(any("Do not repeat flight" in item for item in plan["do_not_attempt"]), "crash plan should forbid repeat flight until checks")
+    assert_true("LOG_DISARMED" in plan["logging_settings_to_review"], "crash repair/startup evidence may need disarmed logging")
+
+
+def test_manifest_next_evidence_vibration_missing_raw_imu_short_controlled_capture():
+    index = {"messages": {"VIBE": {}, "RATE": {}}, "errors": [], "events": [], "modes": []}
+    manifest = build_manifest_from_index(index, "vibration filter issue", "flight.bin")
+    plan = manifest["next_evidence_gathering"]
+    assert_true(plan["safe_to_request_flight"] is True, "vibration raw-IMU capture can be controlled if vehicle is otherwise controllable")
+    assert_true(plan["recommended_next_step_type"] == "controlled_flight", f"unexpected vibration next step: {plan}")
+    assert_true("INS_RAW_LOG_OPT" in plan["logging_settings_to_review"], "vibration plan should review raw IMU logging")
+    assert_true(any("short" in item and "raw/high-rate IMU" in item for item in plan["suggested_safe_capture"]), "vibration plan should recommend short high-rate capture cautiously")
+    assert_true(any("dropouts" in item for item in plan["suggested_safe_capture"]), "vibration plan should require dropout checks")
+    assert_true(any("Reset high-volume" in item or "Clear INS_RAW_LOG_OPT" in item for item in plan["reset_after_test"]), "vibration plan should reset high-volume logging")
+
+
+def test_manifest_next_evidence_prearm_boot_uses_log_disarmed_without_flight():
+    index = {"messages": {"MSG": {}, "ERR": {}}, "errors": [], "events": [], "modes": []}
+    manifest = build_manifest_from_index(index, "pre-arm boot arming failure", "flight.bin")
+    plan = manifest["next_evidence_gathering"]
+    assert_true(plan["safe_to_request_flight"] is False, "pre-arm/boot issue should not require flight")
+    assert_true(plan["recommended_next_step_type"] == "ground_test", f"unexpected pre-arm next step: {plan}")
+    assert_true("LOG_DISARMED" in plan["logging_settings_to_review"], "pre-arm/boot evidence should include LOG_DISARMED")
+    assert_true(any("boot/pre-arm/arming ground capture" in item for item in plan["suggested_safe_capture"]), "pre-arm plan should request boot/pre-arm ground logging")
+    assert_true(any("bypass arming checks" in item for item in plan["do_not_attempt"]), "pre-arm plan should not bypass arming checks")
+
+
+def test_manifest_next_evidence_field_shape_for_all_symptom_classes():
+    required_keys = {
+        "safe_to_request_flight",
+        "recommended_next_step_type",
+        "reason",
+        "bench_checks_first",
+        "logging_settings_to_review",
+        "messages_to_capture",
+        "suggested_safe_capture",
+        "do_not_attempt",
+        "reset_after_test",
+        "confidence_limits",
+    }
+    symptom_map = load_symptom_map()
+    for symptom_class in symptom_map["ordered_class_names"]:
+        manifest = build_manifest_from_index({"messages": {}, "errors": [], "events": [], "modes": []}, symptom_class, "flight.bin")
+        plan = manifest.get("next_evidence_gathering")
+        assert_true(isinstance(plan, dict), f"{symptom_class} should include next_evidence_gathering")
+        assert_true(required_keys <= set(plan), f"{symptom_class} next_evidence_gathering missing keys: {required_keys - set(plan)}")
+        assert_true(plan["recommended_next_step_type"] in {
+            "existing_log_analysis",
+            "parameter_review",
+            "bench_check",
+            "ground_test",
+            "controlled_flight",
+            "do_not_fly_until_checked",
+        }, f"{symptom_class} has invalid next step type")
+
+
 def test_validate_module_availability_separates_required_and_optional_messages():
     modules = module_availability({"messages": {"ATT": {}, "RATE": {}, "PIDY": {}, "RCOU": {}, "MODE": {}, "MSG": {}, "EV": {}, "ERR": {}}})
     yaw = modules["yaw_diagnosis"]
@@ -1667,6 +1821,9 @@ def main():
     test_non_yaw_symptoms_get_targeted_findings()
     test_toilet_bowling_prefers_ekf_gps_when_navigation_context_is_present()
     test_yaml_aliases_drive_symptom_classification()
+    test_rc_prearm_aliases_drive_symptom_classification()
+    test_rc_prearm_required_messages_and_parameters()
+    test_rc_prearm_diagnosis_routes_context_without_bypassing_checks()
     test_new_yaml_alias_does_not_need_python_change()
     test_unmatched_symptom_returns_general_investigation()
     test_malformed_symptom_yaml_fails_clearly()
@@ -1701,6 +1858,12 @@ def main():
     test_yaw_full_evidence_has_no_missing_evidence_tiers()
     test_investigation_manifest_yaw_inventory_plans_next_steps()
     test_investigation_manifest_suggests_extract_when_core_evidence_missing()
+    test_manifest_next_evidence_yaw_missing_pidy_outputs()
+    test_manifest_next_evidence_motor_esc_missing_outputs_prefers_bench()
+    test_manifest_next_evidence_crash_is_do_not_fly()
+    test_manifest_next_evidence_vibration_missing_raw_imu_short_controlled_capture()
+    test_manifest_next_evidence_prearm_boot_uses_log_disarmed_without_flight()
+    test_manifest_next_evidence_field_shape_for_all_symptom_classes()
     test_validate_module_availability_separates_required_and_optional_messages()
     test_compare_summarizes_metric_deltas()
     test_metric_differences_can_ignore_unrequested_sections()

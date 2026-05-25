@@ -198,6 +198,63 @@ symptom_classes:
       - connector_or_power_module_issue
       - throttle_saturation_under_load
 
+  - name: rc_failsafe_prearm_issue
+    aliases:
+      - prearm
+      - pre-arm
+      - would not arm
+      - arming failed
+      - arming check
+      - arming checks
+      - safety switch
+      - radio failsafe
+      - rc failsafe
+      - throttle failsafe
+      - gcs failsafe
+      - lost radio
+      - no rc input
+      - failsafe
+      - ekf prearm
+      - compass prearm
+      - hardware safety switch
+      - arming checks failed
+    required_messages: [MSG, ERR]
+    strongly_recommended_messages: [EV, ARM, MODE, RCIN, PARM]
+    optional_context_messages: [GPS, XKF4, MAG, BAT, POWR, VIBE, RCOU]
+    relevant_parameters:
+      - ARMING_CHECK
+      - BRD_SAFETYENABLE
+      - FS_THR_ENABLE
+      - FS_OPTIONS
+      - FS_GCS_ENABLE
+      - RC_OPTIONS
+      - RC_PROTOCOLS
+      - RCMAP_ROLL
+      - RCMAP_PITCH
+      - RCMAP_THROTTLE
+      - RCMAP_YAW
+      - BATT_ARM_VOLT
+      - BATT_ARM_MAH
+      - GPS_TYPE
+      - COMPASS_USE
+      - EK3_SRC1_POSXY
+      - EK3_SRC1_YAW
+      - LOG_DISARMED
+    recommended_plot_groups: [mode_timeline, rcin_throttle_power, power, gps_quality, ekf_innovations]
+    diagnostic_questions:
+      - What exact pre-arm or failsafe message was logged?
+      - Did RCIN disappear or become invalid?
+      - Did failsafe occur before or after arming?
+      - Was battery, GPS, EKF, compass, or safety switch implicated?
+      - Was LOG_DISARMED enabled if the issue occurred before arming?
+    likely_fault_branches:
+      - prearm_or_arming_check_failure
+      - rc_link_or_input_loss
+      - throttle_or_gcs_failsafe
+      - safety_switch_or_board_safety_state
+      - battery_power_prearm_failure
+      - gps_ekf_compass_prearm_failure
+
   - name: crash_or_loss_of_control
     aliases: [crash, fell, dropped, loss of control, flyaway, flipped]
     required_messages: []
