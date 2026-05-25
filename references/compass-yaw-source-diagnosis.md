@@ -16,6 +16,9 @@ automatic conclusion engine.
      whether the estimate/heading changed without matching rate evidence.
    - Use `MAG`, `XKF3`, and `XKF4` for magnetic field, yaw innovation, and
      test-ratio context.
+   - In AUTO/mission complaints, compare `RATE.YDes` with `RATE.Y`; continuous
+     mission yaw demand can come from `WP_YAW_BEHAVIOR`, waypoint geometry, and
+     yaw-rate/acceleration limits rather than compass error alone.
 
 3. Check GPS yaw / moving-baseline context when relevant.
    - Review `EK3_SRC1_YAW`, `GPS_TYPE`, `GPS_TYPE2`, and `GPS_AUTO_SWITCH`.
@@ -26,6 +29,9 @@ automatic conclusion engine.
    - Check `VIBE`, `BAT`, `POWR`, and motor outputs if the heading problem
      coincides with vibration, current draw, or output saturation.
    - RC input can distinguish commanded yaw from estimator/yaw-source behaviour.
+   - Treat `WP_YAW_BEHAVIOR`, `ATC_RATE_Y_MAX`, `ATC_ACCEL_Y_MAX`, and
+     `MOT_YAW_HEADROOM` as context only; do not infer a parameter fault without
+     matching log evidence.
 
 5. State confidence limits.
    - Missing `MAG`, `XKF3`, `XKF4`, `ATT`, `RATE`, or `MODE` prevents a strong

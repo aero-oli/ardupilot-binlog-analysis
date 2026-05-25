@@ -11,6 +11,9 @@ symptom_classes:
       - yaw drifting
       - yaw toilet bowling
       - heading not holding
+      - mission yaw
+      - auto yaw
+      - auto heading
       - spin
       - pirouette
       - compass
@@ -29,7 +32,13 @@ symptom_classes:
       - ATC_RAT_YAW_D
       - ATC_RAT_YAW_FF
       - ATC_ANG_YAW_P
+      - ATC_RATE_Y_MAX
       - ATC_ACCEL_Y_MAX
+      - MOT_YAW_HEADROOM
+      - WP_YAW_BEHAVIOR
+      - WPNAV_SPEED
+      - WPNAV_ACCEL
+      - WPNAV_ACCEL_C
       - INS_HNTCH_ENABLE
       - INS_LOG_BAT_MASK
       - INS_GYRO_FILTER
@@ -42,6 +51,9 @@ symptom_classes:
       - Did ATT yaw, RATE yaw, and PIDY evidence agree on the tracking problem?
       - Did motor outputs or ESC telemetry show saturation, asymmetry, or faults?
       - Did compass/EKF, vibration, or power evidence coincide with the yaw symptom?
+      - Is the yaw issue mostly in AUTO/mission?
+      - Is RATE.YDes unusually high or continuous in AUTO?
+      - Does WP_YAW_BEHAVIOR explain mission yaw demands?
     likely_fault_branches:
       - yaw_tracking_error
       - yaw_authority_limitation
@@ -98,6 +110,10 @@ symptom_classes:
       - EK3_SRC1_YAW
       - EK3_OGN_HGT_MASK
       - EK3_PRIMARY
+      - WP_YAW_BEHAVIOR
+      - WPNAV_SPEED
+      - WPNAV_ACCEL
+      - WPNAV_ACCEL_C
       - COMPASS_USE
       - COMPASS_USE2
       - COMPASS_USE3
@@ -136,6 +152,9 @@ symptom_classes:
       - COMPASS_ORIENT2
       - COMPASS_ORIENT3
       - EK3_SRC1_YAW
+      - WP_YAW_BEHAVIOR
+      - ATC_RATE_Y_MAX
+      - ATC_ACCEL_Y_MAX
       - GPS_TYPE
       - GPS_TYPE2
       - GPS_AUTO_SWITCH
@@ -306,6 +325,13 @@ symptom_classes:
       - ARMING_CHECK
       - BATT_MONITOR
       - EK3_SRC1_YAW
+      - WP_YAW_BEHAVIOR
+      - WPNAV_SPEED
+      - WPNAV_ACCEL
+      - WPNAV_ACCEL_C
+      - ATC_RATE_Y_MAX
+      - ATC_ACCEL_Y_MAX
+      - MOT_YAW_HEADROOM
     recommended_plot_groups: [mode_timeline, rcin_roll_attitude, rcin_pitch_attitude, rcin_throttle_power, attitude_rate, motor_outputs, power, ekf_gps, vibration, esc_telemetry]
     diagnostic_questions:
       - What changed immediately before loss of control?

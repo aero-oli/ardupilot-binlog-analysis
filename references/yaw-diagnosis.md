@@ -36,6 +36,26 @@ Use this when the user reports yaw, heading, spinning, pirouetting, toilet-bowli
    - Check BAT and POWR.
    - Use FFT only when raw/high-rate IMU data exists.
 
+## AUTO / Mission Yaw Context
+
+If the yaw complaint is mainly in `AUTO` or during a mission, do not treat it as
+purely manual yaw PID tuning.
+
+- Compare `RATE.YDes` vs `RATE.Y` in the mission segment. Large, persistent, or
+  continuous `RATE.YDes` in `AUTO` may be mission/navigation yaw demand rather
+  than a spontaneous aircraft fault.
+- Inspect `WP_YAW_BEHAVIOR`, waypoint geometry, `WPNAV_SPEED`, `WPNAV_ACCEL`,
+  `WPNAV_ACCEL_C`, `ATC_RATE_Y_MAX`, `ATC_ACCEL_Y_MAX`, and
+  `MOT_YAW_HEADROOM` as context for what the autopilot was allowed or expected
+  to command.
+- Compare the same aircraft in AltHold/PosHold/Loiter/AUTO only if it is safe
+  and controllable. A problem that exists only in mission flight needs mission
+  demand, navigation behaviour, estimator health, and yaw authority checked
+  together.
+- Do not change mission, yaw-rate, yaw-acceleration, navigation, or motor
+  headroom parameters blindly. Use log evidence, mission geometry, and ground
+  checks to decide whether a parameter review is justified.
+
 ## Ranked causes
 
 - Yaw authority limited: RATE.YDes/RATE.Y diverge, RATE.YOut high, PIDY limit and/or mapped output-channel saturation.

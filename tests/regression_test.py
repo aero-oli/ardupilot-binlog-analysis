@@ -814,6 +814,46 @@ def test_manifest_includes_symptom_parameter_context():
     assert_true(params["note"].startswith("Parameter values are context"), "manifest should not turn parameters into tuning advice")
 
 
+def test_parameter_context_yaw_includes_mission_yaw_parameters():
+    index = {
+        "parameters": {
+            "WP_YAW_BEHAVIOR": 2,
+            "WPNAV_SPEED": 500,
+            "WPNAV_ACCEL": 250,
+            "WPNAV_ACCEL_C": 100,
+        },
+    }
+    context = select_relevant_parameters("yaw_misbehaviour", index=index)
+    names = {item["name"] for item in context["selected"]}
+
+    assert_true("WP_YAW_BEHAVIOR" in names, "yaw parameter context should include mission yaw behaviour")
+    assert_true({"WPNAV_SPEED", "WPNAV_ACCEL", "WPNAV_ACCEL_C"}.issubset(names), "yaw parameter context should include navigation speed/accel context")
+
+
+def test_parameter_context_mission_yaw_includes_rate_accel_and_headroom():
+    index = {
+        "parameters": {
+            "ATC_RATE_Y_MAX": 18000,
+            "ATC_ACCEL_Y_MAX": 36000,
+            "MOT_YAW_HEADROOM": 200,
+        },
+    }
+    context = select_relevant_parameters("yaw_misbehaviour", index=index)
+    names = {item["name"] for item in context["selected"]}
+
+    assert_true({"ATC_RATE_Y_MAX", "ATC_ACCEL_Y_MAX", "MOT_YAW_HEADROOM"}.issubset(names), "mission-yaw context should include yaw rate/accel limits and motor yaw headroom")
+
+
+def test_manifest_questions_include_mission_yaw_context_for_auto_symptom():
+    index = {"messages": {"ATT": {}, "RATE": {}, "MODE": {}}, "parameters": {"WP_YAW_BEHAVIOR": 2}, "errors": [], "events": [], "modes": []}
+    manifest = build_manifest_from_index(index, "yaw problem in AUTO mission", "flight.bin")
+    questions = "\n".join(manifest["questions_to_answer"])
+
+    assert_true("Is the yaw issue mostly in AUTO/mission?" in questions, "mission yaw manifest should ask whether symptom is mission-specific")
+    assert_true("Is RATE.YDes unusually high or continuous in AUTO?" in questions, "mission yaw manifest should ask about commanded yaw demand")
+    assert_true("Does WP_YAW_BEHAVIOR explain mission yaw demands?" in questions, "mission yaw manifest should ask about mission yaw behaviour")
+
+
 def test_event_markers_collect_mode_err_ev_msg():
     tables = {
         "MODE": pd.DataFrame({"TimeS": [10.0], "Mode": ["LOITER"]}),
@@ -2041,6 +2081,9 @@ def main():
     test_parameter_context_uses_yaml_selectors_and_servo_wildcards()
     test_stream_index_preserves_parameter_defaults_for_context()
     test_manifest_includes_symptom_parameter_context()
+    test_parameter_context_yaw_includes_mission_yaw_parameters()
+    test_parameter_context_mission_yaw_includes_rate_accel_and_headroom()
+    test_manifest_questions_include_mission_yaw_context_for_auto_symptom()
     test_event_markers_collect_mode_err_ev_msg()
     test_mode_segments_are_derived_from_mode_rows()
     test_validate_marks_non_copter_scope_as_partial()

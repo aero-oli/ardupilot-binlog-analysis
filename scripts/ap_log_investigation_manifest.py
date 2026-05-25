@@ -494,7 +494,7 @@ def _next_evidence_gathering(symptom_class, symptom_text, spec, present, missing
     }
 
 
-def _yaw_questions_first(symptom_class, questions):
+def _yaw_questions_first(symptom_class, questions, symptom_text=""):
     if symptom_class != "yaw_misbehaviour":
         return questions
     required = [
@@ -504,6 +504,13 @@ def _yaw_questions_first(symptom_class, questions):
         "Were motor outputs saturated?",
         "Was there EKF or magnetic evidence at the same time?",
     ]
+    text = str(symptom_text or "").lower()
+    if "mission" in text or "auto" in text:
+        required.extend([
+            "Is the yaw issue mostly in AUTO/mission?",
+            "Is RATE.YDes unusually high or continuous in AUTO?",
+            "Does WP_YAW_BEHAVIOR explain mission yaw demands?",
+        ])
     merged = required + [q for q in questions if q not in required]
     return merged
 
@@ -541,7 +548,7 @@ def build_manifest_from_index(index, symptom_text, log_path):
         "next_evidence_gathering": _next_evidence_gathering(symptom_class, symptom_text, spec, present, missing, confidence_limits),
         "recommended_next_commands": _recommended_commands(log_path, symptom_text, spec, present, missing, index),
         "recommended_plots": plot_groups,
-        "questions_to_answer": _yaw_questions_first(symptom_class, spec.get("diagnostic_questions", [])),
+        "questions_to_answer": _yaw_questions_first(symptom_class, spec.get("diagnostic_questions", []), symptom_text),
         "confidence_limits": confidence_limits,
     }
 

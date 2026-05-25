@@ -65,13 +65,18 @@ way to collect that evidence.
 - Safe test pattern: only after motor/prop/frame/setup checks, capture 30-60
   seconds of stable hover plus small yaw steps and small roll/pitch inputs in
   Stabilize or AltHold. If the symptom is navigation-only, compare AltHold and
-  Loiter only if the vehicle is controllable.
+  PosHold/Loiter/AUTO only if the vehicle is controllable and the area is safe.
+  For mission-only yaw, first inspect mission geometry, `RATE.YDes`,
+  `WP_YAW_BEHAVIOR`, WPNAV speed/accel context, yaw-rate/yaw-accel limits, and
+  yaw authority before planning another autonomous run.
 - Bench checks before flight: prop condition/orientation, motor direction,
   frame twist, loose arms, ESC connections, output mapping, compass mounting,
   battery condition, and yaw-related parameters.
 - Do not fly if: yaw authority was lost, a motor/ESC/power fault is suspected,
   the vehicle spun uncontrollably, compass/yaw-source faults persist on the
-  ground, or the pilot cannot safely recover in manual attitude modes.
+  ground, navigation stability is unsafe, or the pilot cannot safely recover in
+  manual attitude modes. Do not repeat autonomous mission testing if yaw control
+  or navigation stability is unsafe.
 - Cleanup: disable raw/batch IMU logging if used; restore rate limits.
 
 ### attitude_rate_issue
