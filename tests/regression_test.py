@@ -16,7 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 import ap_common
 from ap_common import AnalysisError
 from ap_log_compare import metric_differences
-from ap_compass_yaw import build_compass_yaw_investigation, mag_field_frame
+from ap_compass_yaw import build_compass_yaw_investigation, mag_field_frame, write_compass_yaw_plots
 from ap_log_custom_plot import make_custom_plot
 from ap_log_diagnose import diagnosis_missing
 from ap_log_diagnose import build_cannot_conclude
@@ -1685,6 +1685,37 @@ def test_non_yaw_symptom_plots_are_generated_when_data_exists():
         assert_true(any("ekf_gps" in p for p in plots), "EKF/GPS symptom should generate a targeted plot")
 
 
+def test_compass_yaw_plots_generate_with_full_synthetic_evidence():
+    tables = {
+        "ATT": pd.DataFrame({"TimeS": [0.0, 1.0, 2.0], "DesYaw": [10.0, 20.0, 30.0], "Yaw": [9.0, 18.0, 29.0]}),
+        "RATE": pd.DataFrame({"TimeS": [0.0, 1.0, 2.0], "YDes": [0.0, 5.0, -5.0], "Y": [0.0, 4.0, -4.0], "YOut": [0.1, 0.2, -0.2]}),
+        "MAG": pd.DataFrame({"TimeS": [0.0, 1.0, 2.0], "MagX": [100.0, 110.0, 105.0], "MagY": [20.0, 22.0, 24.0], "MagZ": [40.0, 41.0, 43.0]}),
+        "CTUN": pd.DataFrame({"TimeS": [0.0, 1.0, 2.0], "ThO": [0.2, 0.4, 0.6]}),
+        "BAT": pd.DataFrame({"TimeS": [0.0, 1.0, 2.0], "Curr": [5.0, 8.0, 12.0]}),
+        "XKF4": pd.DataFrame({"TimeS": [0.0, 1.0, 2.0], "SM": [0.2, 0.4, 0.6], "SH": [0.1, 0.2, 0.3]}),
+    }
+    with tempfile.TemporaryDirectory() as tmp:
+        plots = write_compass_yaw_plots(tables, tmp, events=True)
+        names = {Path(p).name for p in plots}
+        assert_true("compass_yaw_source_investigation.html" in names, "compass/yaw investigation plot should be written")
+        assert_true("ekf_mag_yaw_innovations.html" in names, "EKF magnetic/yaw plot should be written when XKF data is present")
+        assert_true((Path(tmp) / "compass_yaw_source_investigation.html").exists(), "compass/yaw HTML should exist")
+        assert_true((Path(tmp) / "ekf_mag_yaw_innovations.html").exists(), "EKF HTML should exist")
+
+
+def test_compass_yaw_plots_tolerate_missing_optional_battery_and_throttle():
+    tables = {
+        "ATT": pd.DataFrame({"TimeS": [0.0, 1.0, 2.0], "DesYaw": [10.0, 20.0, 30.0], "Yaw": [9.0, 18.0, 29.0]}),
+        "RATE": pd.DataFrame({"TimeS": [0.0, 1.0, 2.0], "YDes": [0.0, 5.0, -5.0], "Y": [0.0, 4.0, -4.0], "YOut": [0.1, 0.2, -0.2]}),
+        "MAG": pd.DataFrame({"TimeS": [0.0, 1.0, 2.0], "MagX": [100.0, 110.0, 105.0], "MagY": [20.0, 22.0, 24.0], "MagZ": [40.0, 41.0, 43.0]}),
+    }
+    with tempfile.TemporaryDirectory() as tmp:
+        plots = write_compass_yaw_plots(tables, tmp, events=True)
+        names = {Path(p).name for p in plots}
+        assert_true("compass_yaw_source_investigation.html" in names, "missing BAT/CTUN should not block the main compass/yaw plot")
+        assert_true("ekf_mag_yaw_innovations.html" not in names, "missing XKF data should skip EKF plot")
+
+
 def test_custom_plot_supports_arbitrary_fields_and_secondary_axis():
     tables = {
         "GPS": pd.DataFrame({"TimeS": [0.0, 1.0, 2.0], "Alt": [83.5, 84.0, 85.0]}),
@@ -1897,6 +1928,8 @@ def main():
     test_metrics_include_generic_numeric_summary_for_extra_messages()
     test_batch_sampler_isb_fft_rows_are_processed()
     test_non_yaw_symptom_plots_are_generated_when_data_exists()
+    test_compass_yaw_plots_generate_with_full_synthetic_evidence()
+    test_compass_yaw_plots_tolerate_missing_optional_battery_and_throttle()
     test_custom_plot_supports_arbitrary_fields_and_secondary_axis()
     test_custom_plot_rejects_secondary_series_not_in_plot()
     test_custom_plot_missing_message_suggests_extracting_all_messages()

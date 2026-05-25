@@ -400,7 +400,7 @@ def write_compass_yaw_plots(tables: Dict[str, Any], plots_dir, events=False) -> 
         cols=1,
         shared_xaxes=True,
         vertical_spacing=0.04,
-        specs=[[{}], [{}], [{"secondary_y": True}], [{}]],
+        specs=[[{}], [{}], [{"secondary_y": True}], [{"secondary_y": True}]],
         subplot_titles=("Yaw attitude", "Yaw rate", "Mag field vs throttle/current", "Yaw error vs mag field"),
     )
     att = tables.get("ATT")
