@@ -1,6 +1,6 @@
 ---
 name: ardupilot-binlog-analysis
-description: Analyze ArduPilot DataFlash .bin/.log files for ArduCopter tuning, fault diagnosis, symptom-led investigation, yaw/roll/pitch/altitude issues, vibration, EKF/GPS, battery, motor/ESC behaviour, AutoTune, System ID, plot generation, and before/after comparison. Use when the user asks to inspect, diagnose, compare, graph, tune, summarize, or review ArduPilot logs. Do not use for PX4 .ulg logs unless they have been converted to ArduPilot-style tables.
+description: Investigate ArduPilot DataFlash .bin/.log flight logs. Use for Copter log diagnosis, tuning review, symptom-led fault analysis, plots, vibration/FFT, EKF/GPS, power, motor/ESC, AutoTune, System ID, and before/after comparison. Not for PX4 .ulg logs unless converted.
 ---
 
 # ArduPilot Bin Log Analysis Skill

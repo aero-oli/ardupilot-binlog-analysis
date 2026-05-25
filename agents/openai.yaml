@@ -1,7 +1,7 @@
 interface:
   display_name: "ArduPilot Binlog Analysis"
-  short_description: "Analyze ArduPilot DataFlash logs for tuning, fault diagnosis, segment/window analysis, custom plots, EKF/GPS, vibration/FFT, battery, motor/ESC, and System ID."
+  short_description: "Investigate ArduPilot DataFlash .bin/.log logs for Copter diagnosis, tuning, plots, vibration/FFT, EKF/GPS, power, motor/ESC, AutoTune, System ID, and comparisons."
   brand_color: "#1E40AF"
-  default_prompt: "Analyze the attached ArduPilot DataFlash log. Prioritize safety-critical issues, then symptom-specific diagnosis, segment/window context, custom plots where useful, and tuning observations."
+  default_prompt: "Analyze the attached ArduPilot DataFlash log with safety-first, evidence-backed reasoning. Validate and index the log, prioritize safety-critical findings, inspect symptom-specific evidence and missing data, generate plots where useful, and state confidence limits before any tuning advice."
 policy:
   allow_implicit_invocation: true

@@ -9,10 +9,49 @@ python - <<'PY'
 from pathlib import Path
 
 skill = Path("SKILL.md").read_text(encoding="utf-8")
+openai_yaml = Path("agents/openai.yaml").read_text(encoding="utf-8")
 how_to = Path("references/how-to-investigate.md").read_text(encoding="utf-8")
 logging_reference_path = Path("references/logging-configuration-for-investigation.md")
 evidence_reference_path = Path("references/evidence-gathering-flights.md")
 rc_reference_path = Path("references/rc-failsafe-prearm-diagnosis.md")
+
+frontmatter = skill.split("---", 2)[1]
+assert "name: ardupilot-binlog-analysis" in frontmatter
+description_line = next(line for line in frontmatter.splitlines() if line.startswith("description: "))
+description = description_line.removeprefix("description: ")
+assert len(description) <= 300, len(description)
+for required in [
+    "ArduPilot DataFlash",
+    ".bin/.log",
+    "Copter log diagnosis",
+    "tuning review",
+    "symptom-led fault analysis",
+    "plots",
+    "vibration/FFT",
+    "EKF/GPS",
+    "power",
+    "motor/ESC",
+    "AutoTune",
+    "System ID",
+    "before/after comparison",
+    "Not for PX4 .ulg logs unless converted",
+]:
+    assert required in description, required
+for required in [
+    "short_description:",
+    "DataFlash .bin/.log",
+    "Copter diagnosis",
+    "vibration/FFT",
+    "EKF/GPS",
+    "motor/ESC",
+    "AutoTune",
+    "System ID",
+    "comparisons",
+    "safety-first, evidence-backed reasoning",
+    "missing data",
+    "confidence limits",
+]:
+    assert required in openai_yaml, required
 
 assert logging_reference_path.exists()
 reference = logging_reference_path.read_text(encoding="utf-8")
