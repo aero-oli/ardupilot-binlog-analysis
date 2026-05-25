@@ -7,7 +7,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from ap_common import (
     AnalysisError, AXIS_MAP, battery_instance_groups, classify_symptom, clip_columns, collect_dataflash,
-    combined_rcout_dataframe, ekf_instance_groups, ensure_dir, esc_instance_groups, event_markers_from_tables,
+    apply_active_flight_filter, combined_rcout_dataframe, ekf_instance_groups, ensure_dir, esc_instance_groups, event_markers_from_tables,
     filter_tables_by_time, get_col, gps_instance_groups, missing_messages, motor_channels_from_mapping,
     numeric_series, output_channel_columns, output_channel_label, output_mapping_from_tables,
     parse_time_window, percentile, rms, rows_to_dataframe, safe_float, severity_rank, vehicle_scope, write_json
@@ -852,6 +852,11 @@ def main() -> int:
     p.add_argument("--messages", default=None, help="Comma-separated message names to parse, or ALL. Defaults to symptom-relevant messages.")
     p.add_argument("--max-messages", type=int, default=None, help="Optional parse limit for quick diagnosis")
     p.add_argument("--armed-only", action="store_true", help="Collect rows only while ARM messages indicate armed state when available")
+    p.add_argument("--airborne-only", action="store_true", help="Filter the selected window to active airborne-looking rows")
+    p.add_argument("--active-flight-only", action="store_true", help="Filter the selected window to rows that conservatively look like active flight")
+    p.add_argument("--exclude-ground-spool", action="store_true", help="Remove obvious ground spool, landing, or disarmed rows from the selected window")
+    p.add_argument("--min-alt", type=float, default=1.0, help="Minimum relative altitude in metres for active-flight filtering when altitude is available")
+    p.add_argument("--min-throttle", type=float, default=0.15, help="Minimum normalized throttle/output for active-flight filtering when throttle is available")
     p.add_argument("--mode", default=None, help="Select active intervals for a flight mode name or numeric Copter mode id")
     p.add_argument("--around-msg", default=None, help="Select a window around the first matching MSG text")
     p.add_argument("--around-event", default=None, help="Select a window around matching EV/MSG/MODE text")
@@ -885,7 +890,7 @@ def main() -> int:
             for msg in spec["required_messages"] + spec["strongly_recommended_messages"] + spec["optional_context_messages"] + ["PARM"]:
                 if msg not in include:
                     include.append(msg)
-            if any([args.mode, args.around_msg, args.around_event, args.around_error, args.takeoff_only, args.hover_candidates, args.high_throttle_only]):
+            if any([args.mode, args.around_msg, args.around_event, args.around_error, args.takeoff_only, args.hover_candidates, args.high_throttle_only, args.airborne_only, args.active_flight_only, args.exclude_ground_spool]):
                 for msg in ["MODE", "MSG", "EV", "ERR", "ARM", "CTUN", "ATT", "BARO", "GPS", "RCOU", "RCO2", "RCO3"]:
                     if msg not in include:
                         include.append(msg)
@@ -924,12 +929,28 @@ def main() -> int:
             selection["end_s"] = window["end_s"] if window["end_s"] is not None else selection.get("end_s")
             selection["rule"] = "start_end" if selection.get("rule") == "whole_log" else selection.get("rule")
         full_tables = tables
-        tables = filter_tables_by_time(
+        selected_tables = filter_tables_by_time(
             full_tables,
             start_s=selection.get("start_s"),
             end_s=selection.get("end_s"),
             intervals=selection.get("intervals_used"),
         )
+        selection, active_profile = apply_active_flight_filter(
+            selection,
+            selected_tables,
+            active_flight_only=args.active_flight_only,
+            airborne_only=args.airborne_only,
+            exclude_ground_spool=args.exclude_ground_spool,
+            min_alt=args.min_alt,
+            min_throttle=args.min_throttle,
+        )
+        tables = filter_tables_by_time(
+            selected_tables,
+            start_s=selection.get("start_s"),
+            end_s=selection.get("end_s"),
+            intervals=selection.get("intervals_used"),
+        )
+        window_quality = active_profile.get("quality", {})
         vibration_assessment = build_vibration_assessment(
             full_tables,
             symptom_class,
@@ -957,6 +978,9 @@ def main() -> int:
             warnings.append("Diagnosis used an explicit --messages filter; unavailable evidence may be due to filtering.")
         if args.armed_only and not stats.get("armed_filter_supported"):
             warnings.append("--armed-only was requested, but ARM state could not be confirmed from ARM messages.")
+        warnings.extend(selection.get("warnings", []))
+        if window_quality.get("ground_spool_rows_included"):
+            warnings.append("Selected analysis window includes rows that look like ground spool, landing, or disarmed time; use --active-flight-only or --exclude-ground-spool when comparing flight behaviour.")
         logging_health = index.get("logging_health", {})
         if logging_health.get("confirmed_dropouts"):
             warnings.append("Confirmed logging dropout/drop count evidence was found; inspect logging_health.confirmed_dropouts.")
@@ -969,6 +993,7 @@ def main() -> int:
             "symptom_class": symptom_class,
             "analysis_window": selection,
             "analysis_window_units": {"start_s": "s", "end_s": "s"},
+            "window_quality": window_quality,
             "log": {"file": args.log, "vehicle": index.get("vehicle"), "firmware": index.get("firmware"), "duration_s": index.get("duration_s")},
             "units": {"log.duration_s": "s"},
             "parser": stats,

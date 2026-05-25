@@ -15,6 +15,7 @@ import os
 import re
 import sys
 import statistics
+from bisect import bisect_right
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from pathlib import Path
@@ -672,6 +673,296 @@ def filter_tables_by_time(
             mask = mask & (df["TimeS"] <= end_s)
         out[name] = df.loc[mask].copy()
     return out
+
+
+def _timed_values(df: Any, columns: Sequence[str], transform=None) -> List[Tuple[float, Any]]:
+    col = get_col(df, columns) if df is not None and hasattr(df, "columns") else None
+    if not col or "TimeS" not in df.columns:
+        return []
+    rows = []
+    data = df[["TimeS", col]].dropna(subset=["TimeS", col]).sort_values("TimeS")
+    for row in data.to_dict(orient="records"):
+        t = safe_float(row.get("TimeS"))
+        value = row.get(col)
+        if t is None:
+            continue
+        if transform:
+            value = transform(value)
+        rows.append((t, value))
+    return rows
+
+
+def _latest_at(series: Sequence[Tuple[float, Any]], t: float) -> Any:
+    if not series:
+        return None
+    times = [item[0] for item in series]
+    idx = bisect_right(times, t) - 1
+    if idx < 0:
+        return None
+    return series[idx][1]
+
+
+def _active_time_grid(tables: Dict[str, Any]) -> List[float]:
+    preferred = ["ATT", "RATE", "RCOU", "RCO2", "RCO3", "CTUN", "BARO", "GPS", "GPS2", "ARM", "MODE"]
+    times = set()
+    for name in preferred:
+        df = tables.get(name)
+        if df is None or not hasattr(df, "columns") or "TimeS" not in df.columns:
+            continue
+        for value in df["TimeS"].dropna().tolist():
+            t = safe_float(value)
+            if t is not None:
+                times.add(float(t))
+    return sorted(times)
+
+
+def _altitude_sources(tables: Dict[str, Any]) -> List[Dict[str, Any]]:
+    sources = []
+    for name, candidates, relative in [
+        ("CTUN", ["Alt", "BAlt"], True),
+        ("BARO", ["Alt"], False),
+        ("GPS", ["RelAlt", "Alt"], None),
+        ("GPS2", ["RelAlt", "Alt"], None),
+    ]:
+        df = tables.get(name)
+        if df is None or not hasattr(df, "columns"):
+            continue
+        col = get_col(df, candidates)
+        if not col:
+            continue
+        values = _timed_values(df, [col], transform=safe_float)
+        values = [(t, v) for t, v in values if v is not None]
+        if not values:
+            continue
+        is_relative = relative if relative is not None else str(col).lower() == "relalt"
+        baseline = 0.0 if is_relative else float(values[0][1])
+        sources.append({"source": f"{name}.{col}", "values": values, "baseline": baseline})
+    return sources
+
+
+def _throttle_sources(tables: Dict[str, Any]) -> List[Dict[str, Any]]:
+    sources = []
+    for name in ["CTUN"]:
+        df = tables.get(name)
+        col = get_col(df, ["ThO", "ThH"]) if df is not None and hasattr(df, "columns") else None
+        if col:
+            values = _timed_values(df, [col], transform=safe_float)
+            values = [(t, v) for t, v in values if v is not None]
+            if values:
+                sources.append({"source": f"{name}.{col}", "values": values})
+    for name in OUTPUT_MESSAGE_NAMES:
+        df = tables.get(name)
+        if df is None or not hasattr(df, "columns") or "TimeS" not in df.columns:
+            continue
+        cols = output_channel_columns(df)
+        if not cols:
+            continue
+        frame = df[["TimeS", *cols]].dropna(subset=["TimeS"]).copy()
+        values = []
+        for row in frame.to_dict(orient="records"):
+            t = safe_float(row.get("TimeS"))
+            nums = [safe_float(row.get(c)) for c in cols]
+            nums = [v for v in nums if v is not None]
+            if t is None or not nums:
+                continue
+            normalized = max(0.0, min(1.0, (max(nums) - 1000.0) / 1000.0))
+            values.append((t, normalized))
+        if values:
+            sources.append({"source": f"{name}.max_output_normalized", "values": values})
+    return sources
+
+
+def _armed_series(tables: Dict[str, Any]) -> List[Tuple[float, Optional[bool]]]:
+    df = tables.get("ARM")
+    if df is None or not hasattr(df, "columns") or "TimeS" not in df.columns:
+        return []
+    rows = []
+    for row in df.dropna(subset=["TimeS"]).sort_values("TimeS").to_dict(orient="records"):
+        t = safe_float(row.get("TimeS"))
+        armed = _armed_value(row)
+        if t is not None and armed is not None:
+            rows.append((t, armed))
+    return rows
+
+
+def _mode_series(tables: Dict[str, Any]) -> List[Tuple[float, str]]:
+    df = tables.get("MODE")
+    col = get_col(df, ["Mode", "Name", "ModeNum"]) if df is not None and hasattr(df, "columns") else None
+    if not col or "TimeS" not in df.columns:
+        return []
+    out = []
+    for row in df.dropna(subset=["TimeS"]).sort_values("TimeS").to_dict(orient="records"):
+        t = safe_float(row.get("TimeS"))
+        if t is not None:
+            out.append((t, mode_label(row.get(col))))
+    return out
+
+
+def _event_text_rows(tables: Dict[str, Any]) -> List[Tuple[float, str]]:
+    rows = []
+    for name in ["MSG", "EV", "ERR"]:
+        df = tables.get(name)
+        if df is None or not hasattr(df, "columns") or "TimeS" not in df.columns:
+            continue
+        for row in df.dropna(subset=["TimeS"]).sort_values("TimeS").to_dict(orient="records"):
+            t = safe_float(row.get("TimeS"))
+            if t is None:
+                continue
+            text = " ".join(str(row.get(c, "")) for c in df.columns if c != "TimeS").lower()
+            rows.append((t, text))
+    return rows
+
+
+def _intervals_from_mask(times: Sequence[float], mask: Sequence[bool]) -> List[Dict[str, float]]:
+    intervals = []
+    start = None
+    last = None
+    for t, ok in zip(times, mask):
+        if ok and start is None:
+            start = float(t)
+        if not ok and start is not None:
+            intervals.append({"start_s": start, "end_s": float(last)})
+            start = None
+        last = t
+    if start is not None and last is not None:
+        intervals.append({"start_s": start, "end_s": float(last)})
+    return [i for i in intervals if i["end_s"] >= i["start_s"]]
+
+
+def active_flight_profile(
+    tables: Dict[str, Any],
+    *,
+    min_alt: float = 1.0,
+    min_throttle: float = 0.15,
+    mode: str = "active_flight",
+) -> Dict[str, Any]:
+    """Classify active-flight-looking samples and return conservative metadata."""
+    min_alt = float(min_alt)
+    min_throttle = float(min_throttle)
+    times = _active_time_grid(tables)
+    alt_sources = _altitude_sources(tables)
+    throttle_sources = _throttle_sources(tables)
+    armed = _armed_series(tables)
+    modes = _mode_series(tables)
+    event_rows = _event_text_rows(tables)
+    criteria = {
+        "min_alt_m": min_alt,
+        "min_throttle_normalized": min_throttle,
+        "mode": mode,
+        "altitude_sources": [s["source"] for s in alt_sources],
+        "throttle_sources": [s["source"] for s in throttle_sources],
+        "arm_state_available": bool(armed),
+        "mode_available": bool(modes),
+        "event_text_available": bool(event_rows),
+    }
+    warnings = []
+    if not times:
+        return {
+            "criteria": criteria,
+            "warnings": ["Active-flight filtering could not run because no timed telemetry rows were available."],
+            "intervals": [],
+            "quality": {"sample_count": 0, "active_flight_confidence": "none"},
+        }
+    if not alt_sources:
+        warnings.append("Active-flight filtering confidence is limited because no usable altitude signal was available.")
+    if not throttle_sources:
+        warnings.append("Active-flight filtering confidence is limited because no usable throttle/output signal was available.")
+    if not armed:
+        warnings.append("Active-flight filtering confidence is limited because ARM state was not available.")
+
+    active_mask = []
+    low_alt = []
+    low_thr = []
+    disarmed = []
+    landing = []
+    takeoff = []
+    ground_spool = []
+    for t in times:
+        alt_values = []
+        for source in alt_sources:
+            value = _latest_at(source["values"], t)
+            if value is not None:
+                alt_values.append(float(value) - float(source["baseline"]))
+        thr_values = []
+        for source in throttle_sources:
+            value = _latest_at(source["values"], t)
+            if value is not None:
+                thr_values.append(float(value))
+        armed_value = _latest_at(armed, t)
+        mode_value = _latest_at(modes, t)
+        recent_text = " ".join(text for et, text in event_rows if abs(et - t) <= 1.0)
+        alt_ok = True if not alt_sources else bool(alt_values and max(alt_values) >= min_alt)
+        thr_ok = True if not throttle_sources else bool(thr_values and max(thr_values) >= min_throttle)
+        armed_ok = True if armed_value is None else bool(armed_value)
+        landing_like = mode_value in {"LAND"} or "land" in recent_text
+        takeoff_like = "takeoff" in recent_text
+        low_alt.append(bool(alt_sources and (not alt_values or max(alt_values) < min_alt)))
+        low_thr.append(bool(throttle_sources and (not thr_values or max(thr_values) < min_throttle)))
+        disarmed.append(armed_value is False or "disarm" in recent_text)
+        landing.append(landing_like)
+        takeoff.append(takeoff_like)
+        if mode == "exclude_ground_spool":
+            ok = not disarmed[-1] and not landing_like
+            if alt_sources and throttle_sources:
+                ok = ok and not (low_alt[-1] and low_thr[-1])
+            elif alt_sources:
+                ok = ok and not low_alt[-1]
+            elif throttle_sources:
+                ok = ok and not low_thr[-1]
+        else:
+            ok = alt_ok and thr_ok and armed_ok and not landing_like
+        active_mask.append(bool(ok))
+        ground_spool.append(bool(disarmed[-1] or landing_like or low_alt[-1]))
+
+    intervals = _intervals_from_mask(times, active_mask)
+    if not intervals:
+        warnings.append("No active-flight-looking interval was identified; original window is retained for traceability.")
+        intervals = [{"start_s": float(min(times)), "end_s": float(max(times))}]
+    sample_count = len(times)
+    quality = {
+        "sample_count": sample_count,
+        "ground_spool_rows_included": any(ground_spool),
+        "ground_spool_fraction": sum(ground_spool) / sample_count,
+        "low_throttle_fraction": sum(low_thr) / sample_count if throttle_sources else None,
+        "low_altitude_fraction": sum(low_alt) / sample_count if alt_sources else None,
+        "disarmed_rows_included": any(disarmed),
+        "landing_rows_included": any(landing),
+        "takeoff_rows_included": any(takeoff),
+        "active_flight_confidence": "high" if alt_sources and throttle_sources and armed else ("medium" if alt_sources or throttle_sources else "low"),
+    }
+    return {"criteria": criteria, "warnings": warnings, "intervals": intervals, "quality": quality}
+
+
+def apply_active_flight_filter(
+    selection: Dict[str, Any],
+    tables: Dict[str, Any],
+    *,
+    active_flight_only: bool = False,
+    airborne_only: bool = False,
+    exclude_ground_spool: bool = False,
+    min_alt: float = 1.0,
+    min_throttle: float = 0.15,
+) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    requested = bool(active_flight_only or airborne_only or exclude_ground_spool)
+    profile_mode = "exclude_ground_spool" if exclude_ground_spool and not (active_flight_only or airborne_only) else "active_flight"
+    profile = active_flight_profile(tables, min_alt=min_alt, min_throttle=min_throttle, mode=profile_mode)
+    if not requested:
+        return selection, profile
+    updated = dict(selection)
+    intervals = profile.get("intervals") or selection.get("intervals_used") or selection.get("intervals") or []
+    updated["intervals_used"] = intervals
+    updated["intervals_found"] = selection.get("intervals_found", selection.get("intervals", intervals))
+    updated["ground_spool_excluded"] = True
+    updated["criteria"] = {**updated.get("criteria", {}), "active_flight": profile.get("criteria", {})}
+    updated["window_quality"] = profile.get("quality", {})
+    updated["warnings"] = list(updated.get("warnings", [])) + list(profile.get("warnings", []))
+    suffix = "exclude_ground_spool" if profile_mode == "exclude_ground_spool" else "active_flight"
+    updated["rule"] = f"{updated.get('rule', 'whole_log')}+{suffix}"
+    if intervals:
+        updated["start_s"] = intervals[0].get("start_s")
+        updated["end_s"] = intervals[-1].get("end_s")
+        updated["intervals"] = intervals
+    return updated, profile
 
 def params_from_tables(
     tables: Dict[str, Any],

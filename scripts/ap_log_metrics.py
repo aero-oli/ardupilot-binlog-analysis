@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from ap_common import (
-    AnalysisError, AXIS_MAP, battery_instance_groups, clip_columns, combined_rcout_dataframe, df_duration,
+    AnalysisError, AXIS_MAP, apply_active_flight_filter, battery_instance_groups, clip_columns, combined_rcout_dataframe, df_duration,
     ekf_instance_groups, esc_instance_groups, filter_tables_by_time, fmt, get_col,
     gps_instance_groups, imu_instance_groups, load_tables, md_table, motor_channels_from_mapping, numeric_series,
     output_channel_columns, output_mapping_from_tables, parse_time_window,
@@ -143,6 +143,7 @@ def compute_metrics(tables, analysis_window=None):
         "messages_present": sorted(tables.keys()),
         "analysis_window": analysis_window or {"start_s": None, "end_s": None},
         "analysis_window_units": {"start_s": "s", "end_s": "s"},
+        "window_quality": (analysis_window or {}).get("window_quality", {}),
         "flight": {},
         "health": {},
         "tuning": {},
@@ -418,12 +419,42 @@ def main() -> int:
     p.add_argument("--json", default="metrics.json")
     p.add_argument("--summary", default=None)
     p.add_argument("--window", default=None, help="Optional TimeS window as START:END or around:CENTER:RADIUS")
+    p.add_argument("--airborne-only", action="store_true", help="Filter the selected window to active airborne-looking rows")
+    p.add_argument("--active-flight-only", action="store_true", help="Filter the selected window to rows that conservatively look like active flight")
+    p.add_argument("--exclude-ground-spool", action="store_true", help="Remove obvious ground spool, landing, or disarmed rows from the selected window")
+    p.add_argument("--min-alt", type=float, default=1.0, help="Minimum relative altitude in metres for active-flight filtering when altitude is available")
+    p.add_argument("--min-throttle", type=float, default=0.15, help="Minimum normalized throttle/output for active-flight filtering when throttle is available")
     args = p.parse_args()
     try:
         tables = load_tables(args.tables)
         window = parse_time_window(args.window)
-        tables = filter_tables_by_time(tables, **window)
-        metrics = compute_metrics(tables, analysis_window=window)
+        selection = {
+            "start_s": window.get("start_s"),
+            "end_s": window.get("end_s"),
+            "rule": "window" if args.window else "whole_log",
+            "intervals_used": [],
+            "warnings": [],
+        }
+        selected_tables = filter_tables_by_time(tables, **window)
+        selection, active_profile = apply_active_flight_filter(
+            selection,
+            selected_tables,
+            active_flight_only=args.active_flight_only,
+            airborne_only=args.airborne_only,
+            exclude_ground_spool=args.exclude_ground_spool,
+            min_alt=args.min_alt,
+            min_throttle=args.min_throttle,
+        )
+        tables = filter_tables_by_time(
+            selected_tables,
+            start_s=selection.get("start_s"),
+            end_s=selection.get("end_s"),
+            intervals=selection.get("intervals_used"),
+        )
+        selection["window_quality"] = active_profile.get("quality", {})
+        metrics = compute_metrics(tables, analysis_window=selection)
+        if selection.get("warnings"):
+            metrics["confidence"]["reasons"].extend(selection["warnings"])
         write_json(args.json, metrics)
         if args.summary:
             Path(args.summary).parent.mkdir(parents=True, exist_ok=True)

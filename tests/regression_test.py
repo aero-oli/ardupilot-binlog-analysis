@@ -369,6 +369,61 @@ def test_index_summary_includes_decoded_mode_timeline_and_caveat():
     assert_true("not confirmed Copter" in summary, "unknown vehicle mode decoding should be caveated")
 
 
+def test_active_flight_filter_excludes_ground_spool_from_auto_window():
+    tables = {
+        "MODE": pd.DataFrame({"TimeS": [0.0], "Mode": [3]}),
+        "ARM": pd.DataFrame({"TimeS": [0.0], "Armed": [1]}),
+        "CTUN": pd.DataFrame({"TimeS": [0.0, 1.0, 2.0, 10.0, 11.0, 12.0], "Alt": [0.0, 0.1, 0.1, 3.0, 3.2, 3.1], "ThO": [0.08, 0.10, 0.10, 0.45, 0.46, 0.44]}),
+        "RCOU": pd.DataFrame({"TimeS": [0.0, 1.0, 2.0, 10.0, 11.0, 12.0], "C1": [1950, 1960, 1950, 1500, 1510, 1500], "C2": [1500, 1500, 1500, 1500, 1510, 1500]}),
+        "PARM": pd.DataFrame({"Name": ["SERVO1_FUNCTION", "SERVO2_FUNCTION"], "Value": [33, 34]}),
+    }
+    selection = select_analysis_window(tables, mode="AUTO", log_end_s=12.0, vehicle_scope={"primary_vehicle": "Copter"})
+    selected = ap_common.filter_tables_by_time(tables, start_s=selection["start_s"], end_s=selection["end_s"], intervals=selection["intervals_used"])
+
+    filtered_selection, profile = ap_common.apply_active_flight_filter(selection, selected, active_flight_only=True)
+    filtered = ap_common.filter_tables_by_time(selected, start_s=filtered_selection["start_s"], end_s=filtered_selection["end_s"], intervals=filtered_selection["intervals_used"])
+
+    assert_true(filtered["RCOU"]["TimeS"].tolist() == [10.0, 11.0, 12.0], "active-flight filter should exclude low-altitude spool rows")
+    assert_true(filtered_selection["ground_spool_excluded"] is True, "selection should record ground/spool exclusion")
+    assert_true(filtered_selection["rule"] == "mode+active_flight", "selection rule should record active-flight filtering")
+    assert_true(profile["quality"]["ground_spool_rows_included"] is True, "window quality should report excluded ground/spool contamination")
+    assert_true(profile["criteria"]["min_alt_m"] == 1.0 and profile["criteria"]["min_throttle_normalized"] == 0.15, "active-flight criteria should be recorded")
+
+
+def test_ground_only_saturation_is_not_active_flight_motor_finding():
+    tables = {
+        "MODE": pd.DataFrame({"TimeS": [0.0], "Mode": [3]}),
+        "ARM": pd.DataFrame({"TimeS": [0.0], "Armed": [1]}),
+        "CTUN": pd.DataFrame({"TimeS": [0.0, 1.0, 2.0, 10.0, 11.0, 12.0], "Alt": [0.0, 0.1, 0.1, 3.0, 3.2, 3.1], "ThO": [0.08, 0.10, 0.10, 0.45, 0.46, 0.44]}),
+        "RCOU": pd.DataFrame({"TimeS": [0.0, 1.0, 2.0, 10.0, 11.0, 12.0], "C1": [1950, 1960, 1950, 1500, 1510, 1500], "C2": [1500, 1500, 1500, 1500, 1510, 1500]}),
+        "PARM": pd.DataFrame({"Name": ["SERVO1_FUNCTION", "SERVO2_FUNCTION"], "Value": [33, 34]}),
+    }
+    index = {"messages": {name: {} for name in tables}, "parameters": {"SERVO1_FUNCTION": 33, "SERVO2_FUNCTION": 34}, "errors": [], "events": [], "modes": []}
+    unfiltered_findings, *_ = diagnose_by_class("motor_esc_issue", tables, index)
+    selection = {"start_s": 0.0, "end_s": 12.0, "rule": "window", "intervals_used": [{"start_s": 0.0, "end_s": 12.0}], "warnings": []}
+    filtered_selection, _profile = ap_common.apply_active_flight_filter(selection, tables, active_flight_only=True)
+    filtered = ap_common.filter_tables_by_time(tables, start_s=filtered_selection["start_s"], end_s=filtered_selection["end_s"], intervals=filtered_selection["intervals_used"])
+    filtered_findings, *_ = diagnose_by_class("motor_esc_issue", filtered, index)
+
+    assert_true(any("Motor output saturation" in f.get("possible_cause", "") for f in unfiltered_findings), "unfiltered ground spool saturation should be visible to the existing heuristic")
+    assert_true(not any("Motor output saturation" in f.get("possible_cause", "") for f in filtered_findings), "ground-only saturation should not become active-flight saturation")
+
+
+def test_active_flight_filter_warns_when_evidence_is_insufficient():
+    tables = {
+        "ATT": pd.DataFrame({"TimeS": [0.0, 1.0, 2.0], "Roll": [0.0, 0.0, 0.0]}),
+        "RATE": pd.DataFrame({"TimeS": [0.0, 1.0, 2.0], "R": [0.0, 0.0, 0.0]}),
+    }
+    selection = {"start_s": 0.0, "end_s": 2.0, "rule": "window", "intervals_used": [{"start_s": 0.0, "end_s": 2.0}], "warnings": []}
+    filtered_selection, profile = ap_common.apply_active_flight_filter(selection, tables, active_flight_only=True)
+
+    warning_text = "\n".join(filtered_selection["warnings"])
+    assert_true("no usable altitude signal" in warning_text, "missing altitude should be warned")
+    assert_true("no usable throttle/output signal" in warning_text, "missing throttle should be warned")
+    assert_true(profile["quality"]["active_flight_confidence"] == "low", "insufficient evidence should not be presented as certain")
+    assert_true(filtered_selection["intervals_used"] == [{"start_s": 0.0, "end_s": 2.0}], "insufficient evidence should retain the original window")
+
+
 def test_mode_window_filters_disjoint_intervals_without_intervening_modes():
     tables = {
         "MODE": pd.DataFrame({
@@ -1963,6 +2018,9 @@ def main():
     test_decoded_mode_selection_preserves_multiple_intervals()
     test_unknown_numeric_mode_is_labelled_without_crashing()
     test_index_summary_includes_decoded_mode_timeline_and_caveat()
+    test_active_flight_filter_excludes_ground_spool_from_auto_window()
+    test_ground_only_saturation_is_not_active_flight_motor_finding()
+    test_active_flight_filter_warns_when_evidence_is_insufficient()
     test_mode_window_filters_disjoint_intervals_without_intervening_modes()
     test_mode_window_diagnosis_uses_only_selected_intervals()
     test_custom_plot_manifest_records_split_mode_intervals()

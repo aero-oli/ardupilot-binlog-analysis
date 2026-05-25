@@ -9,7 +9,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from ap_common import (
-    AnalysisError, ensure_dir, event_markers_from_tables, filter_tables_by_time, get_col, load_tables,
+    AnalysisError, apply_active_flight_filter, ensure_dir, event_markers_from_tables, filter_tables_by_time, get_col, load_tables,
     require_package, write_json
 )
 from ap_units import unit_for_name
@@ -269,6 +269,11 @@ def main() -> int:
     p.add_argument("--manifest", default=None)
     p.add_argument("--window", default=None, help="Optional TimeS window as START:END or around:CENTER:RADIUS")
     p.add_argument("--armed-only", action="store_true", help="Record armed-only selector intent when using extracted armed-only tables")
+    p.add_argument("--airborne-only", action="store_true", help="Filter the selected window to active airborne-looking rows")
+    p.add_argument("--active-flight-only", action="store_true", help="Filter the selected window to rows that conservatively look like active flight")
+    p.add_argument("--exclude-ground-spool", action="store_true", help="Remove obvious ground spool, landing, or disarmed rows from the selected window")
+    p.add_argument("--min-alt", type=float, default=1.0, help="Minimum relative altitude in metres for active-flight filtering when altitude is available")
+    p.add_argument("--min-throttle", type=float, default=0.15, help="Minimum normalized throttle/output for active-flight filtering when throttle is available")
     p.add_argument("--around-msg", default=None, help="Select a window around the first matching MSG text")
     p.add_argument("--around-event", default=None, help="Select a window around matching EV/MSG/MODE text")
     p.add_argument("--around-error", action="store_true", help="Select a window around the first ERR message")
@@ -311,8 +316,23 @@ def main() -> int:
             high_throttle_percentile=args.high_throttle_percentile,
             high_throttle_threshold=args.high_throttle_threshold,
         )
-        tables = filter_tables_by_time(
+        selected_tables = filter_tables_by_time(
             tables,
+            start_s=selection.get("start_s"),
+            end_s=selection.get("end_s"),
+            intervals=selection.get("intervals_used"),
+        )
+        selection, active_profile = apply_active_flight_filter(
+            selection,
+            selected_tables,
+            active_flight_only=args.active_flight_only,
+            airborne_only=args.airborne_only,
+            exclude_ground_spool=args.exclude_ground_spool,
+            min_alt=args.min_alt,
+            min_throttle=args.min_throttle,
+        )
+        tables = filter_tables_by_time(
+            selected_tables,
             start_s=selection.get("start_s"),
             end_s=selection.get("end_s"),
             intervals=selection.get("intervals_used"),
@@ -330,6 +350,7 @@ def main() -> int:
             events=args.events,
             align_tolerance=args.align_tolerance,
         )
+        manifest["window_quality"] = active_profile.get("quality", {})
         if args.manifest:
             write_json(args.manifest, manifest)
         print(f"Wrote custom plot to {manifest['plot']}")
