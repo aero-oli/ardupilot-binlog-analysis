@@ -10,7 +10,29 @@ from ap_common import params_from_tables, safe_float
 from ap_symptom_map import requirement_spec
 
 METADATA_CAVEAT = "Parameter metadata may not exactly match the firmware that produced the log. Latest-source metadata may include unreleased, renamed, or removed parameters. Use metadata as explanatory context, not proof of firmware-specific behaviour or automatic parameter-change advice."
+BITMASK_CAVEAT = "Bit definitions may vary by vehicle and firmware; decode using the metadata source as explanatory context only."
 METADATA_DIR = Path(__file__).resolve().parents[1] / "references" / "parameter-metadata"
+LOG_BITMASK_MESSAGE_FAMILIES = {
+    "PIDY": ["PID"],
+    "PIDR": ["PID"],
+    "PIDP": ["PID"],
+    "PIDA": ["PID"],
+    "RCIN": ["RC input"],
+    "RCOU": ["RC output"],
+    "RCO2": ["RC output"],
+    "RCO3": ["RC output"],
+    "GPS": ["GPS"],
+    "GPS2": ["GPS"],
+    "GPA": ["GPS"],
+    "MAG": ["Compass"],
+    "CTUN": ["Control Tuning"],
+    "NTUN": ["Navigation Tuning"],
+    "BAT": ["Battery Monitor"],
+    "POWR": ["Battery Monitor"],
+    "IMU": ["IMU", "Fast IMU", "Raw IMU"],
+    "GYR": ["IMU", "Fast IMU", "Raw IMU"],
+    "ACC": ["IMU", "Fast IMU", "Raw IMU"],
+}
 
 
 def _combined_parameter_values(index: Optional[Dict[str, Any]] = None, tables: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -118,6 +140,22 @@ def _decode_enum(value: Any, metadata_entry: Optional[Dict[str, Any]]) -> Option
     return None
 
 
+def decode_bitmask(value: Any, metadata_bitmask: Optional[Dict[str, Any]]) -> List[str]:
+    value_f = safe_float(value)
+    if value_f is None or not metadata_bitmask:
+        return []
+    value_i = int(value_f)
+    enabled = []
+    for bit, label in sorted(metadata_bitmask.items(), key=lambda item: int(item[0]) if str(item[0]).isdigit() else str(item[0])):
+        try:
+            bit_i = int(bit)
+        except Exception:
+            continue
+        if value_i & (1 << bit_i):
+            enabled.append(str(label))
+    return enabled
+
+
 def _decode_bitmask(value: Any, metadata_entry: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
     if not metadata_entry:
         return []
@@ -136,6 +174,28 @@ def _decode_bitmask(value: Any, metadata_entry: Optional[Dict[str, Any]]) -> Lis
     return decoded
 
 
+def log_bitmask_missing_guidance(value: Any, metadata_entry: Optional[Dict[str, Any]], missing_messages: Sequence[str]) -> List[Dict[str, Any]]:
+    if not metadata_entry:
+        return []
+    bitmask = metadata_entry.get("bitmask") or {}
+    if not bitmask:
+        return []
+    enabled = set(decode_bitmask(value, bitmask))
+    out = []
+    for message in missing_messages:
+        families = LOG_BITMASK_MESSAGE_FAMILIES.get(str(message).upper(), [])
+        absent = [family for family in families if family not in enabled]
+        if absent:
+            out.append({
+                "message": str(message).upper(),
+                "likely_logging_families": families,
+                "absent_logging_families": absent,
+                "explanation": f"{message} may be missing because LOG_BITMASK does not appear to enable: {', '.join(absent)}.",
+                "caveat": BITMASK_CAVEAT,
+            })
+    return out
+
+
 def enrich_parameter_entry(entry: Dict[str, Any], metadata: Optional[Dict[str, Any]] = None, vehicle: str = "ArduCopter") -> Dict[str, Any]:
     metadata = metadata or load_parameter_metadata(vehicle)
     meta = find_parameter_metadata(entry.get("name"), metadata=metadata, vehicle=vehicle)
@@ -152,6 +212,8 @@ def enrich_parameter_entry(entry: Dict[str, Any], metadata: Optional[Dict[str, A
     bitmask_decode = _decode_bitmask(out.get("value"), meta)
     if bitmask_decode:
         out["bitmask_decode"] = bitmask_decode
+        out["decoded_bits"] = decode_bitmask(out.get("value"), meta.get("bitmask"))
+        out["bitmask_caveat"] = BITMASK_CAVEAT
     return out
 
 

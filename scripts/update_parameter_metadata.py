@@ -47,8 +47,35 @@ EXACT_NAMES = {
     "MOT_YAW_HEADROOM",
     "SERVO1_FUNCTION",
     "ARMING_CHECK",
+    "RC_OPTIONS",
 }
 PREFIX_PATTERNS = ["RCMAP_", "FS_", "BATT_", "COMPASS_"]
+FALLBACK_ENTRIES = {
+    "ARMING_CHECK": {
+        "DisplayName": "Arming check bitmask",
+        "Description": "Controls which pre-arm safety checks are required before arming on firmware that uses ARMING_CHECK. Newer metadata may expose related arming check parameters instead.",
+        "Values": {"0": "Disabled", "1": "All checks"},
+        "Bitmask": {
+            "1": "Barometer",
+            "2": "Compass",
+            "3": "GPS",
+            "4": "INS",
+            "5": "Parameters",
+            "6": "RC Channels",
+            "7": "Board voltage",
+            "8": "Battery Level",
+            "10": "Logging Available",
+            "11": "Hardware safety switch",
+            "12": "GPS Configuration",
+            "13": "System",
+            "14": "Mission",
+            "15": "Rangefinder",
+            "16": "Camera",
+            "17": "AuxAuth",
+        },
+        "User": "Standard",
+    },
+}
 
 
 def _anchor(name):
@@ -117,6 +144,10 @@ def compact_from_raw(raw, vehicle="ArduCopter", source_url=None, docs_url=None):
         meta = flat.get(name)
         if meta:
             entries.append(_compact_entry(name, meta, vehicle, metadata_version, docs_url, source_url))
+        elif name in FALLBACK_ENTRIES:
+            entry = _compact_entry(name, FALLBACK_ENTRIES[name], vehicle, metadata_version, docs_url, source_url)
+            entry["source_note"] = "Fallback compact metadata because this exact parameter was not present in the fetched latest-source metadata."
+            entries.append(entry)
 
     if "SERVO1_FUNCTION" in flat and not any(entry["name"] == "SERVO*_FUNCTION" for entry in entries):
         entry = _compact_entry("SERVO*_FUNCTION", flat["SERVO1_FUNCTION"], vehicle, metadata_version, docs_url, source_url)

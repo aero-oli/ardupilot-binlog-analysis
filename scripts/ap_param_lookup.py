@@ -11,12 +11,16 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from ap_common import read_json, write_json
 from ap_param_context import merge_external_parameters, parse_param_file
 from ap_parameters import (
+    BITMASK_CAVEAT,
     METADATA_CAVEAT,
     _numeric_flags,
     enrich_parameter_entry,
+    find_parameter_metadata,
+    log_bitmask_missing_guidance,
     load_parameter_metadata,
     select_relevant_parameters,
 )
+from ap_symptom_map import requirement_spec
 
 
 def _parse_names(value):
@@ -49,10 +53,15 @@ def lookup_parameters(index_path=None, params_path=None, names=None, symptom=Non
     metadata = load_parameter_metadata(vehicle)
     requested_names = _parse_names(names)
     symptom_context = None
+    missing_messages_for_symptom = []
 
     if symptom:
         index_for_context = {"parameters": params, "parameter_defaults": defaults}
         symptom_context = select_relevant_parameters(symptom, index=index_for_context, enrich_metadata=True, vehicle=vehicle)
+        spec = requirement_spec(symptom)
+        present_messages = set((source_index.get("messages") or {}).keys())
+        message_selectors = spec.get("required_messages", []) + spec.get("strongly_recommended_messages", []) + spec.get("optional_context_messages", [])
+        missing_messages_for_symptom = [msg for msg in message_selectors if msg not in present_messages]
         for entry in symptom_context.get("selected", []):
             if entry["name"] not in requested_names:
                 requested_names.append(entry["name"])
@@ -73,6 +82,9 @@ def lookup_parameters(index_path=None, params_path=None, names=None, symptom=Non
         }
         enriched = enrich_parameter_entry(entry, metadata=metadata, vehicle=vehicle)
         enriched["logged_value"] = enriched.get("value")
+        if name == "LOG_BITMASK":
+            meta = find_parameter_metadata(name, metadata=metadata, vehicle=vehicle)
+            enriched["possibly_missing_for_symptom"] = log_bitmask_missing_guidance(enriched.get("value"), meta, missing_messages_for_symptom)
         results.append(enriched)
 
     output = {
@@ -80,6 +92,7 @@ def lookup_parameters(index_path=None, params_path=None, names=None, symptom=Non
         "metadata_source": metadata.get("source_url") or metadata.get("source_note"),
         "metadata_version": metadata.get("metadata_version"),
         "metadata_caveat": metadata.get("caveat") or METADATA_CAVEAT,
+        "bitmask_caveat": BITMASK_CAVEAT,
         "parameters": results,
         "symptom_context": symptom_context,
         "external_parameter_context": merged["external_parameter_context"],

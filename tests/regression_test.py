@@ -34,7 +34,7 @@ from ap_param_lookup import lookup_parameters
 from ap_log_plots import health_plots
 from update_parameter_metadata import compact_from_raw
 from ap_log_plots import main as plots_main
-from ap_parameters import select_relevant_parameters
+from ap_parameters import decode_bitmask, enrich_parameter_entry, select_relevant_parameters
 from ap_rcin import build_command_response_investigation, rc_channel_mapping, summarize_rcin
 from ap_log_validate import log_quality_status, module_availability
 from ap_skill_doctor import run_doctor
@@ -963,6 +963,43 @@ def test_param_lookup_symptom_returns_enriched_relevant_parameters():
     assert_true({"WP_YAW_BEHAVIOR", "ATC_RATE_Y_MAX", "MOT_YAW_HEADROOM"}.issubset(names), "symptom lookup should include relevant logged yaw parameters")
     assert_true(wp["enum_value"] == "Face along GPS course", "symptom lookup should enrich relevant parameters")
     assert_true(result["symptom_context"]["selected"][0]["metadata_caveat"], "symptom context should include metadata caveat")
+
+
+def test_generic_bitmask_decode_returns_enabled_labels():
+    decoded = decode_bitmask(5, {"0": "First", "1": "Second", "2": "Third"})
+    assert_true(decoded == ["First", "Third"], f"unexpected bitmask decode: {decoded}")
+
+
+def test_unknown_bitmask_metadata_does_not_crash():
+    assert_true(decode_bitmask(7, None) == [], "missing bitmask metadata should decode to an empty list")
+    enriched = enrich_parameter_entry({"name": "UNKNOWN_BITMASK", "value": 7}, metadata={"caveat": "test caveat", "parameters": []})
+    assert_true(enriched["metadata_missing"] is True, "unknown metadata should be marked missing")
+    assert_true("decoded_bits" not in enriched, "unknown metadata should not invent decoded bits")
+
+
+def test_log_bitmask_missing_pid_bit_reports_pid_guidance():
+    index = {
+        "messages": {"ATT": {}, "RATE": {}},
+        "parameters": {"LOG_BITMASK": 65535 - 4096},
+        "parameter_defaults": {},
+    }
+    with tempfile.TemporaryDirectory() as tmp:
+        index_path = Path(tmp) / "index.json"
+        index_path.write_text(json.dumps(index), encoding="utf-8")
+        result = lookup_parameters(index_path=index_path, names="LOG_BITMASK", symptom="yaw_misbehaviour")
+    entry = result["parameters"][0]
+    missing = entry["possibly_missing_for_symptom"]
+    assert_true("PID" not in entry["decoded_bits"], "synthetic LOG_BITMASK should not decode PID bit")
+    assert_true(any(item["message"] == "PIDY" and "PID" in item["absent_logging_families"] for item in missing), f"missing PID guidance should mention PIDY: {missing}")
+    assert_true("Bit definitions may vary" in entry["bitmask_caveat"], "bitmask output should include caveat")
+    assert_true("Bit definitions may vary" in result["bitmask_caveat"], "lookup output should include top-level bitmask caveat")
+
+
+def test_manifest_next_evidence_uses_log_bitmask_pid_context():
+    index = {"messages": {"ATT": {}, "RATE": {}}, "parameters": {"LOG_BITMASK": 65535 - 4096}, "errors": [], "events": [], "modes": []}
+    manifest = build_manifest_from_index(index, "yaw issue", "flight.bin")
+    hints = "\n".join(manifest["next_evidence_gathering"]["logging_profile_hints"])
+    assert_true("LOG_BITMASK" in hints and "PID logging" in hints, "missing PIDY guidance should mention LOG_BITMASK/PID logging when available")
 
 
 def test_parameter_metadata_fetch_compactor_uses_machine_readable_shape():
@@ -2380,6 +2417,10 @@ def main():
     test_external_servo_function_enables_motor_mapping_without_log_parm()
     test_external_rcmap_yaw_enables_rcin_mapping_without_log_parm()
     test_param_lookup_symptom_returns_enriched_relevant_parameters()
+    test_generic_bitmask_decode_returns_enabled_labels()
+    test_unknown_bitmask_metadata_does_not_crash()
+    test_log_bitmask_missing_pid_bit_reports_pid_guidance()
+    test_manifest_next_evidence_uses_log_bitmask_pid_context()
     test_parameter_metadata_fetch_compactor_uses_machine_readable_shape()
     test_parameter_context_yaw_includes_mission_yaw_parameters()
     test_parameter_context_mission_yaw_includes_rate_accel_and_headroom()

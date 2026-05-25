@@ -15,6 +15,9 @@ high-volume logging after the diagnostic capture.
   baseline as enabling the basic log types with `65535`; relevant bits include
   attitude, GPS, control tuning, navigation tuning, RC input, IMU, battery,
   RC output, PID, compass, motors, fast IMU, raw IMU, and notch logging.
+  `scripts/ap_param_lookup.py` decodes bitmask metadata when available and can
+  explain likely missing message families, but bit definitions may vary by
+  vehicle and firmware.
 - Review `LOG_BACKEND_TYPE` so the intended file/block backend is enabled.
   For diagnostic .BIN capture, the file backend is normally the useful target.
 - Review `LOG_FILE_RATEMAX`, `LOG_BLK_RATEMAX`, and `LOG_DARM_RATEMAX`.
@@ -65,6 +68,10 @@ high-volume logging after the diagnostic capture.
 ## Parameter review checklist
 
 - `LOG_BITMASK`: Does it include the message families needed for the symptom?
+  If `PIDY`/`PIDR`/`PIDP` are missing and the PID logging bit appears absent,
+  report that PID logging may not have been enabled. Do not claim this
+  definitely explains missing messages without considering firmware, rate
+  limits, log damage, and logging health.
 - `LOG_BACKEND_TYPE`: Is the intended onboard backend enabled?
 - `LOG_DISARMED`: Is disarmed/startup logging needed for this investigation, and
   has the user been warned about log size?

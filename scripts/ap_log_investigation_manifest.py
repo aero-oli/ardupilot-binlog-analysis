@@ -8,7 +8,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from ap_common import AnalysisError, classify_symptom, collect_dataflash, missing_messages, write_json
 from ap_param_context import merge_external_parameters, parse_param_file
-from ap_parameters import select_relevant_parameters
+from ap_parameters import find_parameter_metadata, load_parameter_metadata, log_bitmask_missing_guidance, select_relevant_parameters
 from ap_rcin import rc_channel_mapping, rcin_channel_col
 from ap_symptom_map import diagnosis_requirements, requirement_spec
 
@@ -461,15 +461,24 @@ def _step_type(symptom_class, missing, present, symptom_text):
     return plan["default_step"], bool(plan["safe_to_request_flight"])
 
 
-def _missing_critical_message_guidance(symptom_class, present):
+def _missing_critical_message_guidance(symptom_class, present, index=None):
     guidance = []
     logging_profile_hints = []
     hardware_support_dependent_evidence = []
+    params = (index or {}).get("parameters", {}) or {}
 
     if symptom_class == "yaw_misbehaviour":
         if "PIDY" not in present:
             guidance.append("Capture PIDY to verify yaw PID error, I-term behaviour, Dmod, SRate, and flags.")
             logging_profile_hints.append("Review rate-controller/PID logging so PIDY is present during the yaw symptom window.")
+            if "LOG_BITMASK" in params:
+                metadata = load_parameter_metadata()
+                log_meta = find_parameter_metadata("LOG_BITMASK", metadata=metadata)
+                pid_guidance = log_bitmask_missing_guidance(params.get("LOG_BITMASK"), log_meta, ["PIDY"])
+                if pid_guidance:
+                    logging_profile_hints.append("LOG_BITMASK does not appear to include PID logging for missing PIDY; review LOG_BITMASK/PID logging as context, noting bit definitions may vary by firmware.")
+                else:
+                    logging_profile_hints.append("LOG_BITMASK is available; review whether PID logging was enabled for the firmware before concluding why PIDY is missing.")
         if not (present & ACTUATOR_OUTPUT_MESSAGES):
             guidance.append("Capture actuator outputs to verify yaw authority and saturation.")
             logging_profile_hints.append("Ensure actuator output messages RCOU/RCO2/RCO3 are logged for the selected frame/output backend.")
@@ -481,6 +490,12 @@ def _missing_critical_message_guidance(symptom_class, present):
         if missing_pid:
             guidance.append("Capture PIDR/PIDP to verify Dmod, limiting, P/I/D/FF terms, and rate-controller behaviour.")
             logging_profile_hints.append("Review rate-controller/PID logging so PIDR and PIDP are present during the wobble/attitude-rate symptom window.")
+            if "LOG_BITMASK" in params:
+                metadata = load_parameter_metadata()
+                log_meta = find_parameter_metadata("LOG_BITMASK", metadata=metadata)
+                pid_guidance = log_bitmask_missing_guidance(params.get("LOG_BITMASK"), log_meta, missing_pid)
+                if pid_guidance:
+                    logging_profile_hints.append("LOG_BITMASK does not appear to include PID logging for missing PIDR/PIDP; review LOG_BITMASK/PID logging as context, noting bit definitions may vary by firmware.")
 
     elif symptom_class == "vibration_issue":
         if "VIBE" not in present:
@@ -489,6 +504,8 @@ def _missing_critical_message_guidance(symptom_class, present):
         if not (present & RAW_OR_HIGH_RATE_IMU_MESSAGES):
             guidance.append("Raw/high-rate IMU or batch-sampler data is missing, so FFT/filter conclusions are limited.")
             logging_profile_hints.append("Use raw/high-rate IMU or batch-sampler logging only for a short targeted capture, then check DSF/DMS/logging health and disable high-volume logging afterward.")
+            if any(name in params for name in ["INS_RAW_LOG_OPT", "INS_LOG_BAT_MASK", "INS_LOG_BAT_OPT"]):
+                logging_profile_hints.append("INS_RAW_LOG_OPT/INS_LOG_BAT_MASK/INS_LOG_BAT_OPT are available; decode them as capture-planning context only, not as proof that FFT evidence should exist in this log.")
 
     elif symptom_class == "motor_esc_issue":
         if not (present & ACTUATOR_OUTPUT_MESSAGES):
@@ -510,7 +527,7 @@ def _missing_critical_message_guidance(symptom_class, present):
     }
 
 
-def _next_evidence_gathering(symptom_class, symptom_text, spec, present, missing, confidence_limits):
+def _next_evidence_gathering(symptom_class, symptom_text, spec, present, missing, confidence_limits, index=None):
     plan = SYMPTOM_EVIDENCE_PLANS.get(symptom_class, SYMPTOM_EVIDENCE_PLANS["general_investigation"])
     step_type, safe_to_request_flight = _step_type(symptom_class, missing, present, symptom_text)
     logging_settings = list(plan["logging_settings"])
@@ -518,7 +535,7 @@ def _next_evidence_gathering(symptom_class, symptom_text, spec, present, missing
     do_not_attempt = list(plan["do_not_attempt"])
     reset_after_test = list(plan["reset"])
     confidence = list(confidence_limits)
-    targeted_guidance = _missing_critical_message_guidance(symptom_class, present)
+    targeted_guidance = _missing_critical_message_guidance(symptom_class, present, index=index)
 
     if _is_boot_or_prearm_request(symptom_text):
         logging_settings.append("LOG_DISARMED")
@@ -621,7 +638,7 @@ def build_manifest_from_index(index, symptom_text, log_path, external_parameter_
         "parameter_source_precedence": merged_params["parameter_source_precedence"],
         "available_evidence": _available_evidence(index),
         "missing_evidence": missing,
-        "next_evidence_gathering": _next_evidence_gathering(symptom_class, symptom_text, spec, present, missing, confidence_limits),
+        "next_evidence_gathering": _next_evidence_gathering(symptom_class, symptom_text, spec, present, missing, confidence_limits, index=parameter_index),
         "recommended_next_commands": _recommended_commands(log_path, symptom_text, spec, present, missing, index),
         "recommended_plots": plot_groups,
         "questions_to_answer": _yaw_questions_first(symptom_class, spec.get("diagnostic_questions", []), symptom_text),
