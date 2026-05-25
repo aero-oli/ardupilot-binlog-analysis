@@ -34,7 +34,7 @@ symptom_classes:
       - COMPASS_USE
       - COMPASS_ORIENT
       - EK3_SRC1_YAW
-    recommended_plot_groups: [yaw_attitude, yaw_rate, yaw_pid, motor_outputs, esc_telemetry, vibration, power, ekf_mag]
+    recommended_plot_groups: [rcin_yaw_rate, yaw_attitude, yaw_rate, yaw_pid, motor_outputs, esc_telemetry, vibration, power, ekf_mag]
     diagnostic_questions:
       - Was yaw commanded by pilot/autopilot or uncommanded?
       - Did ATT yaw, RATE yaw, and PIDY evidence agree on the tracking problem?
@@ -52,9 +52,9 @@ symptom_classes:
     aliases: [wobble, oscillation, roll wobble, pitch wobble, twitching, shaking, bounce]
     required_messages: [ATT, RATE]
     strongly_recommended_messages: [PIDR, PIDP, RCOU, MODE]
-    optional_context_messages: [PIDY, MSG, EV, ERR, VIBE, IMU, BAT, POWR, ESC, ESCX, EDT2, XKF4]
+    optional_context_messages: [PIDY, MSG, EV, ERR, RCIN, VIBE, IMU, BAT, POWR, ESC, ESCX, EDT2, XKF4]
     relevant_parameters: [ATC_RAT_RLL_P, ATC_RAT_RLL_I, ATC_RAT_RLL_D, ATC_RAT_PIT_P, ATC_RAT_PIT_I, ATC_RAT_PIT_D, INS_HNTCH_ENABLE]
-    recommended_plot_groups: [attitude_rate, pid_terms, motor_outputs, vibration, power]
+    recommended_plot_groups: [rcin_roll_attitude, rcin_pitch_attitude, attitude_rate, pid_terms, motor_outputs, vibration, power]
     diagnostic_questions:
       - Is the issue on roll, pitch, yaw, or multiple axes?
       - Does RATE tracking error coincide with controller output or motor saturation?
@@ -120,9 +120,9 @@ symptom_classes:
     aliases: [battery sag, brownout, low voltage, power problem, voltage drop]
     required_messages: [BAT]
     strongly_recommended_messages: [POWR, RCOU]
-    optional_context_messages: [CTUN, RATE, ESC, ESCX, EDT2, ERR, EV, MSG, VIBE]
+    optional_context_messages: [CTUN, RATE, RCIN, ESC, ESCX, EDT2, ERR, EV, MSG, VIBE]
     relevant_parameters: [BATT_MONITOR, BATT_ARM_VOLT, BATT_LOW_VOLT, BATT_CRT_VOLT, MOT_BAT_VOLT_MAX, MOT_BAT_VOLT_MIN]
-    recommended_plot_groups: [power, motor_outputs, altitude_throttle, esc_telemetry]
+    recommended_plot_groups: [rcin_throttle_power, power, motor_outputs, altitude_throttle, esc_telemetry]
     diagnostic_questions:
       - Does voltage sag coincide with high current or throttle demand?
       - Are board-power flags or Vcc drops present?
@@ -139,7 +139,7 @@ symptom_classes:
     strongly_recommended_messages: [ATT, RATE, RCOU, MODE]
     optional_context_messages: [EV, ERR, MSG, BAT, GPS, XKF4, VIBE, PIDR, PIDP, PIDY, ESC, ESCX, EDT2, RCIN, CTUN, POWR, MAG]
     relevant_parameters: [FRAME_CLASS, FRAME_TYPE, FS_THR_ENABLE, FS_BATT_ENABLE, ARMING_CHECK]
-    recommended_plot_groups: [mode_timeline, attitude_rate, motor_outputs, power, ekf_gps, vibration, esc_telemetry]
+    recommended_plot_groups: [mode_timeline, rcin_roll_attitude, rcin_pitch_attitude, rcin_throttle_power, attitude_rate, motor_outputs, power, ekf_gps, vibration, esc_telemetry]
     diagnostic_questions:
       - What changed immediately before loss of control?
       - Did attitude/rate tracking fail before impact?
@@ -172,9 +172,9 @@ symptom_classes:
     aliases: []
     required_messages: []
     strongly_recommended_messages: [ATT, RATE]
-    optional_context_messages: [RCOU, MODE, MSG, EV, ERR, PIDR, PIDP, PIDY, VIBE, BAT, POWR, GPS, XKF4, ESC, ESCX, EDT2]
+    optional_context_messages: [RCOU, MODE, MSG, EV, ERR, RCIN, PIDR, PIDP, PIDY, VIBE, BAT, POWR, GPS, XKF4, ESC, ESCX, EDT2]
     relevant_parameters: []
-    recommended_plot_groups: [mode_timeline, attitude_rate, motor_outputs, power, vibration, ekf_gps]
+    recommended_plot_groups: [mode_timeline, rcin_roll_attitude, rcin_pitch_attitude, rcin_throttle_power, attitude_rate, motor_outputs, power, vibration, ekf_gps]
     diagnostic_questions:
       - What symptom or event should be prioritized?
       - Which flight segment and mode are relevant?

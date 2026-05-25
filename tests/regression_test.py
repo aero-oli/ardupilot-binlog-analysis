@@ -25,6 +25,7 @@ from ap_log_investigation_manifest import build_manifest_from_index
 from ap_log_metrics import compute_metrics
 from ap_log_plots import health_plots
 from ap_log_plots import main as plots_main
+from ap_rcin import build_command_response_investigation, rc_channel_mapping, summarize_rcin
 from ap_log_validate import module_availability
 from ap_symptom_map import load_symptom_map
 from ap_vibration import build_vibration_assessment
@@ -607,6 +608,71 @@ def test_yaw_diagnosis_separates_yaw_control_from_yaw_estimator_evidence():
     assert_true("mag field magnitude correlates" in evidence, "yaw estimator evidence should retain MAG/load correlation")
 
 
+def test_rcin_summary_uses_parameter_channel_mapping():
+    tables = {
+        "PARM": pd.DataFrame({
+            "Name": ["RCMAP_ROLL", "RCMAP_PITCH", "RCMAP_THROTTLE", "RCMAP_YAW", "RC2_TRIM"],
+            "Value": [1, 3, 4, 2, 1490],
+        }),
+        "RCIN": pd.DataFrame({"TimeS": [0.0, 1.0, 2.0], "C1": [1500, 1600, 1500], "C2": [1490, 1700, 1490], "C3": [1500, 1500, 1400], "C4": [1100, 1400, 1800]}),
+    }
+    mapping = rc_channel_mapping(tables)
+    summary = summarize_rcin(tables)
+    assert_true(mapping["axes"]["yaw"]["channel"] == 2, "RCMAP_YAW should select the yaw input channel")
+    assert_true(mapping["axes"]["pitch"]["channel"] == 3, "RCMAP_PITCH should select the pitch input channel")
+    assert_true(summary["axes"]["yaw"]["field"] == "C2", "RCIN summary should use mapped yaw field")
+    assert_true(summary["axes"]["yaw"]["trim"] == 1490.0, "RCIN summary should use RC channel trim when available")
+    assert_true(summary["mapping"]["limitation"] is None, "complete RCMAP parameters should avoid default-mapping limitation")
+
+
+def test_yaw_rcin_commanded_motion_is_context_not_fault():
+    index = {"messages": {"ATT": {}, "RATE": {}, "RCIN": {}, "PARM": {}}, "parameters": {"RCMAP_YAW": 4}, "errors": [], "events": [], "modes": []}
+    tables = {
+        "RCIN": pd.DataFrame({"TimeS": [0.0, 1.0, 2.0], "C4": [1500, 1700, 1700]}),
+        "ATT": pd.DataFrame({"TimeS": [0.0, 1.0, 2.0], "DesYaw": [0.0, 5.0, 10.0], "Yaw": [0.0, 4.0, 9.0]}),
+        "RATE": pd.DataFrame({"TimeS": [0.0, 1.0, 2.0], "YDes": [0.0, 25.0, 20.0], "Y": [0.0, 22.0, 19.0], "YOut": [0.0, 0.2, 0.2]}),
+    }
+    result = build_command_response_investigation(tables, index, axes=("yaw",))
+    checks = "\n".join(c.get("result", "") for c in result["checked"])
+    assert_true(result["findings"] == [], "commanded yaw should not become a fault finding")
+    assert_true("commanded manoeuvre" in checks, "RCIN command before yaw motion should be recorded as commanded context")
+
+
+def test_yaw_without_rcin_or_desired_command_flags_uncommanded_motion():
+    index = {"messages": {"ATT": {}, "RATE": {}, "RCIN": {}}, "parameters": {"RCMAP_YAW": 4}, "errors": [], "events": [], "modes": []}
+    tables = {
+        "RCIN": pd.DataFrame({"TimeS": [0.0, 1.0, 2.0], "C4": [1500, 1500, 1500]}),
+        "ATT": pd.DataFrame({"TimeS": [0.0, 1.0, 2.0], "DesYaw": [0.0, 0.0, 0.0], "Yaw": [0.0, 8.0, 16.0]}),
+        "RATE": pd.DataFrame({"TimeS": [0.0, 1.0, 2.0], "YDes": [0.0, 0.0, 0.0], "Y": [0.0, 18.0, 22.0], "YOut": [0.0, 0.05, 0.05]}),
+    }
+    findings, context, checked, *_ = diagnose_yaw(tables, index)
+    causes = "\n".join(f.get("possible_cause", "") for f in findings)
+    assert_true("yaw motion without RCIN or desired command" in causes, "uncommanded yaw motion should be diagnostic evidence")
+    assert_true(any(c.get("source") == "RCIN" for c in context), "RCIN range summary should be retained as context")
+
+
+def test_roll_pitch_rcin_command_response_checks_are_added():
+    index = {"messages": {"ATT": {}, "RATE": {}, "RCIN": {}}, "parameters": {"RCMAP_ROLL": 1, "RCMAP_PITCH": 2}, "errors": [], "events": [], "modes": []}
+    tables = {
+        "RCIN": pd.DataFrame({"TimeS": [0.0, 1.0, 2.0], "C1": [1500, 1650, 1650], "C2": [1500, 1500, 1500]}),
+        "ATT": pd.DataFrame({"TimeS": [0.0, 1.0, 2.0], "DesRoll": [0.0, 8.0, 12.0], "Roll": [0.0, 7.0, 11.0], "DesPitch": [0.0, 0.0, 0.0], "Pitch": [0.0, 8.0, 12.0]}),
+        "RATE": pd.DataFrame({"TimeS": [0.0, 1.0, 2.0], "RDes": [0.0, 20.0, 15.0], "R": [0.0, 18.0, 13.0], "PDes": [0.0, 0.0, 0.0], "P": [0.0, 18.0, 20.0]}),
+    }
+    findings, _context, checked, *_ = diagnose_by_class("attitude_rate_issue", tables, index)
+    causes = "\n".join(f.get("possible_cause", "") for f in findings)
+    checks = "\n".join(c.get("result", "") for c in checked)
+    assert_true("commanded manoeuvre" in checks, "roll RCIN command should be checked against response")
+    assert_true("pitch motion without RCIN or desired command" in causes, "pitch response without RCIN/desired command should be flagged")
+
+
+def test_manifest_includes_rcin_plot_presets_when_supported():
+    index = {"messages": {"ATT": {}, "RATE": {}, "RCIN": {}, "CTUN": {}, "BAT": {}}, "errors": [], "events": [], "modes": []}
+    manifest = build_manifest_from_index(index, "yaw issue", "flight.bin")
+    commands = "\n".join(manifest["recommended_next_commands"])
+    assert_true("RCIN.C4=RC yaw input" in commands, "yaw manifest should include RCIN yaw command-response custom plot")
+    assert_true("rcin_yaw_rate" in manifest["recommended_plots"], "RCIN yaw plot preset should be listed as recommended when data exists")
+
+
 def test_escx_generates_plots_and_avoids_missing_telemetry_caveat():
     tables = {
         "ESCX": pd.DataFrame({
@@ -1017,6 +1083,11 @@ def main():
     test_normal_compass_data_is_context_not_interference_finding()
     test_magnetic_interference_hypothesis_requires_correlation()
     test_yaw_diagnosis_separates_yaw_control_from_yaw_estimator_evidence()
+    test_rcin_summary_uses_parameter_channel_mapping()
+    test_yaw_rcin_commanded_motion_is_context_not_fault()
+    test_yaw_without_rcin_or_desired_command_flags_uncommanded_motion()
+    test_roll_pitch_rcin_command_response_checks_are_added()
+    test_manifest_includes_rcin_plot_presets_when_supported()
     test_escx_generates_plots_and_avoids_missing_telemetry_caveat()
     test_normal_telemetry_is_context_not_findings()
     test_yaw_pid_error_below_threshold_is_checked_not_finding()

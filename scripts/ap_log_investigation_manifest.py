@@ -12,7 +12,7 @@ from ap_symptom_map import requirement_spec
 
 EVIDENCE_GROUPS = {
     "core": {"ATT", "RATE", "GPS", "VIBE", "BAT", "CTUN"},
-    "controller": {"RATE", "PIDR", "PIDP", "PIDY", "PIDA", "CTUN"},
+    "controller": {"RATE", "PIDR", "PIDP", "PIDY", "PIDA", "CTUN", "RCIN"},
     "actuator": {"RCOU", "RCO2", "RCO3", "ESC", "ESCX", "EDT2", "PARM"},
     "estimator": {"GPS", "GPA", "GPS2", "MAG", "XKF1", "XKF2", "XKF3", "XKF4", "NKF1", "NKF2", "NKF3", "NKF4", "BARO", "RNGF"},
     "power": {"BAT", "BCL", "POWR"},
@@ -23,6 +23,10 @@ EVIDENCE_GROUPS = {
 PLOT_COMMANDS = {
     "yaw_attitude": ["--series ATT.DesYaw", "--series ATT.Yaw", "--title \"Yaw desired vs achieved\""],
     "yaw_rate": ["--series RATE.YDes", "--series RATE.Y", "--series RATE.YOut", "--secondary RATE.YOut", "--title \"Yaw rate tracking and output\""],
+    "rcin_yaw_rate": ["--series RCIN.C4=RC yaw input", "--series RATE.YDes", "--series RATE.Y", "--title \"RCIN yaw command and yaw rate response\""],
+    "rcin_roll_attitude": ["--series RCIN.C1=RC roll input", "--series ATT.DesRoll", "--series ATT.Roll", "--title \"RCIN roll command and attitude response\""],
+    "rcin_pitch_attitude": ["--series RCIN.C2=RC pitch input", "--series ATT.DesPitch", "--series ATT.Pitch", "--title \"RCIN pitch command and attitude response\""],
+    "rcin_throttle_power": ["--series RCIN.C3=RC throttle input", "--series CTUN.ThO", "--series BAT.Curr", "--series BAT.Volt", "--secondary BAT.Curr", "--title \"RCIN throttle, output, and battery\""],
     "yaw_pid": ["--series PIDY.Tar", "--series PIDY.Act", "--series PIDY.Err", "--secondary PIDY.Flags", "--title \"Yaw PID evidence\""],
     "motor_outputs": ["--series RCOU.C1", "--series RCOU.C2", "--series RCOU.C3", "--series RCOU.C4", "--title \"Motor outputs\""],
     "power": ["--series BAT.Volt", "--series BAT.Curr", "--secondary BAT.Curr", "--title \"Battery voltage and current\""],
@@ -66,7 +70,7 @@ def _available_plot_groups(spec, present):
         if not command_parts:
             continue
         required_messages = {part.split()[1].split(".")[0] for part in command_parts if part.startswith("--series ") or part.startswith("--secondary ")}
-        if required_messages and not required_messages.intersection(present):
+        if required_messages and not required_messages.issubset(present):
             continue
         groups.append(group)
     return groups

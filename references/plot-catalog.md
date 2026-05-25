@@ -45,5 +45,15 @@ python scripts/ap_log_segments.py --tables out/tables --json out/segments.json -
 2. `yaw_rate_desired_vs_actual.html`
 3. `yaw_pid_terms.html`
 4. `motor_outputs_during_yaw_error.html`
+5. `rcin_yaw_rate_command_response.html` when `RCIN` is available.
+
+## RCIN command-response plots
+
+- Yaw: `RCIN` yaw channel with `RATE.YDes` and `RATE.Y`.
+- Roll: `RCIN` roll channel with `ATT.DesRoll` and `ATT.Roll`.
+- Pitch: `RCIN` pitch channel with `ATT.DesPitch` and `ATT.Pitch`.
+- Throttle/power: `RCIN` throttle channel with `CTUN.ThO`, `BAT.Curr`, and `BAT.Volt`.
+
+Use `RCMAP_*` parameters when available. If they are absent, label the plot/diagnosis as using the default ArduPilot channel order assumption.
 
 Generate only plots supported by data present in the log.

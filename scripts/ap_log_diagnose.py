@@ -17,6 +17,7 @@ from ap_diag_requirements import missing_by_tier
 from ap_symptom_map import requirement_spec
 from ap_window_select import select_analysis_window
 from ap_compass_yaw import build_compass_yaw_investigation, write_compass_yaw_plots
+from ap_rcin import build_command_response_investigation, rcin_channel_col, rc_channel_mapping, summarize_rcin
 from ap_vibration import add_vibration_assessment_findings, build_vibration_assessment
 
 
@@ -43,6 +44,21 @@ def make_targeted_plots_from_tables(tables, symptom_class, plots_dir, events=Fal
     out = ensure_dir(plots_dir)
     markers = event_markers_from_tables(tables) if events else []
     if symptom_class == "yaw_misbehaviour":
+        if "RCIN" in tables and "RATE" in tables:
+            mapping = rc_channel_mapping(tables)
+            yaw_info = mapping["axes"]["yaw"]
+            yaw_col = rcin_channel_col(tables["RCIN"], yaw_info["channel"])
+            rate = tables["RATE"]
+            if yaw_col and all(c in rate.columns for c in ["YDes", "Y"]):
+                fig = make_subplots(rows=2, cols=1, shared_xaxes=True, subplot_titles=("RC yaw input", "Yaw rate response"))
+                rcin = tables["RCIN"]; x = rcin["TimeS"] if "TimeS" in rcin.columns else list(range(len(rcin)))
+                fig.add_trace(go.Scatter(x=x, y=rcin[yaw_col], mode="lines", name=f"RCIN.{yaw_col} yaw"), row=1, col=1)
+                x = rate["TimeS"] if "TimeS" in rate.columns else list(range(len(rate)))
+                for c in ["YDes", "Y"]:
+                    fig.add_trace(go.Scatter(x=x, y=rate[c], mode="lines", name=f"RATE.{c}"), row=2, col=1)
+                fig.update_layout(title="RCIN yaw command vs yaw rate response", template="plotly_white", hovermode="x unified")
+                add_event_markers(fig, markers)
+                p = out / "rcin_yaw_rate_command_response.html"; fig.write_html(str(p), include_plotlyjs="cdn"); generated.append(str(p))
         if "ATT" in tables:
             fig = go.Figure()
             att = tables["ATT"]
@@ -92,6 +108,24 @@ def make_targeted_plots_from_tables(tables, symptom_class, plots_dir, events=Fal
             p = out / "motor_outputs_during_yaw_error.html"; fig.write_html(str(p), include_plotlyjs="cdn"); generated.append(str(p))
         generated.extend(write_compass_yaw_plots(tables, out, events=events))
     if symptom_class in {"attitude_rate_issue", "crash_or_loss_of_control", "general_investigation"}:
+        if "RCIN" in tables and "ATT" in tables:
+            mapping = rc_channel_mapping(tables)
+            rcin = tables["RCIN"]
+            att = tables["ATT"]
+            for axis, des_col, actual_col in [("roll", "DesRoll", "Roll"), ("pitch", "DesPitch", "Pitch")]:
+                info = mapping["axes"][axis]
+                rc_col = rcin_channel_col(rcin, info["channel"])
+                if not rc_col or des_col not in att.columns or actual_col not in att.columns:
+                    continue
+                fig = make_subplots(rows=2, cols=1, shared_xaxes=True, subplot_titles=(f"RC {axis} input", f"{axis.title()} attitude response"))
+                x = rcin["TimeS"] if "TimeS" in rcin.columns else list(range(len(rcin)))
+                fig.add_trace(go.Scatter(x=x, y=rcin[rc_col], mode="lines", name=f"RCIN.{rc_col} {axis}"), row=1, col=1)
+                x = att["TimeS"] if "TimeS" in att.columns else list(range(len(att)))
+                for c in [des_col, actual_col]:
+                    fig.add_trace(go.Scatter(x=x, y=att[c], mode="lines", name=f"ATT.{c}"), row=2, col=1)
+                fig.update_layout(title=f"RCIN {axis} command vs attitude response", template="plotly_white", hovermode="x unified")
+                add_event_markers(fig, markers)
+                p = out / f"rcin_{axis}_attitude_command_response.html"; fig.write_html(str(p), include_plotlyjs="cdn"); generated.append(str(p))
         if "ATT" in tables:
             att = tables["ATT"]
             fig = make_subplots(rows=3, cols=1, shared_xaxes=True, subplot_titles=("Roll", "Pitch", "Yaw"))
@@ -166,6 +200,26 @@ def make_targeted_plots_from_tables(tables, symptom_class, plots_dir, events=Fal
             fig.update_layout(title="Battery and board power symptom plot", template="plotly_white", hovermode="x unified")
             add_event_markers(fig, markers)
             p = out / "battery_power_symptom.html"; fig.write_html(str(p), include_plotlyjs="cdn"); generated.append(str(p))
+        if "RCIN" in tables and ("CTUN" in tables or "BAT" in tables):
+            mapping = rc_channel_mapping(tables)
+            thr_info = mapping["axes"]["throttle"]
+            thr_col = rcin_channel_col(tables["RCIN"], thr_info["channel"])
+            if thr_col:
+                fig = make_subplots(rows=3, cols=1, shared_xaxes=True, subplot_titles=("RC throttle", "Throttle output", "Battery"))
+                rcin = tables["RCIN"]; x = rcin["TimeS"] if "TimeS" in rcin.columns else list(range(len(rcin)))
+                fig.add_trace(go.Scatter(x=x, y=rcin[thr_col], mode="lines", name=f"RCIN.{thr_col} throttle"), row=1, col=1)
+                if "CTUN" in tables:
+                    ctun = tables["CTUN"]; x = ctun["TimeS"] if "TimeS" in ctun.columns else list(range(len(ctun)))
+                    if "ThO" in ctun.columns:
+                        fig.add_trace(go.Scatter(x=x, y=ctun["ThO"], mode="lines", name="CTUN.ThO"), row=2, col=1)
+                if "BAT" in tables:
+                    bat = tables["BAT"]; x = bat["TimeS"] if "TimeS" in bat.columns else list(range(len(bat)))
+                    for c in ["Curr", "Volt", "VoltR"]:
+                        if c in bat.columns:
+                            fig.add_trace(go.Scatter(x=x, y=bat[c], mode="lines", name=f"BAT.{c}"), row=3, col=1)
+                fig.update_layout(title="RCIN throttle vs throttle output and battery", template="plotly_white", hovermode="x unified")
+                add_event_markers(fig, markers)
+                p = out / "rcin_throttle_power_command_response.html"; fig.write_html(str(p), include_plotlyjs="cdn"); generated.append(str(p))
     if symptom_class in {"motor_esc_issue", "crash_or_loss_of_control", "general_investigation"}:
         rcou = combined_rcout_dataframe(tables)
         if rcou is not None:
@@ -447,6 +501,11 @@ def diagnose_yaw(tables, index, vibration_assessment=None):
     checked = []
     missing_required, missing_strongly, missing_optional = diagnosis_missing(index, "yaw_misbehaviour")
 
+    command_response = build_command_response_investigation(tables, index, axes=("yaw",))
+    findings.extend(command_response["findings"])
+    context.extend(command_response["context"])
+    checked.extend(command_response["checked"])
+
     # Commanded vs uncommanded yaw
     if "ATT" in tables and all(c in tables["ATT"].columns for c in ["DesYaw", "Yaw"]):
         att = tables["ATT"]
@@ -564,6 +623,11 @@ def diagnose_by_class(symptom_class, tables, index, vibration_assessment=None):
     checked = []
     missing_required, missing_strongly, missing_optional = diagnosis_missing(index, symptom_class)
     add_event_findings(index, findings, checked)
+    if symptom_class in {"attitude_rate_issue", "crash_or_loss_of_control", "general_investigation"}:
+        command_response = build_command_response_investigation(tables, index, axes=("roll", "pitch", "yaw"))
+        findings.extend(command_response["findings"])
+        context.extend(command_response["context"])
+        checked.extend(command_response["checked"])
 
     if symptom_class == "attitude_rate_issue":
         add_attitude_rate_findings(tables, findings, checked, axes=("roll", "pitch"), rank=2)
@@ -700,6 +764,7 @@ def main() -> int:
             window_tables=tables,
             analysis_window=selection,
         )
+        rcin_summary = summarize_rcin(tables, index)
         if symptom_class == "yaw_misbehaviour":
             findings, context, checked, missing_required, missing_strongly, missing_optional = diagnose_yaw(tables, index, vibration_assessment=vibration_assessment)
         else:
@@ -728,6 +793,7 @@ def main() -> int:
             "findings": findings,
             "context": context,
             "checked_but_not_supported": checked,
+            "rcin_command_context": rcin_summary,
             "vibration_context": vibration_assessment.get("vibration_context", {}),
             "vibration_relevance_to_symptom": vibration_assessment.get("vibration_relevance_to_symptom", {}),
             "vibration_confidence_limits": vibration_assessment.get("vibration_confidence_limits", []),
