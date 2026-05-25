@@ -123,6 +123,17 @@ def test_skill_references_exist():
         assert_true((ROOT / required).exists(), f"symptom guide missing: {required}")
 
 
+def test_skill_requires_safety_next_steps():
+    skill = (ROOT / "SKILL.md").read_text(encoding="utf-8")
+    for phrase in [
+        "Recommended next steps",
+        "Immediate safety gate",
+        "What not to do",
+        "Do not stop at missing evidence",
+    ]:
+        assert_true(phrase in skill, f"SKILL.md missing required safety next-step phrase: {phrase}")
+
+
 def test_reference_coverage_and_key_files():
     evidence = (ROOT / "references" / "evidence-gathering-flights.md").read_text(encoding="utf-8")
     for spec in symptom_classes():
@@ -173,6 +184,7 @@ def test_repo_housekeeping_files():
 def main():
     test_symptom_map_shape_and_plot_groups()
     test_skill_references_exist()
+    test_skill_requires_safety_next_steps()
     test_reference_coverage_and_key_files()
     test_reference_safety_wording()
     test_parameter_metadata_schema_and_samples()

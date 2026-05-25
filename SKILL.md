@@ -270,4 +270,17 @@ The final answer to the user should be concise but technical. It must be written
 6. Safety-critical status before flight.
 7. What cannot be concluded.
 
+For safety-relevant findings, the final answer must include a clear `Recommended next steps` section. Keep it ordered:
+
+1. `Immediate safety gate`: choose the conservative gate that fits the evidence, such as normal analysis only, no AUTO/mission flying, controlled hover only, ground test only, bench only, or do not fly until checked.
+2. `Bench/hardware checks`.
+3. `Configuration/logging checks`.
+4. `Controlled evidence-gathering activity, only if safe`.
+5. `Reanalysis step`.
+6. `What not to do`.
+
+Do not stop at missing evidence limits confidence. If evidence is missing, state what specific evidence should be collected next, how to collect it safely, and what must be checked first.
+
+For reusable wording patterns and a mission/yaw/wobble example, read `references/final-answer-patterns.md`. Keep SKILL.md as investigation guidance: gather evidence, inspect outputs, and write the final answer yourself; do not add automatic report generation.
+
 Never bury a safety-critical finding behind tuning optimisation.
