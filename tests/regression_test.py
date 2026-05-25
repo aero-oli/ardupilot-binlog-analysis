@@ -20,6 +20,7 @@ from ap_log_diagnose import diagnose_by_class
 from ap_log_diagnose import diagnose_yaw
 from ap_log_diagnose import make_targeted_plots_from_tables
 from ap_log_fft import fft_from_isb_rows
+from ap_log_investigation_manifest import build_manifest_from_index
 from ap_log_metrics import compute_metrics
 from ap_log_plots import health_plots
 from ap_log_plots import main as plots_main
@@ -441,6 +442,31 @@ def test_yaw_full_evidence_has_no_missing_evidence_tiers():
     assert_true(optional == [], f"full yaw evidence should satisfy optional context messages, got {optional}")
 
 
+def test_investigation_manifest_yaw_inventory_plans_next_steps():
+    index = {"messages": {"ATT": {}, "RATE": {}, "PIDY": {}, "BAT": {}, "MSG": {}}, "errors": [], "events": [], "modes": []}
+    manifest = build_manifest_from_index(index, "yaw issue", "flight.bin")
+    assert_true(manifest["symptom_class"] == "yaw_misbehaviour", "manifest should classify yaw symptom from YAML")
+    assert_true("ATT" in manifest["available_evidence"]["core"], "ATT should be listed as core evidence")
+    assert_true("RATE" in manifest["available_evidence"]["controller"], "RATE should be listed as controller evidence")
+    assert_true("PIDY" in manifest["available_evidence"]["controller"], "PIDY should be listed as controller evidence")
+    assert_true("BAT" in manifest["available_evidence"]["power"], "BAT should be listed as power evidence")
+    assert_true(manifest["missing_evidence"]["required"] == [], "ATT/RATE should satisfy yaw required evidence")
+    assert_true("RCOU" in manifest["missing_evidence"]["strongly_recommended"], "missing RCOU should be strongly recommended")
+    assert_true(any("ap_log_diagnose.py" in cmd for cmd in manifest["recommended_next_commands"]), "manifest should suggest diagnosis command")
+    assert_true(any("ap_log_custom_plot.py" in cmd and "RATE.YDes" in cmd for cmd in manifest["recommended_next_commands"]), "manifest should suggest concrete yaw custom plot")
+    assert_true(any("Was yaw commanded or uncommanded?" in q for q in manifest["questions_to_answer"]), "manifest should include yaw questions")
+    assert_true(any("strongly recommended" in limit for limit in manifest["confidence_limits"]), "missing strong evidence should limit confidence")
+
+
+def test_investigation_manifest_suggests_extract_when_core_evidence_missing():
+    index = {"messages": {"MSG": {}}, "errors": [], "events": [], "modes": []}
+    manifest = build_manifest_from_index(index, "yaw issue", "flight.bin")
+    assert_true("ATT" in manifest["missing_evidence"]["required"], "missing ATT should be required yaw evidence")
+    assert_true("RATE" in manifest["missing_evidence"]["required"], "missing RATE should be required yaw evidence")
+    assert_true(any("ap_log_extract.py" in cmd and "--messages ATT,RATE" in cmd for cmd in manifest["recommended_next_commands"]), "manifest should suggest extracting missing core evidence")
+    assert_true(any("Cannot answer core diagnosis" in limit for limit in manifest["confidence_limits"]), "manifest should state required evidence limit")
+
+
 def test_validate_module_availability_separates_required_and_optional_messages():
     modules = module_availability({"messages": {"ATT": {}, "RATE": {}, "PIDY": {}, "RCOU": {}, "MODE": {}, "MSG": {}, "EV": {}, "ERR": {}}})
     yaw = modules["yaw_diagnosis"]
@@ -675,6 +701,8 @@ def main():
     test_yaw_diagnosis_requires_only_att_and_rate()
     test_yaw_with_pidy_missing_other_strong_data_downgrades_confidence()
     test_yaw_full_evidence_has_no_missing_evidence_tiers()
+    test_investigation_manifest_yaw_inventory_plans_next_steps()
+    test_investigation_manifest_suggests_extract_when_core_evidence_missing()
     test_validate_module_availability_separates_required_and_optional_messages()
     test_compare_summarizes_metric_deltas()
     test_metric_differences_can_ignore_unrequested_sections()

@@ -54,7 +54,13 @@ Use when the user says something like:
 - “crashed”
 - “loss of control”
 
-Run deterministic evidence gathering:
+First create an investigation manifest. This is a planning artifact only; it identifies available evidence, missing evidence, suggested next commands/plots, confidence limits, and questions to answer. Do not treat it as a diagnosis or final conclusion.
+
+```bash
+python scripts/ap_log_investigation_manifest.py LOG.BIN --symptom "USER SYMPTOM" --out out/investigation.json
+```
+
+Inspect `out/investigation.json`, then run deterministic evidence gathering:
 
 ```bash
 python scripts/ap_log_diagnose.py LOG.BIN --symptom "USER SYMPTOM" --out out/diagnosis.json --plots out/plots/diagnosis
