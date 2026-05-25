@@ -33,6 +33,8 @@ python scripts/ap_log_index.py LOG.BIN --json out/index.json --summary out/index
 
 If the file is a telemetry `.tlog`, not a DataFlash `.bin/.log`, state that this skill is optimized for DataFlash logs and that telemetry logs may not include the same onboard messages.
 
+For the investigation sequence, use `references/how-to-investigate.md`: validate and inventory first, run the manifest before symptom diagnosis, select a relevant time window, plot desired-vs-actual signals, then treat script findings as hypotheses to verify against timing and missing evidence.
+
 ## Analysis modes
 
 Choose the mode from the user's request. If the user reports a symptom, symptom-led diagnosis has priority over a general review.
