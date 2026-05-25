@@ -24,6 +24,12 @@ The goal is to produce evidence-backed conclusions and plots. Use bundled script
 
 ## First action
 
+If dependency or import failures occur, run the skill doctor before starting or retrying a long workflow:
+
+```bash
+python scripts/ap_skill_doctor.py
+```
+
 Create an output directory, usually `out/` or `log-analysis-out/`, and run validation/indexing before interpretation.
 
 ```bash

@@ -20,6 +20,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
+from ap_modes import first_present, mode_decoding_note, mode_label, mode_timeline_from_rows
+
 try:
     import numpy as np
 except Exception:  # pragma: no cover - dependency checked at runtime
@@ -332,7 +334,14 @@ class StreamingIndexBuilder:
             if msg_text:
                 self.firmware_messages.append(msg_text)
         elif typ == "MODE" and len(self.modes) < 500:
-            self.modes.append({"time_s": ts, "mode": row.get("Mode") or row.get("ModeNum") or row.get("Name"), "raw": strip_private(row)})
+            raw_mode = first_present(row, ["Mode", "ModeNum", "Name"])
+            self.modes.append({
+                "time_s": ts,
+                "raw_mode": raw_mode,
+                "decoded_mode": mode_label(raw_mode),
+                "mode": mode_label(raw_mode),
+                "raw": strip_private(row),
+            })
         elif typ == "EV" and len(self.events) < 500:
             self.events.append({"time_s": ts, "id": row.get("Id"), "raw": strip_private(row)})
         elif typ == "ERR" and len(self.errors) < 500:
@@ -433,6 +442,8 @@ class StreamingIndexBuilder:
             "parameter_count": len(self.parameters),
             "firmware_messages": self.firmware_messages[:100],
             "modes": self.modes[:500],
+            "mode_timeline": mode_timeline_from_rows(self.modes[:500], log_end_s=self.end_s),
+            "mode_decoding": mode_decoding_note(vehicle_scope({"vehicle": vehicle, "firmware": firmware, "parameters": self.parameters})),
             "events": self.events[:500],
             "errors": self.errors[:500],
             "logging_dropouts": self.logging_dropouts[:200],
@@ -918,7 +929,8 @@ def event_markers_from_tables(tables: Dict[str, Any], limit: int = 200) -> List[
             for row in mode.to_dict(orient="records"):
                 t = safe_float(row.get("TimeS"))
                 if t is not None:
-                    markers.append({"time_s": t, "label": f"MODE {row.get(col)}", "source": "MODE"})
+                    raw_mode = row.get(col)
+                    markers.append({"time_s": t, "label": f"MODE {mode_label(raw_mode)} ({raw_mode})", "source": "MODE"})
     if "ERR" in tables:
         for row in tables["ERR"].to_dict(orient="records"):
             t = safe_float(row.get("TimeS"))
@@ -955,7 +967,16 @@ def mode_segments_from_tables(tables: Dict[str, Any], log_end_s: Optional[float]
             continue
         end = safe_float(rows[i + 1].get("TimeS")) if i + 1 < len(rows) else log_end_s
         duration = None if end is None else max(0.0, end - start)
-        segments.append({"mode": str(row.get(mode_col)), "start_s": start, "end_s": end, "duration_s": duration})
+        raw_mode = row.get(mode_col)
+        decoded_mode = mode_label(raw_mode)
+        segments.append({
+            "raw_mode": raw_mode,
+            "decoded_mode": decoded_mode,
+            "mode": decoded_mode,
+            "start_s": start,
+            "end_s": end,
+            "duration_s": duration,
+        })
     return segments
 
 def vehicle_scope(index: Dict[str, Any]) -> Dict[str, Any]:
@@ -1060,6 +1081,14 @@ def message_inventory_markdown(index: Dict[str, Any]) -> str:
         lines.append("|---:|---:|---:|")
         for e in index["errors"][:50]:
             lines.append(f"| {fmt(e.get('time_s'))} | {e.get('subsys')} | {e.get('ecode')} |")
+    if index.get("modes"):
+        timeline = mode_timeline_from_rows(index["modes"], log_end_s=index.get("end_time_s"))
+        lines.append("\n## Mode timeline\n")
+        lines.append(f"- {mode_decoding_note(vehicle_scope(index))}\n")
+        lines.append("| Raw mode | Decoded mode | Start s | End s | Duration s |")
+        lines.append("|---|---|---:|---:|---:|")
+        for mode in timeline[:100]:
+            lines.append(f"| {mode.get('raw_mode')} | {mode.get('decoded_mode')} | {fmt(mode.get('start_s'))} | {fmt(mode.get('end_s'))} | {fmt(mode.get('duration_s'))} |")
     return "\n".join(lines) + "\n"
 
 def fmt(v: Any, ndigits: int = 3) -> str:

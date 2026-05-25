@@ -32,6 +32,21 @@ Install script dependencies in the environment that will run the tools:
 pip install -r requirements.txt
 ```
 
+Check a fresh workspace before starting a long analysis:
+
+```bash
+python scripts/ap_skill_doctor.py
+python scripts/ap_skill_doctor.py --json out/skill_doctor.json
+```
+
+If dependencies are missing and you want a local virtual environment, bootstrap one:
+
+```bash
+bash scripts/bootstrap_venv.sh
+source .venv/bin/activate
+python scripts/ap_skill_doctor.py
+```
+
 The main agent entrypoint is `SKILL.md`. The deterministic tools live in `scripts/`, with domain references in `references/`.
 
 ## How To Use

@@ -262,7 +262,7 @@ def main() -> int:
     p.add_argument("--tables", required=True, help="Directory produced by ap_log_extract.py")
     p.add_argument("--series", action="append", required=True, help="Series as MESSAGE.FIELD or MESSAGE.FIELD=Label; repeat for multiple traces")
     p.add_argument("--secondary", action="append", default=[], help="MESSAGE.FIELD series to plot on the right y-axis in overlay mode")
-    p.add_argument("--mode", default=None, help="Flight mode selector, or legacy plot mode overlay/subplots")
+    p.add_argument("--mode", default=None, help="Flight mode selector by name or numeric Copter mode id, or legacy plot mode overlay/subplots")
     p.add_argument("--plot-mode", choices=["overlay", "subplots"], default="overlay")
     p.add_argument("--title", default="Custom ArduPilot plot")
     p.add_argument("--out", default="custom_plot.html", help="Output .html path or output directory")

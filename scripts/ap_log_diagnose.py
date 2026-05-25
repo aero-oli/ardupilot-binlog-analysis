@@ -10,7 +10,7 @@ from ap_common import (
     combined_rcout_dataframe, ekf_instance_groups, ensure_dir, esc_instance_groups, event_markers_from_tables,
     filter_tables_by_time, get_col, gps_instance_groups, missing_messages, motor_channels_from_mapping,
     numeric_series, output_channel_columns, output_channel_label, output_mapping_from_tables,
-    parse_time_window, percentile, rms, rows_to_dataframe, safe_float, severity_rank, write_json
+    parse_time_window, percentile, rms, rows_to_dataframe, safe_float, severity_rank, vehicle_scope, write_json
 )
 from ap_diag_helpers import add_motor_esc_findings, add_power_findings, vals
 from ap_diag_requirements import missing_by_tier
@@ -852,7 +852,7 @@ def main() -> int:
     p.add_argument("--messages", default=None, help="Comma-separated message names to parse, or ALL. Defaults to symptom-relevant messages.")
     p.add_argument("--max-messages", type=int, default=None, help="Optional parse limit for quick diagnosis")
     p.add_argument("--armed-only", action="store_true", help="Collect rows only while ARM messages indicate armed state when available")
-    p.add_argument("--mode", default=None, help="Select the active interval for a flight mode name")
+    p.add_argument("--mode", default=None, help="Select active intervals for a flight mode name or numeric Copter mode id")
     p.add_argument("--around-msg", default=None, help="Select a window around the first matching MSG text")
     p.add_argument("--around-event", default=None, help="Select a window around matching EV/MSG/MODE text")
     p.add_argument("--around-error", action="store_true", help="Select a window around the first ERR message")
@@ -917,6 +917,7 @@ def main() -> int:
             high_throttle_percentile=args.high_throttle_percentile,
             high_throttle_threshold=args.high_throttle_threshold,
             log_end_s=index.get("end_time_s"),
+            vehicle_scope=vehicle_scope(index),
         )
         if args.start_time is not None or args.end_time is not None:
             selection["start_s"] = window["start_s"] if window["start_s"] is not None else selection.get("start_s")

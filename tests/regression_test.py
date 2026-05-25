@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import gzip
 import json
+import subprocess
 import tempfile
 from pathlib import Path
 
@@ -32,6 +33,7 @@ from ap_log_plots import main as plots_main
 from ap_parameters import select_relevant_parameters
 from ap_rcin import build_command_response_investigation, rc_channel_mapping, summarize_rcin
 from ap_log_validate import module_availability
+from ap_skill_doctor import run_doctor
 from ap_symptom_map import load_symptom_map
 from ap_vibration import build_vibration_assessment
 from ap_window_select import select_analysis_window
@@ -285,6 +287,86 @@ def test_window_selector_mode_intervals():
     selection = select_analysis_window(tables, mode="LOITER", log_end_s=40.0)
     assert_true(selection["start_s"] == 10.0 and selection["end_s"] == 30.0, "mode selector should return active interval")
     assert_true(selection["rule"] == "mode", "selection should record mode rule")
+
+
+def test_copter_numeric_mode_matches_named_query():
+    tables = {"MODE": pd.DataFrame({"TimeS": [0.0, 10.0, 20.0], "Mode": [0, 3, 16]})}
+    selection = select_analysis_window(tables, mode="AUTO", log_end_s=30.0, vehicle_scope={"primary_vehicle": "Copter"})
+
+    assert_true(selection["start_s"] == 10.0 and selection["end_s"] == 20.0, "MODE.Mode=3 should match --mode AUTO")
+    assert_true(selection["decoded_source"] == "AUTO", "mode selector should record decoded source")
+    assert_true(selection["mode_intervals"][0]["decoded_mode"] == "AUTO", "selected numeric interval should include decoded mode")
+
+
+def test_copter_poshold_numeric_mode_matches_named_query():
+    tables = {"MODE": pd.DataFrame({"TimeS": [0.0, 10.0, 25.0], "Mode": [3, 16, 6]})}
+    selection = select_analysis_window(tables, mode="POSHOLD", log_end_s=35.0, vehicle_scope={"primary_vehicle": "Copter"})
+
+    assert_true(selection["start_s"] == 10.0 and selection["end_s"] == 25.0, "MODE.Mode=16 should match --mode POSHOLD")
+
+
+def test_copter_mode_aliases_match_numeric_modes():
+    tables = {"MODE": pd.DataFrame({"TimeS": [0.0, 8.0, 16.0, 24.0], "Mode": [2, 16, 20, 21]})}
+
+    alt_hold = select_analysis_window(tables, mode="ALT_HOLD", log_end_s=30.0, vehicle_scope={"primary_vehicle": "Copter"})
+    guided_no_gps = select_analysis_window(tables, mode="GUIDED_NO_GPS", log_end_s=30.0, vehicle_scope={"primary_vehicle": "Copter"})
+    smart_rtl = select_analysis_window(tables, mode="SMARTRTL", log_end_s=30.0, vehicle_scope={"primary_vehicle": "Copter"})
+
+    assert_true(alt_hold["start_s"] == 0.0 and alt_hold["decoded_source"] == "ALTHOLD", "ALT_HOLD should alias ALTHOLD")
+    assert_true(guided_no_gps["start_s"] == 16.0 and guided_no_gps["decoded_source"] == "GUIDED_NOGPS", "GUIDED_NO_GPS should alias GUIDED_NOGPS")
+    assert_true(smart_rtl["start_s"] == 24.0 and smart_rtl["decoded_source"] == "SMART_RTL", "SMARTRTL should alias SMART_RTL")
+
+
+def test_copter_named_mode_matches_numeric_query():
+    tables = {"MODE": pd.DataFrame({"TimeS": [0.0, 5.0, 15.0], "Name": ["STABILIZE", "AUTO", "RTL"]})}
+    selection = select_analysis_window(tables, mode="3", log_end_s=30.0, vehicle_scope={"primary_vehicle": "Copter"})
+
+    assert_true(selection["start_s"] == 5.0 and selection["end_s"] == 15.0, 'MODE.Name="AUTO" should match --mode 3')
+
+
+def test_decoded_mode_selection_preserves_multiple_intervals():
+    tables = {
+        "MODE": pd.DataFrame({
+            "TimeS": [0.0, 10.0, 20.0, 30.0, 40.0],
+            "Mode": [0, 3, 0, 3, 16],
+        })
+    }
+    selection = select_analysis_window(tables, mode="AUTO", log_end_s=50.0, vehicle_scope={"primary_vehicle": "Copter"})
+
+    assert_true(selection["intervals_found"] == [{"start_s": 10.0, "end_s": 20.0}, {"start_s": 30.0, "end_s": 40.0}], "decoded numeric mode intervals should remain split")
+    assert_true([m["decoded_mode"] for m in selection["mode_intervals"]] == ["AUTO", "AUTO"], "mode interval metadata should carry decoded names")
+
+
+def test_unknown_numeric_mode_is_labelled_without_crashing():
+    tables = {"MODE": pd.DataFrame({"TimeS": [0.0, 10.0], "Mode": [99, 3]})}
+    segments = ap_common.mode_segments_from_tables(tables, log_end_s=20.0)
+
+    assert_true(segments[0]["raw_mode"] == 99, "unknown numeric raw mode should be preserved")
+    assert_true(segments[0]["decoded_mode"] == "UNKNOWN_COPTER_MODE_99", "unknown numeric mode should be labelled")
+    assert_true(segments[1]["decoded_mode"] == "AUTO", "known numeric mode should still decode")
+
+
+def test_index_summary_includes_decoded_mode_timeline_and_caveat():
+    index = {
+        "file_name": "flight.bin",
+        "vehicle": None,
+        "firmware": None,
+        "duration_s": 30.0,
+        "end_time_s": 30.0,
+        "parameter_count": 0,
+        "messages": {"MODE": {"count": 3, "fields": ["TimeS", "Mode"]}},
+        "modes": [
+            {"time_s": 0.0, "raw_mode": 0, "decoded_mode": "STABILIZE"},
+            {"time_s": 10.0, "raw_mode": 3, "decoded_mode": "AUTO"},
+            {"time_s": 20.0, "raw_mode": 16, "decoded_mode": "POSHOLD"},
+        ],
+        "errors": [],
+        "parameters": {},
+    }
+
+    summary = ap_common.message_inventory_markdown(index)
+    assert_true("| 3 | AUTO | 10.000 | 20.000 | 10.000 |" in summary, "index summary should include raw and decoded mode timeline")
+    assert_true("not confirmed Copter" in summary, "unknown vehicle mode decoding should be caveated")
 
 
 def test_mode_window_filters_disjoint_intervals_without_intervening_modes():
@@ -1685,6 +1767,35 @@ def test_non_yaw_symptom_plots_are_generated_when_data_exists():
         assert_true(any("ekf_gps" in p for p in plots), "EKF/GPS symptom should generate a targeted plot")
 
 
+def test_skill_doctor_passes_with_current_test_environment():
+    with tempfile.TemporaryDirectory() as tmp:
+        result = run_doctor(Path(tmp) / "doctor-out")
+    assert_true(result["exit_code"] == 0, f"doctor should pass in the regression environment: {result}")
+    names = {check["name"] for check in result["checks"] if check["status"] == "pass"}
+    assert_true("package:pymavlink" in names, "doctor should check pymavlink")
+    assert_true("package:PyYAML" in names, "doctor should check PyYAML via yaml import")
+    assert_true("module:ap_log_diagnose" in names, "doctor should check core diagnosis module imports")
+    assert_true("synthetic_dataframe_path" in names, "doctor should verify a no-log synthetic data path")
+
+
+def test_skill_doctor_cli_writes_json():
+    with tempfile.TemporaryDirectory() as tmp:
+        json_path = Path(tmp) / "skill_doctor.json"
+        out_dir = Path(tmp) / "doctor-out"
+        proc = subprocess.run(
+            [sys.executable, "scripts/ap_skill_doctor.py", "--json", str(json_path), "--out-dir", str(out_dir)],
+            cwd=Path(__file__).resolve().parents[1],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+        assert_true(proc.returncode == 0, f"doctor CLI should pass, stdout={proc.stdout}, stderr={proc.stderr}")
+        result = json.loads(json_path.read_text(encoding="utf-8"))
+        assert_true(result["exit_code"] == 0, "doctor JSON should report success in the regression environment")
+        assert_true(any(c["name"] == "requirements_txt" for c in result["checks"]), "doctor JSON should include requirements.txt check")
+
+
 def test_compass_yaw_plots_generate_with_full_synthetic_evidence():
     tables = {
         "ATT": pd.DataFrame({"TimeS": [0.0, 1.0, 2.0], "DesYaw": [10.0, 20.0, 30.0], "Yaw": [9.0, 18.0, 29.0]}),
@@ -1845,6 +1956,13 @@ def main():
     test_load_tables_fails_on_unreadable_table()
     test_time_window_filters_tables_inclusively()
     test_window_selector_mode_intervals()
+    test_copter_numeric_mode_matches_named_query()
+    test_copter_poshold_numeric_mode_matches_named_query()
+    test_copter_mode_aliases_match_numeric_modes()
+    test_copter_named_mode_matches_numeric_query()
+    test_decoded_mode_selection_preserves_multiple_intervals()
+    test_unknown_numeric_mode_is_labelled_without_crashing()
+    test_index_summary_includes_decoded_mode_timeline_and_caveat()
     test_mode_window_filters_disjoint_intervals_without_intervening_modes()
     test_mode_window_diagnosis_uses_only_selected_intervals()
     test_custom_plot_manifest_records_split_mode_intervals()
@@ -1928,6 +2046,8 @@ def main():
     test_metrics_include_generic_numeric_summary_for_extra_messages()
     test_batch_sampler_isb_fft_rows_are_processed()
     test_non_yaw_symptom_plots_are_generated_when_data_exists()
+    test_skill_doctor_passes_with_current_test_environment()
+    test_skill_doctor_cli_writes_json()
     test_compass_yaw_plots_generate_with_full_synthetic_evidence()
     test_compass_yaw_plots_tolerate_missing_optional_battery_and_throttle()
     test_custom_plot_supports_arbitrary_fields_and_secondary_axis()

@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import deque
 
 from ap_common import AnalysisError, get_col, parse_time_window, safe_float
+from ap_modes import first_present, mode_decoding_note, mode_label, mode_matches
 
 
 def _table_time_bounds(tables):
@@ -54,7 +55,7 @@ def _around(center, radius, rule, source):
     return _window(center - radius, center + radius, rule, source=source)
 
 
-def _mode_window(tables, mode, log_end_s=None):
+def _mode_window(tables, mode, log_end_s=None, vehicle_scope=None):
     if "MODE" not in tables:
         raise AnalysisError("--mode requested but MODE data is missing")
     df = tables["MODE"]
@@ -65,20 +66,25 @@ def _mode_window(tables, mode, log_end_s=None):
         raise AnalysisError("--mode requested but MODE has no Mode/Name/ModeNum field")
     rows = df.dropna(subset=["TimeS"]).sort_values("TimeS").to_dict(orient="records")
     intervals = []
-    wanted = str(mode).lower()
+    interval_modes = []
     for i, row in enumerate(rows):
-        current = str(row.get(mode_col, "")).lower()
-        if wanted not in current:
+        candidates = [row.get(c) for c in ["Mode", "Name", "ModeNum"] if c in row]
+        if not any(mode_matches(candidate, mode, vehicle_scope=vehicle_scope) for candidate in candidates):
             continue
         start = safe_float(row.get("TimeS"))
         end = safe_float(rows[i + 1].get("TimeS")) if i + 1 < len(rows) else log_end_s
         if end is None:
             _start, end = _table_time_bounds(tables)
         if start is not None and end is not None and end >= start:
+            raw_mode = first_present(row, ["Mode", "ModeNum", "Name"])
             intervals.append({"start_s": start, "end_s": end})
+            interval_modes.append({"start_s": start, "end_s": end, "raw_mode": raw_mode, "decoded_mode": mode_label(raw_mode)})
     if not intervals:
         raise AnalysisError(f"--mode {mode!r} did not match any MODE intervals")
     selection = _window(intervals[0]["start_s"], intervals[-1]["end_s"], "mode", source=str(mode), intervals=intervals)
+    selection["decoded_source"] = mode_label(mode)
+    selection["mode_decoding"] = mode_decoding_note(vehicle_scope)
+    selection["mode_intervals"] = interval_modes
     selection["intervals_found"] = intervals
     selection["intervals_used"] = intervals
     selection["non_matching_gaps_excluded"] = len(intervals) > 1
@@ -354,6 +360,7 @@ def select_analysis_window(
     high_throttle_percentile=90.0,
     high_throttle_threshold=None,
     log_end_s=None,
+    vehicle_scope=None,
 ):
     requested = [
         bool(window),
@@ -376,7 +383,7 @@ def select_analysis_window(
             parsed["end_s"] = table_end
         return _window(parsed["start_s"], parsed["end_s"], "window", source=window)
     if mode:
-        return _mode_window(tables, mode, log_end_s=log_end_s)
+        return _mode_window(tables, mode, log_end_s=log_end_s, vehicle_scope=vehicle_scope)
     if around_msg:
         return _around_msg_window(tables, around_msg, around_radius_s)
     if around_event:

@@ -6,6 +6,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from ap_common import AnalysisError, collect_dataflash, missing_messages, vehicle_scope, write_json
 from ap_diag_requirements import DIAGNOSIS_REQUIREMENTS, missing_by_tier
+from ap_modes import mode_decoding_note, mode_timeline_from_rows
 
 MODULES = {
     "core": {"required": ["ATT", "RATE", "RCOU", "MODE", "MSG", "EV", "ERR"], "optional": ["PARM", "ARM"]},
@@ -95,7 +96,17 @@ def main() -> int:
         elif modules["yaw_diagnosis"]["missing_strongly_recommended"]:
             warnings.append("Yaw diagnosis is available from ATT/RATE but confidence is reduced without yaw_diagnosis.missing_strongly_recommended messages.")
         warnings.extend(scope.get("notes", []))
-        result = {"file": str(path), "warnings": warnings, "vehicle_scope": scope, "modules": modules, "logging_health": logging_health, "index": index}
+        mode_timeline = mode_timeline_from_rows(index.get("modes", []), log_end_s=index.get("end_time_s"))
+        result = {
+            "file": str(path),
+            "warnings": warnings,
+            "vehicle_scope": scope,
+            "mode_decoding": mode_decoding_note(scope),
+            "mode_timeline": mode_timeline,
+            "modules": modules,
+            "logging_health": logging_health,
+            "index": index,
+        }
         write_json(args.json, result)
         if args.summary:
             lines = [f"# Validation: {path.name}\n"]
@@ -108,8 +119,19 @@ def main() -> int:
             lines.append(f"- Possible dropout context: {logging_health.get('possible_dropout_count', 0)}")
             lines.append(f"- Max time gap: {logging_health.get('max_time_gap_s', 0)} s")
             lines.append(f"- Confidence impact: {logging_health.get('confidence_impact', 'unknown')}\n")
-            lines.append("## Module availability")
             lines.append(f"\n## Vehicle scope\n- Primary vehicle: {scope['primary_vehicle']}\n- Copter heuristic confidence: {scope['copter_heuristics_confidence']}\n")
+            if mode_timeline:
+                lines.append("## Mode timeline")
+                lines.append(f"- {mode_decoding_note(scope)}")
+                lines.append("")
+                lines.append("| Raw mode | Decoded mode | Start s | End s | Duration s |")
+                lines.append("|---|---|---:|---:|---:|")
+                for mode in mode_timeline[:100]:
+                    end = "" if mode.get("end_s") is None else f"{mode['end_s']:.3f}"
+                    dur = "" if mode.get("duration_s") is None else f"{mode['duration_s']:.3f}"
+                    lines.append(f"| {mode.get('raw_mode')} | {mode.get('decoded_mode')} | {mode.get('start_s'):.3f} | {end} | {dur} |")
+                lines.append("")
+            lines.append("## Module availability")
             lines.append("| Module | Status | Missing |")
             lines.append("|---|---|---|")
             for name, m in modules.items():

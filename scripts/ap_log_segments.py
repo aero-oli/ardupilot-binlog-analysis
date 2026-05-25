@@ -7,6 +7,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from ap_common import AnalysisError, load_tables, mode_segments_from_tables, write_json
+from ap_modes import mode_decoding_note
 
 
 def main() -> int:
@@ -25,14 +26,14 @@ def main() -> int:
         if durations:
             log_end_s = max(durations)
         segments = mode_segments_from_tables(tables, log_end_s=log_end_s)
-        result = {"tables": args.tables, "segments": segments}
+        result = {"tables": args.tables, "mode_decoding": mode_decoding_note(), "segments": segments}
         write_json(args.json, result)
         if args.summary:
-            lines = ["# ArduPilot mode segments\n", "| Mode | Start s | End s | Duration s |", "|---|---:|---:|---:|"]
+            lines = ["# ArduPilot mode segments\n", f"- {mode_decoding_note()}\n", "| Raw mode | Decoded mode | Start s | End s | Duration s |", "|---|---|---:|---:|---:|"]
             for seg in segments:
                 end = "" if seg.get("end_s") is None else f"{seg['end_s']:.3f}"
                 dur = "" if seg.get("duration_s") is None else f"{seg['duration_s']:.3f}"
-                lines.append(f"| {seg.get('mode')} | {seg.get('start_s'):.3f} | {end} | {dur} |")
+                lines.append(f"| {seg.get('raw_mode')} | {seg.get('decoded_mode', seg.get('mode'))} | {seg.get('start_s'):.3f} | {end} | {dur} |")
             Path(args.summary).parent.mkdir(parents=True, exist_ok=True)
             Path(args.summary).write_text("\n".join(lines) + "\n", encoding="utf-8")
         print(f"Derived {len(segments)} mode segments")
