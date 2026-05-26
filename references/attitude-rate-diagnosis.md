@@ -2,6 +2,8 @@
 
 Use ATT desired vs achieved to confirm the symptom axis. Use RATE desired vs achieved to identify controller tracking. Use PIDR/PIDP terms and flags to identify limiting or noise. Use mapped output channels from RCOU/RCO2/RCO3 to verify actuator saturation and VIBE/FFT for vibration/filtering. Do not tune roll/pitch gains until motor output headroom and vibration are acceptable.
 
+When comparing attitude/rate behaviour across modes, treat POSHOLD and LOITER as navigation-assisted comparison context, not pure manual control. They can show whether a symptom is worse outside AUTO, but they still include position-hold/navigation logic. Do not describe POSHOLD as pure manual control; manual-control conclusions are limited without STABILIZE, ALTHOLD, or ACRO segments.
+
 ## Key checks
 
 - ATT.DesRoll/Roll and ATT.DesPitch/Pitch.

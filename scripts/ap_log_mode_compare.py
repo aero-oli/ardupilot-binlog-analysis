@@ -36,6 +36,14 @@ DEFAULT_COMPARE_MESSAGES = [
     "RCIN", "PARM", "VIBE", "BAT", "POWR", "GPS", "GPS2", "XKF3", "XKF4", "NKF3", "NKF4", "CTUN", "BARO",
 ]
 
+PURE_MANUAL_ATTITUDE_MODES = {"STABILIZE", "ALTHOLD", "ACRO"}
+MANUAL_CONFIDENCE_MODES = {"STABILIZE", "ALTHOLD"}
+NAV_ASSISTED_HOLD_MODES = {"POSHOLD", "LOITER"}
+POSHOLD_MANUAL_LIMITATION = (
+    "POSHOLD/LOITER are not pure manual attitude modes; manual-control conclusions are limited without "
+    "STABILIZE, ALTHOLD, or ACRO segments."
+)
+
 
 def _duration(intervals: Sequence[Dict[str, Any]]) -> float:
     total = 0.0
@@ -244,6 +252,22 @@ def _score_mode(symptom_class, metrics):
     return None
 
 
+def _manual_control_assessment(modes_found):
+    found = set(modes_found or [])
+    limitations = []
+    if found & MANUAL_CONFIDENCE_MODES:
+        confidence = "high"
+    elif found & PURE_MANUAL_ATTITUDE_MODES:
+        confidence = "medium"
+    elif found & NAV_ASSISTED_HOLD_MODES:
+        confidence = "low"
+        limitations.append(POSHOLD_MANUAL_LIMITATION)
+    else:
+        confidence = "low"
+        limitations.append("No STABILIZE, ALTHOLD, or ACRO segments were compared; pure manual-control conclusions are limited.")
+    return confidence, limitations
+
+
 def compare_modes(
     tables,
     *,
@@ -269,6 +293,8 @@ def compare_modes(
 
     per_mode = []
     confidence_limits = []
+    modes_found = []
+    requested_modes_missing = []
     spec = requirement_spec(symptom_class)
     present = set(tables.keys())
     missing = {
@@ -282,8 +308,11 @@ def compare_modes(
             selection = select_analysis_window(tables, mode=mode, log_end_s=log_end_s, vehicle_scope={"primary_vehicle": "Copter"})
         except AnalysisError as exc:
             per_mode.append({"query": mode, "decoded_mode": decoded, "error": str(exc), "intervals_found": [], "intervals_used": [], "metrics": {}})
+            requested_modes_missing.append(decoded)
             confidence_limits.append(f"Mode {mode} could not be compared: {exc}")
             continue
+        if decoded not in modes_found:
+            modes_found.append(decoded)
         selected = filter_tables_by_time(tables, start_s=selection.get("start_s"), end_s=selection.get("end_s"), intervals=selection.get("intervals_used"))
         selection, profile = apply_active_flight_filter(
             selection,
@@ -319,14 +348,21 @@ def compare_modes(
         key=lambda item: item["ranking_score"],
         reverse=True,
     )
+    manual_control_confidence, manual_control_limitations = _manual_control_assessment(modes_found)
+    confidence_limits.extend(manual_control_limitations)
     return {
         "symptom": symptom,
         "symptom_class": symptom_class,
+        "requested_modes": modes,
         "selected_modes": modes,
         "decoded_modes": [decode_copter_mode(m) or mode_label(m) for m in modes],
+        "modes_found": modes_found,
+        "requested_modes_missing": requested_modes_missing,
+        "manual_control_confidence": manual_control_confidence,
+        "manual_control_limitations": manual_control_limitations,
         "mode_comparisons": per_mode,
         "ranking": [{"decoded_mode": m["decoded_mode"], "query": m["query"], "score": m["ranking_score"]} for m in ranked],
-        "confidence_limits": confidence_limits,
+        "confidence_limits": list(dict.fromkeys(confidence_limits)),
         "missing_evidence": missing,
         "diagnostic_aid_note": "Mode comparison is a diagnostic aid for scoping symptoms across flight modes; it is not a final conclusion.",
     }

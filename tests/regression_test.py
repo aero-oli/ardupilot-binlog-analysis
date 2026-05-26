@@ -1116,6 +1116,57 @@ def test_mode_compare_ranks_auto_worse_for_yaw_tracking_with_numeric_modes():
     assert_true(auto["window_quality"]["ground_spool_rows_included"] is True, "mode comparison should record ground/spool contamination")
 
 
+def test_mode_compare_reports_missing_manual_modes_as_manual_control_limit():
+    tables = {
+        "MODE": pd.DataFrame({"TimeS": [0.0, 10.0, 20.0], "Mode": [3, 16, 3]}),
+        "ATT": pd.DataFrame({"TimeS": [1.0, 11.0, 21.0], "DesYaw": [0, 0, 0], "Yaw": [50, 2, 60]}),
+        "RATE": pd.DataFrame({"TimeS": [1.0, 11.0, 21.0], "YDes": [0, 0, 0], "Y": [55, 2, 65], "YOut": [0.8, 0.1, 0.9]}),
+    }
+
+    result = compare_modes(
+        tables,
+        symptom="yaw_misbehaviour",
+        compare_modes=["AUTO", "POSHOLD", "STABILIZE", "ALTHOLD"],
+    )
+
+    assert_true(result["requested_modes"] == ["AUTO", "POSHOLD", "STABILIZE", "ALTHOLD"], "requested modes should be explicit")
+    assert_true(result["modes_found"] == ["AUTO", "POSHOLD"], f"available modes should still be compared: {result['modes_found']}")
+    assert_true(result["requested_modes_missing"] == ["STABILIZE", "ALTHOLD"], f"missing requested modes should be recorded: {result['requested_modes_missing']}")
+    assert_true(result["manual_control_confidence"] == "low", f"POSHOLD-only manual evidence should be low confidence: {result['manual_control_confidence']}")
+    expected = "POSHOLD/LOITER are not pure manual attitude modes; manual-control conclusions are limited without STABILIZE, ALTHOLD, or ACRO segments."
+    assert_true(expected in result["manual_control_limitations"], "manual limitation should be explicit")
+    assert_true(expected in result["confidence_limits"], "manual limitation should also be in confidence limits")
+    assert_true(any(item["decoded_mode"] == "AUTO" and not item.get("error") for item in result["mode_comparisons"]), "available AUTO mode should still be compared")
+
+
+def test_mode_compare_poshold_only_reduces_manual_control_confidence():
+    tables = {
+        "MODE": pd.DataFrame({"TimeS": [0.0, 10.0], "Mode": [16, 16]}),
+        "ATT": pd.DataFrame({"TimeS": [1.0, 2.0], "DesYaw": [0, 0], "Yaw": [1, 2]}),
+        "RATE": pd.DataFrame({"TimeS": [1.0, 2.0], "YDes": [0, 0], "Y": [1, 2], "YOut": [0.1, 0.1]}),
+    }
+
+    result = compare_modes(tables, symptom="yaw_misbehaviour", compare_modes=["POSHOLD"])
+
+    assert_true(result["modes_found"] == ["POSHOLD"], f"POSHOLD should be found: {result['modes_found']}")
+    assert_true(result["manual_control_confidence"] == "low", f"POSHOLD-only comparison should not imply manual control: {result['manual_control_confidence']}")
+    assert_true(any("not pure manual attitude modes" in item for item in result["manual_control_limitations"]), "POSHOLD limitation should be present")
+
+
+def test_mode_compare_althold_improves_manual_control_confidence():
+    tables = {
+        "MODE": pd.DataFrame({"TimeS": [0.0, 10.0, 20.0], "Mode": [16, 2, 16]}),
+        "ATT": pd.DataFrame({"TimeS": [1.0, 11.0, 21.0], "DesYaw": [0, 0, 0], "Yaw": [1, 2, 1]}),
+        "RATE": pd.DataFrame({"TimeS": [1.0, 11.0, 21.0], "YDes": [0, 0, 0], "Y": [1, 2, 1], "YOut": [0.1, 0.1, 0.1]}),
+    }
+
+    result = compare_modes(tables, symptom="yaw_misbehaviour", compare_modes=["POSHOLD", "ALTHOLD"])
+
+    assert_true(result["modes_found"] == ["POSHOLD", "ALTHOLD"], f"POSHOLD and ALTHOLD should be found: {result['modes_found']}")
+    assert_true(result["manual_control_confidence"] in {"medium", "high"}, f"ALTHOLD should improve manual-control confidence: {result['manual_control_confidence']}")
+    assert_true(not any("POSHOLD/LOITER are not pure manual" in item for item in result["manual_control_limitations"]), "pure manual/AltHold segment should remove POSHOLD-only limitation")
+
+
 def test_manifest_recommends_mode_compare_for_mission_symptom():
     index = {"messages": {"ATT": {}, "RATE": {}, "MODE": {}, "CTUN": {}, "RCOU": {}}, "parameters": {}, "errors": [], "events": [], "modes": []}
     manifest = build_manifest_from_index(index, "yaw problem during missions", "flight.bin")
@@ -2786,6 +2837,9 @@ def main():
     test_parameter_context_mission_yaw_includes_rate_accel_and_headroom()
     test_manifest_questions_include_mission_yaw_context_for_auto_symptom()
     test_mode_compare_ranks_auto_worse_for_yaw_tracking_with_numeric_modes()
+    test_mode_compare_reports_missing_manual_modes_as_manual_control_limit()
+    test_mode_compare_poshold_only_reduces_manual_control_confidence()
+    test_mode_compare_althold_improves_manual_control_confidence()
     test_manifest_recommends_mode_compare_for_mission_symptom()
     test_manifest_yaw_mission_wobble_adds_attitude_secondary()
     test_manifest_loiter_drift_toilet_bowling_adds_yaw_secondary()

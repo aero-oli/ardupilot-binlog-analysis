@@ -96,8 +96,12 @@ User report: "yaw misbehaves".
    ```
 
    Treat this as a diagnostic aid: inspect `intervals_found`, `intervals_used`,
-   active-flight criteria, missing evidence, and confidence limits before
-   ranking causes.
+   active-flight criteria, `modes_found`, `requested_modes_missing`,
+   `manual_control_confidence`, `manual_control_limitations`, missing evidence,
+   and confidence limits before ranking causes. POSHOLD and LOITER are useful
+   comparison context but include position-hold/navigation logic. Do not
+   describe POSHOLD as pure manual control; pure manual-control conclusions
+   need STABILIZE, ALTHOLD, or ACRO evidence.
 
 4. Plot yaw desired vs actual signals.
 
