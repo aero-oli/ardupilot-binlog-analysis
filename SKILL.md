@@ -83,6 +83,14 @@ python scripts/ap_methodic_notch_review.py LOG.BIN --out out/methodic_8_1.json -
 
 This tool gathers VIBE/clipping, raw/high-rate IMU or ISBH/ISBD FFT readiness, dominant peaks, PID Dmod/Flags, ESC/RPM evidence, logging health, and current notch parameter context. It gives safe next actions and must not be treated as an automatic notch-parameter setter.
 
+For Methodic 8.2 throttle-controller review, the dispatcher uses the dedicated throttle-controller evidence tool. You may also run it directly:
+
+```bash
+python scripts/ap_methodic_throttle_controller.py LOG.BIN --out out/methodic_8_2.json --summary out/methodic_8_2.md --plots out/plots/methodic_8_2
+```
+
+This tool gathers hover-window quality, `CTUN.ThO`/`CTUN.ThH`, `MOT_THST_HOVER`, altitude target/actual evidence, motor headroom, battery/board power, and vibration evidence. It frames MOT/PSC parameter changes only as review candidates; it must not write parameters or tune from a poor hover.
+
 If the user gives required observations such as motor/ESC heat, audible oscillation, visible shaking, or hard-to-control behaviour, pass them as repeated `--manual-observation` values. If those observations are not available, preserve that as missing evidence; do not promote the step to a clean pass from log evidence alone.
 
 `ap_methodic_step.py` returns a standard schema with `result`, `safety_gate`, `evidence_used`, `missing_evidence`, `manual_observations_required`, `findings`, `parameter_context`, `plots`, `recommended_next_steps`, `what_not_to_do`, `next_methodic_step`, and `confidence_limits`. Treat the step result as structured evidence, not final truth. Inspect the JSON, summary, and plots before writing conclusions yourself.

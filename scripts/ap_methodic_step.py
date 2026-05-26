@@ -15,6 +15,7 @@ from ap_common import AnalysisError, ensure_dir, iter_dataflash_messages, messag
 from ap_methodic_711_motor_oscillation import analyze_motor_oscillation_711
 from ap_methodic_first_flight import analyze_first_flight
 from ap_methodic_notch_review import analyze_notch_review
+from ap_methodic_throttle_controller import analyze_throttle_controller
 from ap_methodic_oscillation import classify_oscillation
 from ap_methodic_rc import analyze_rc_input_contamination
 from ap_methodic_registry import MethodicRegistryError, get_step, load_registry
@@ -41,7 +42,7 @@ STANDARD_SCHEMA_KEYS = [
     "confidence_limits",
 ]
 
-STEP_IMPLEMENTATIONS = {"7.1": "analyze_7_1", "7.1.1": "analyze_7_1_1", "8.1": "analyze_8_1"}
+STEP_IMPLEMENTATIONS = {"7.1": "analyze_7_1", "7.1.1": "analyze_7_1_1", "8.1": "analyze_8_1", "8.2": "analyze_8_2"}
 
 
 def empty_result(step: dict[str, Any]) -> dict[str, Any]:
@@ -448,6 +449,26 @@ def analyze_8_1(log_path: Path, step: dict[str, Any], plots_dir: Path | None, ma
             "Do not set notch parameters from an unreadable or empty log.",
         ]
         result["confidence_limits"] = ["No deterministic 8.1 evidence was available because log parsing failed."]
+        return normalize_schema(result)
+
+
+def analyze_8_2(log_path: Path, step: dict[str, Any], plots_dir: Path | None, manual_observations: list[str]) -> dict[str, Any]:
+    try:
+        result = analyze_throttle_controller(log_path, plots_dir=plots_dir)
+        if manual_observations:
+            result["evidence_used"].append({"type": "manual_observations_provided_to_dispatcher", "value": manual_observations})
+        return result
+    except Exception as exc:
+        result = empty_result(step)
+        result["result"] = "inconclusive"
+        result["safety_gate"] = "repeat_step"
+        result["missing_evidence"] = [f"Step 8.2 throttle-controller evidence could not be read: {exc}"]
+        result["checked_but_not_supported"] = ["methodic_8_2_throttle_controller"]
+        result["recommended_next_steps"] = [
+            "Collect a readable DataFlash log with CTUN, ATT, RATE, RCOU/RCO2/RCO3, PARM, and a stable hover before classifying Methodic 8.2.",
+            "Do not write throttle-controller parameter changes from an unreadable or unsafe hover log.",
+        ]
+        result["confidence_limits"] = ["No deterministic 8.2 evidence was available because log parsing failed."]
         return normalize_schema(result)
 
 
