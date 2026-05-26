@@ -207,6 +207,7 @@ python tests/methodic_first_flight_test.py
 python tests/methodic_711_test.py
 python tests/methodic_notch_review_test.py
 python tests/methodic_throttle_controller_test.py
+python tests/methodic_pid_notch_review_test.py
 python - <<'PY'
 import sys
 sys.path.insert(0, "scripts")
