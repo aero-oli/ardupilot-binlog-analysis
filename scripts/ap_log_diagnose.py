@@ -22,6 +22,7 @@ from ap_compass_yaw import build_compass_yaw_investigation, write_compass_yaw_pl
 from ap_param_context import merge_external_parameters, parse_param_file
 from ap_parameters import select_relevant_parameters
 from ap_rcin import build_command_response_investigation, rcin_channel_col, rc_channel_mapping, summarize_rcin
+from ap_timeline_context import build_events_relative_to_window
 from ap_units import value_with_unit
 from ap_vibration import add_vibration_assessment_findings, build_vibration_assessment
 from ap_log_investigation_manifest import _next_evidence_gathering
@@ -903,7 +904,7 @@ def main() -> int:
         else:
             spec = requirement_spec(symptom_class)
             include = []
-            for msg in spec["required_messages"] + spec["strongly_recommended_messages"] + spec["optional_context_messages"] + ["PARM"]:
+            for msg in spec["required_messages"] + spec["strongly_recommended_messages"] + spec["optional_context_messages"] + ["PARM", "ARM"]:
                 if msg not in include:
                     include.append(msg)
             if any([args.mode, args.around_msg, args.around_event, args.around_error, args.takeoff_only, args.hover_candidates, args.high_throttle_only, args.airborne_only, args.active_flight_only, args.exclude_ground_spool]):
@@ -977,6 +978,7 @@ def main() -> int:
             window_tables=tables,
             analysis_window=selection,
         )
+        events_relative_to_window = build_events_relative_to_window(full_tables, selection)
         rcin_summary = summarize_rcin(tables, parameter_index)
         parameter_context = select_relevant_parameters(symptom_class, index=parameter_index, tables=full_tables)
         control_evidence_completeness = build_control_evidence_completeness(
@@ -1045,6 +1047,7 @@ def main() -> int:
             "analysis_window": selection,
             "analysis_window_units": {"start_s": "s", "end_s": "s"},
             "window_quality": window_quality,
+            "events_relative_to_window": events_relative_to_window,
             "log": {"file": args.log, "vehicle": index.get("vehicle"), "firmware": index.get("firmware"), "duration_s": index.get("duration_s")},
             "units": {"log.duration_s": "s"},
             "parser": stats,

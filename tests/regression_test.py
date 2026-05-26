@@ -27,6 +27,7 @@ from ap_log_diagnose import add_event_findings
 from ap_err_decode import decode_err_entries
 from ap_evidence_completeness import build_control_evidence_completeness
 from ap_log_extract import write_jsonl_stream
+from ap_timeline_context import build_events_relative_to_window
 from ap_log_diagnose import make_targeted_plots_from_tables
 from ap_log_fft import fft_from_isb_rows, fft_from_tables
 from ap_log_investigation_manifest import build_manifest_from_index, validate_recommended_plot_groups
@@ -1135,6 +1136,49 @@ def test_control_evidence_completeness_fft_unusable_adds_confidence_limit():
 
     assert_true(completeness["fft"] == "unusable", f"unusable FFT should be reported: {completeness}")
     assert_true(any("FFT unusable" in item and "sparse or irregular" in item for item in completeness["confidence_limits"]), "FFT unusable reason should limit vibration/filter confidence")
+
+
+def test_timeline_context_post_window_warning_is_not_in_window_cause():
+    tables = {
+        "MSG": pd.DataFrame({
+            "TimeS": [5.0, 42.0],
+            "Message": ["mission yaw started", "PreArm: Compass not healthy"],
+        }),
+    }
+    result = build_events_relative_to_window(tables, {"intervals_used": [{"start_s": 10.0, "end_s": 20.0}]})
+
+    inside_text = "\n".join(item["label"] for item in result["inside_window"])
+    after_text = "\n".join(item["label"] for item in result["after_window"])
+    assert_true("Compass not healthy" not in inside_text, "post-window compass warning must not be treated as in-window cause")
+    assert_true("Compass not healthy" in after_text, "post-window compass warning should remain visible as safety context")
+    assert_true(any("safety context for the next flight" in item for item in result["interpretation_hints"]["after_window"]), "after-window hint should preserve safety relevance without causality")
+
+
+def test_timeline_context_in_window_err_is_candidate_causal_evidence():
+    tables = {"ERR": pd.DataFrame({"TimeS": [12.0], "Subsys": [11], "ECode": [2]})}
+    result = build_events_relative_to_window(tables, {"intervals_used": [{"start_s": 10.0, "end_s": 20.0}]})
+
+    assert_true(result["inside_window"][0]["source"] == "ERR", "in-window ERR should be classified inside the symptom window")
+    assert_true("candidate causal/supporting evidence" in result["interpretation_hints"]["inside_window"][0], "inside-window hint should carry more causal weight")
+
+
+def test_timeline_context_multiple_mode_intervals_classify_correctly():
+    tables = {
+        "MODE": pd.DataFrame({"TimeS": [5.0, 12.0, 25.0, 35.0], "Mode": ["STABILIZE", "AUTO", "POSHOLD", "AUTO"]}),
+        "EV": pd.DataFrame({"TimeS": [32.0], "Id": [17]}),
+        "ARM": pd.DataFrame({"TimeS": [2.0, 45.0], "Armed": [1, 0], "Reason": ["armed", "disarmed"]}),
+    }
+    result = build_events_relative_to_window(
+        tables,
+        {"intervals_used": [{"start_s": 10.0, "end_s": 20.0}, {"start_s": 30.0, "end_s": 40.0}]},
+    )
+
+    inside = [(item["source"], item["time_s"]) for item in result["inside_window"]]
+    before = [(item["source"], item["time_s"]) for item in result["before_window"]]
+    after = [(item["source"], item["time_s"]) for item in result["after_window"]]
+    assert_true(("MODE", 12.0) in inside and ("EV", 32.0) in inside and ("MODE", 35.0) in inside, f"events inside either selected interval should be inside: {inside}")
+    assert_true(("ARM", 2.0) in before and ("MODE", 5.0) in before, f"events before first interval should be before: {before}")
+    assert_true(("ARM", 45.0) in after, f"events after last interval should be after: {after}")
 
 
 def test_mode_compare_ranks_auto_worse_for_yaw_tracking_with_numeric_modes():
@@ -3052,6 +3096,9 @@ def main():
     test_control_evidence_completeness_missing_pid_and_esc_is_medium_for_yaw()
     test_control_evidence_completeness_missing_att_rate_is_low()
     test_control_evidence_completeness_fft_unusable_adds_confidence_limit()
+    test_timeline_context_post_window_warning_is_not_in_window_cause()
+    test_timeline_context_in_window_err_is_candidate_causal_evidence()
+    test_timeline_context_multiple_mode_intervals_classify_correctly()
     test_mode_compare_ranks_auto_worse_for_yaw_tracking_with_numeric_modes()
     test_mode_compare_auto_mission_yaw_demand_near_configured_rate_limit()
     test_mode_compare_mission_yaw_decodes_wp_yaw_behavior()

@@ -50,16 +50,26 @@ Use this as an operating sequence before forming conclusions. The scripts provid
 
    Battery sag, high current, board power flags, high vibration, and clipping are relevant when they occur in the symptom window or correlate with the affected signal. Whole-log maxima are context unless timing supports relevance.
 
-9. Treat script findings as hypotheses.
+9. Separate in-window timeline evidence from outside-window context.
+
+   Inspect `events_relative_to_window` in `diagnosis.json` or the evidence
+   digest. `inside_window` entries are candidate causal/supporting evidence.
+   `before_window` entries are setup or precondition context. `after_window`
+   entries, including post-flight or disarmed compass/GPS/power/radio warnings,
+   may be safety-critical for the next flight but are not direct proof of the
+   selected in-flight symptom unless timing links them. Use
+   `timeline-interpretation.md` when writing this distinction.
+
+10. Treat script findings as hypotheses.
 
    A finding means a threshold or rule fired. Confirm it against plots, timing, available messages, and missing evidence before ranking it as a likely cause.
 
-10. Always state missing data and confidence limits.
+11. Always state missing data and confidence limits.
 
    Separate missing required data from missing strongly recommended or optional context. Explain when log dropouts, timestamp gaps, message sparsity, absent RCIN, absent ESC telemetry, or missing parameters limit confidence.
    If the current log is insufficient, use `logging-configuration-for-investigation.md` to describe the missing logging/messages and `evidence-gathering-flights.md` to choose the safest next evidence-gathering activity. The next step may be a parameter dump, bench inspection, ground test, restrained test, or controlled flight.
 
-11. For safety-relevant cases, build a next-step planning aid after diagnosis and any mode comparison outputs exist.
+12. For safety-relevant cases, build a next-step planning aid after diagnosis and any mode comparison outputs exist.
 
    ```bash
    python scripts/ap_next_steps.py --diagnosis out/diagnosis.json --mode-compare out/mode_compare.json --param-lookup out/param_lookup.json --fft out/fft.json --manifest out/investigation.json --json out/next_steps.json --summary out/next_steps.md
@@ -67,7 +77,7 @@ Use this as an operating sequence before forming conclusions. The scripts provid
 
    Pass only the outputs that exist. Inspect the generated plan for the immediate safety gate, bench checks, logging/configuration checks, controlled evidence capture, reanalysis, and what not to do. Treat it as planning guidance, not an automatic final diagnosis.
 
-12. Do not recommend unsafe flight or disabling checks.
+13. Do not recommend unsafe flight or disabling checks.
 
     Never declare the aircraft safe from a log alone. Do not recommend disabling arming, EKF, GPS, compass, battery, logging, or failsafe checks as a routine fix. Prefer targeted inspection, bench verification, and conservative ground checks.
 
@@ -123,7 +133,14 @@ User report: "yaw misbehaves".
 
    Check whether voltage sag, high current, power flags, high vibration, or clipping occurred in the same window as yaw error or output saturation. If they occurred elsewhere, list them as context rather than cause.
 
-8. Build the next-step plan if the case is safety-relevant.
+8. Inspect `events_relative_to_window`.
+
+   Confirm whether compass, GPS yaw, battery failsafe, radio failsafe, ERR, EV,
+   ARM, or mode-change entries occurred during the AUTO/yaw symptom interval.
+   If they occurred after landing or while disarmed, keep them as safety context
+   and next-flight checks rather than proof of the in-mission yaw issue.
+
+9. Build the next-step plan if the case is safety-relevant.
 
    ```bash
    python scripts/ap_next_steps.py --diagnosis out/diagnosis.json --mode-compare out/mode_compare.json --manifest out/investigation.json --json out/next_steps.json --summary out/next_steps.md
@@ -131,7 +148,7 @@ User report: "yaw misbehaves".
 
    Use it to make sure the final answer includes the ordered safety gate, bench checks, logging improvements, controlled capture if safe, reanalysis, and what not to do.
 
-9. Form a ranked conclusion only after the evidence is checked.
+10. Form a ranked conclusion only after the evidence is checked.
 
    Rank likely causes by the strongest time-aligned evidence. Include checked-but-not-supported hypotheses, missing evidence, confidence limits, and safety-critical checks before further flight.
 

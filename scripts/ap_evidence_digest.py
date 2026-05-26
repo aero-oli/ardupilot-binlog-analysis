@@ -166,6 +166,14 @@ def _fft_status(fft):
 
 def _timeline_context(diagnosis, manifest):
     out = []
+    relative = (diagnosis or {}).get("events_relative_to_window") or (manifest or {}).get("events_relative_to_window") or {}
+    for key, label in [
+        ("inside_window", "inside-window"),
+        ("before_window", "before-window"),
+        ("after_window", "after-window"),
+    ]:
+        for item in relative.get(key, [])[:8]:
+            out.append(f"{label} {item.get('source')} t={item.get('time_s')}: {item.get('label')}")
     for source in [diagnosis or {}, manifest or {}]:
         for key in ["decoded_errors", "timeline", "events", "warnings"]:
             value = source.get(key)
@@ -190,12 +198,19 @@ def _in_window_evidence(diagnosis):
         out.append(f"{label}: start_s={start}, end_s={end}")
     for finding in diagnosis.get("findings", []) or []:
         out.append(_finding_label(finding))
+    relative = diagnosis.get("events_relative_to_window") or {}
+    for item in relative.get("inside_window", [])[:8]:
+        out.append(f"inside-window {item.get('source')} t={item.get('time_s')}: {item.get('label')}")
     return _dedupe(out)
 
 
 def _post_flight_prearm_context(diagnosis, manifest):
     out = []
     keywords = ("prearm", "pre-arm", "post-flight", "post flight", "disarm", "arming", "failsafe")
+    for source in [diagnosis or {}, manifest or {}]:
+        relative = source.get("events_relative_to_window") or {}
+        for item in relative.get("after_window", [])[:12]:
+            out.append(f"after-window {item.get('source')} t={item.get('time_s')}: {item.get('label')}")
     for item in _timeline_context(diagnosis, manifest):
         if any(keyword in item.lower() for keyword in keywords):
             out.append(item)
