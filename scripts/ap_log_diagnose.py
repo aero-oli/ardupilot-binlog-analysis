@@ -24,6 +24,7 @@ from ap_rcin import build_command_response_investigation, rcin_channel_col, rc_c
 from ap_units import value_with_unit
 from ap_vibration import add_vibration_assessment_findings, build_vibration_assessment
 from ap_log_investigation_manifest import _next_evidence_gathering
+from ap_err_decode import decode_err_entries
 
 
 ACTUATOR_OUTPUT_MESSAGES = ("RCOU", "RCO2", "RCO3")
@@ -372,14 +373,24 @@ def limit_confidence_for_logging_health(findings, checked, logging_health):
 
 def add_event_findings(index, findings, checked):
     errors = index.get("errors", [])
+    decoded_errors = index.get("decoded_errors") or decode_err_entries(errors)
     events = index.get("events", [])
     modes = index.get("modes", [])
     if errors:
+        evidence = []
+        for i, raw in enumerate(errors[:10]):
+            decoded = decoded_errors[i] if i < len(decoded_errors) else None
+            if decoded:
+                evidence.append(
+                    f"ERR t={decoded.get('time_s')} Subsys={decoded.get('subsys')} ECode={decoded.get('ecode')}: "
+                    f"{decoded.get('meaning')} ({decoded.get('confidence')}); {decoded.get('caveat')}"
+                )
+            evidence.append(str(raw))
         add_finding(
             findings, 1, "Log contains ERR messages/failsafe-related entries", "safety-critical", "high",
-            [str(e) for e in errors[:10]],
+            evidence[:20],
             "Subsystem errors and failsafe-related entries can explain sudden behaviour changes and should be placed first in the timeline.",
-            ["Review ERR Subsys/ECode meanings", "Correlate ERR entries with MODE, EV, MSG, RC input and control symptoms"],
+            ["Use local ERR decoder/reference for Subsys/ECode context", "Correlate ERR entries with MODE, EV, MSG, RC input and control symptoms"],
         )
     else:
         checked.append({"check": "ERR timeline", "result": "No ERR rows were indexed"})
@@ -906,6 +917,7 @@ def main() -> int:
             end_s=window["end_s"],
             armed_only=args.armed_only,
         )
+        index["decoded_errors"] = decode_err_entries(index.get("errors", []))
         external_parameter_context = parse_param_file(args.params) if args.params else None
         merged_params = merge_external_parameters(index, external_parameter_context)
         parameter_index = merged_params["index"]

@@ -43,6 +43,14 @@ For the investigation sequence, use `references/how-to-investigate.md`: validate
 
 If validation or indexing reports parse errors, bad-byte skips, logging dropouts, missing timebase, missing core messages after arm, no `FMT`, no `PARM`, or likely truncated/partial data, consult `references/corrupt-or-incomplete-log.md` before writing conclusions. Treat missing evidence in damaged logs as a confidence limit, not proof that a fault was absent.
 
+When logs contain `ERR` rows, use the local ERR decoder and `references/err-subsys-ecode.md` before web searching for common `ERR.Subsys`/`ERR.ECode` context:
+
+```bash
+python scripts/ap_err_decode.py --index out/index.json --json out/err_decode.json
+```
+
+If the decoder confidence is `unknown`, state that the local mapping does not identify the code and avoid assigning a specific cause without firmware-specific evidence.
+
 ## Analysis modes
 
 Choose the mode from the user's request. If the user reports a symptom, symptom-led diagnosis has priority over a general review.

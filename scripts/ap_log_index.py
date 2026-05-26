@@ -5,6 +5,7 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from ap_common import AnalysisError, collect_dataflash, message_inventory_markdown, write_json
+from ap_err_decode import decode_err_entries
 
 def main() -> int:
     p = argparse.ArgumentParser(description="Index an ArduPilot DataFlash log: messages, fields, parameters, events, errors, modes.")
@@ -17,6 +18,7 @@ def main() -> int:
     try:
         include = [m.strip().upper() for m in args.messages.split(",") if m.strip()] if args.messages else []
         _rows, index, _stats = collect_dataflash(args.log, include=include, max_messages=args.max_messages)
+        index["decoded_errors"] = decode_err_entries(index.get("errors", []))
         write_json(args.json, index)
         if args.summary:
             Path(args.summary).parent.mkdir(parents=True, exist_ok=True)

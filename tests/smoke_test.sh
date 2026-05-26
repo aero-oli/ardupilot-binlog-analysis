@@ -72,6 +72,8 @@ for required in [
     "manual_control_confidence",
     "manual_control_limitations",
     "do not describe POSHOLD as pure manual control",
+    "references/err-subsys-ecode.md",
+    "python scripts/ap_err_decode.py",
     "python scripts/ap_case_investigate.py",
     "python scripts/ap_log_diagnose_modes.py",
     "python scripts/ap_next_steps.py",

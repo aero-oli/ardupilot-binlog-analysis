@@ -23,6 +23,8 @@ from ap_log_diagnose import diagnosis_missing
 from ap_log_diagnose import build_cannot_conclude
 from ap_log_diagnose import diagnose_by_class
 from ap_log_diagnose import diagnose_yaw
+from ap_log_diagnose import add_event_findings
+from ap_err_decode import decode_err_entries
 from ap_log_extract import write_jsonl_stream
 from ap_log_diagnose import make_targeted_plots_from_tables
 from ap_log_fft import fft_from_isb_rows, fft_from_tables
@@ -1218,6 +1220,39 @@ def test_event_markers_collect_mode_err_ev_msg():
     assert_true(any("LOITER" in x for x in labels), "mode marker should be present")
     assert_true(any("ERR" in x for x in labels), "ERR marker should be present")
     assert_true(any("EV" in x for x in labels), "EV marker should be present")
+
+
+def test_err_decode_known_code_is_caveated_context():
+    decoded = decode_err_entries([{"time_s": 12.3, "subsys": 5, "ecode": 1}])
+
+    assert_true(decoded[0]["meaning"] == "Radio failsafe triggered", f"known code should decode conservatively: {decoded}")
+    assert_true(decoded[0]["confidence"] == "known_mapping", "known code should carry known_mapping confidence")
+    assert_true("firmware" in decoded[0]["caveat"].lower(), "decoded ERR rows should include firmware caveat")
+
+
+def test_err_decode_unknown_code_remains_unknown():
+    decoded = decode_err_entries([{"time_s": 12.3, "subsys": 999, "ecode": 42}])
+
+    assert_true(decoded[0]["meaning"] == "Unknown ERR Subsys/ECode", f"unknown code should not be guessed: {decoded}")
+    assert_true(decoded[0]["confidence"] == "unknown", "unknown code should carry unknown confidence")
+    assert_true("do not infer" in decoded[0]["caveat"].lower(), "unknown code should warn against overinterpretation")
+
+
+def test_event_findings_include_decoded_err_context_when_available():
+    findings = []
+    checked = []
+    index = {
+        "errors": [{"time_s": 12.3, "subsys": 5, "ecode": 1}],
+        "decoded_errors": decode_err_entries([{"time_s": 12.3, "subsys": 5, "ecode": 1}]),
+        "events": [],
+        "modes": [],
+    }
+
+    add_event_findings(index, findings, checked)
+
+    evidence = "\n".join(str(item) for item in findings[0]["evidence"])
+    assert_true("Radio failsafe triggered" in evidence, f"decoded ERR meaning should be included with raw rows: {evidence}")
+    assert_true("Subsys=5 ECode=1" in evidence, f"raw ERR ids should remain visible: {evidence}")
 
 
 def test_mode_segments_are_derived_from_mode_rows():
@@ -2845,6 +2880,9 @@ def main():
     test_manifest_loiter_drift_toilet_bowling_adds_yaw_secondary()
     test_manifest_motor_pulsed_then_dropped_adds_power_or_crash_secondary()
     test_event_markers_collect_mode_err_ev_msg()
+    test_err_decode_known_code_is_caveated_context()
+    test_err_decode_unknown_code_remains_unknown()
+    test_event_findings_include_decoded_err_context_when_available()
     test_mode_segments_are_derived_from_mode_rows()
     test_validate_marks_non_copter_scope_as_partial()
     test_vibe_clip_variants_are_detected()

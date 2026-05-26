@@ -1368,10 +1368,12 @@ def message_inventory_markdown(index: Dict[str, Any]) -> str:
         lines.append(f"| `{name}` | {info.get('count')} | {fields} |")
     if index.get("errors"):
         lines.append("\n## ERR messages\n")
-        lines.append("| Time s | Subsys | ECode |")
-        lines.append("|---:|---:|---:|")
-        for e in index["errors"][:50]:
-            lines.append(f"| {fmt(e.get('time_s'))} | {e.get('subsys')} | {e.get('ecode')} |")
+        decoded_errors = index.get("decoded_errors", [])
+        lines.append("| Time s | Subsys | ECode | Meaning | Confidence |")
+        lines.append("|---:|---:|---:|---|---|")
+        for i, e in enumerate(index["errors"][:50]):
+            decoded = decoded_errors[i] if i < len(decoded_errors) else {}
+            lines.append(f"| {fmt(e.get('time_s'))} | {e.get('subsys')} | {e.get('ecode')} | {decoded.get('meaning', '')} | {decoded.get('confidence', '')} |")
     if index.get("modes"):
         timeline = mode_timeline_from_rows(index["modes"], log_end_s=index.get("end_time_s"))
         lines.append("\n## Mode timeline\n")
