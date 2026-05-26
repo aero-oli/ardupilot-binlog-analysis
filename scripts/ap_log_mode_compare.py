@@ -27,6 +27,8 @@ from ap_common import (
     write_json,
 )
 from ap_modes import decode_copter_mode, mode_label
+from ap_param_context import merge_external_parameters, parse_param_file
+from ap_parameters import enrich_parameter_entry
 from ap_rcin import rc_channel_mapping, rcin_channel_col
 from ap_symptom_map import requirement_spec
 
@@ -43,6 +45,7 @@ POSHOLD_MANUAL_LIMITATION = (
     "POSHOLD/LOITER are not pure manual attitude modes; manual-control conclusions are limited without "
     "STABILIZE, ALTHOLD, or ACRO segments."
 )
+MISSION_YAW_MODES = {"AUTO", "RTL", "GUIDED", "SMART_RTL"}
 
 
 def _duration(intervals: Sequence[Dict[str, Any]]) -> float:
@@ -96,6 +99,86 @@ def _series_abs_stats(df, col):
     if not values:
         return None
     return {"samples": len(values), "p95_abs": percentile(values, 95), "max_abs": max(values)}
+
+
+def _parameter_value(index, name):
+    params = (index or {}).get("parameters") or {}
+    return safe_float(params.get(name))
+
+
+def _wp_yaw_behavior_context(index):
+    value = _parameter_value(index, "WP_YAW_BEHAVIOR")
+    if value is None:
+        return {
+            "value": None,
+            "meaning": None,
+            "caveat": "WP_YAW_BEHAVIOR is missing from available parameter context.",
+        }
+    enriched = enrich_parameter_entry({"name": "WP_YAW_BEHAVIOR", "value": value})
+    return {
+        "value": value,
+        "meaning": enriched.get("enum_value"),
+        "metadata_caveat": enriched.get("metadata_caveat"),
+    }
+
+
+def _mission_yaw_hint(ydes_p95, y_p95, error_p95, near_rate_limit):
+    high_demand = False
+    if ydes_p95 is not None:
+        high_demand = ydes_p95 >= 20.0 or bool(near_rate_limit)
+    high_error = error_p95 is not None and error_p95 >= 10.0
+    good_tracking = error_p95 is not None and ydes_p95 is not None and error_p95 <= max(5.0, ydes_p95 * 0.25)
+    low_demand_actual_motion = ydes_p95 is not None and y_p95 is not None and ydes_p95 <= 5.0 and y_p95 >= 10.0
+    if high_demand and high_error:
+        return "High mission yaw demand and high tracking error: yaw demand may exceed aircraft response; verify actuator authority, vibration/power, and mission geometry before tuning."
+    if high_demand and good_tracking:
+        return "Mission yaw demand is high but tracked; review mission geometry and WP_YAW_BEHAVIOR before treating this as a tune fault."
+    if low_demand_actual_motion:
+        return "Low commanded yaw but actual yaw movement is present; inspect uncommanded yaw, estimator/yaw-source, mechanical, or disturbance hypotheses."
+    return "Mission yaw demand context only; do not treat parameter values alone as cause or as automatic tuning advice."
+
+
+def _mission_yaw_demand(tables, *, index=None, decoded_mode=None):
+    if decoded_mode not in MISSION_YAW_MODES:
+        return None
+    rate = tables.get("RATE")
+    if rate is None or not hasattr(rate, "columns") or "YDes" not in rate.columns or "Y" not in rate.columns:
+        return None
+    ydes = _series_abs_stats(rate, "YDes") or {}
+    y_actual = _series_abs_stats(rate, "Y") or {}
+    yout = _series_abs_stats(rate, "YOut") or {}
+    tracking = _tracking_stats(rate, "YDes", "Y") or {}
+    ydes_p95 = ydes.get("p95_abs")
+    y_p95 = y_actual.get("p95_abs")
+    error_p95 = tracking.get("p95_abs")
+    atc_rate_y_max = _parameter_value(index, "ATC_RATE_Y_MAX")
+    atc_accel_y_max = _parameter_value(index, "ATC_ACCEL_Y_MAX")
+    near_rate_limit = False
+    if atc_rate_y_max is not None and atc_rate_y_max > 0 and ydes_p95 is not None:
+        near_rate_limit = ydes_p95 >= atc_rate_y_max * 0.9
+    missing = [
+        name for name, value in [
+            ("ATC_RATE_Y_MAX", atc_rate_y_max),
+            ("ATC_ACCEL_Y_MAX", atc_accel_y_max),
+            ("WP_YAW_BEHAVIOR", _parameter_value(index, "WP_YAW_BEHAVIOR")),
+        ] if value is None
+    ]
+    demand = {
+        "RATE.YDes_p95_abs": ydes_p95,
+        "RATE.YDes_max_abs": ydes.get("max_abs"),
+        "RATE.Y_p95_abs": y_p95,
+        "tracking_error_p95_abs": error_p95,
+        "RATE.YOut_p95_abs": yout.get("p95_abs"),
+        "ATC_RATE_Y_MAX": atc_rate_y_max,
+        "ATC_ACCEL_Y_MAX": atc_accel_y_max,
+        "WP_YAW_BEHAVIOR": _wp_yaw_behavior_context(index),
+        "demand_near_configured_rate_limit": near_rate_limit,
+        "interpretation_hint": _mission_yaw_hint(ydes_p95, y_p95, error_p95, near_rate_limit),
+        "caveat": "This is derived mission-yaw context. It does not prove that a parameter caused the issue and must be read with mode, estimator, vibration, power, and actuator evidence.",
+    }
+    if missing:
+        demand["parameter_caveat"] = "Mission-yaw parameter context is missing: " + ", ".join(missing) + ". Interpret demand without treating absent values as defaults."
+    return demand
 
 
 def _pid_context(tables, message):
@@ -213,12 +296,15 @@ def _event_summary(tables):
     }
 
 
-def _mode_metrics(symptom_class, tables, index=None):
+def _mode_metrics(symptom_class, tables, index=None, decoded_mode=None):
     metrics: Dict[str, Any] = {"events": _event_summary(tables)}
     if symptom_class == "yaw_misbehaviour":
         metrics["att_yaw_error"] = _tracking_stats(tables.get("ATT"), "DesYaw", "Yaw", angle=True)
         metrics["rate_y_error"] = _tracking_stats(tables.get("RATE"), "YDes", "Y")
         metrics["rate_yout"] = _series_abs_stats(tables.get("RATE"), "YOut")
+        mission_yaw = _mission_yaw_demand(tables, index=index, decoded_mode=decoded_mode)
+        if mission_yaw:
+            metrics["mission_yaw_demand"] = mission_yaw
         metrics["rcin_yaw_active_pct"] = _rcin_yaw_active_pct(tables, index=index)
         metrics["pidy"] = _pid_context(tables, "PIDY")
     elif symptom_class == "attitude_rate_issue":
@@ -324,7 +410,7 @@ def compare_modes(
             min_throttle=min_throttle,
         )
         mode_tables = filter_tables_by_time(selected, start_s=selection.get("start_s"), end_s=selection.get("end_s"), intervals=selection.get("intervals_used"))
-        metrics = _mode_metrics(symptom_class, mode_tables, index=index)
+        metrics = _mode_metrics(symptom_class, mode_tables, index=index, decoded_mode=decoded)
         duration = _duration(selection.get("intervals_used", []))
         if duration < 2.0:
             confidence_limits.append(f"Mode {decoded} has a short comparison duration ({duration:.2f}s); do not over-interpret ranking.")
@@ -429,10 +515,14 @@ def main() -> int:
     p.add_argument("--json", default="mode_compare.json")
     p.add_argument("--plots", default=None)
     p.add_argument("--max-messages", type=int, default=None)
+    p.add_argument("--params", help="Optional external .param file to supplement missing logged parameters")
     args = p.parse_args()
     try:
         include = list(DEFAULT_COMPARE_MESSAGES)
         rows, index, stats = collect_dataflash(args.log, include=include, max_messages=args.max_messages)
+        external_parameter_context = parse_param_file(args.params) if args.params else None
+        merged_params = merge_external_parameters(index, external_parameter_context)
+        parameter_index = merged_params["index"]
         tables = {typ: rows_to_dataframe(data) for typ, data in rows.items() if data and typ not in {"FMT", "FMTU"}}
         result = compare_modes(
             tables,
@@ -443,10 +533,15 @@ def main() -> int:
             exclude_ground_spool=args.exclude_ground_spool,
             min_alt=args.min_alt,
             min_throttle=args.min_throttle,
-            index=index,
+            index=parameter_index,
         )
         result["log"] = {"file": args.log, "vehicle": index.get("vehicle"), "firmware": index.get("firmware")}
         result["parser"] = stats
+        result["parameter_source_precedence"] = merged_params["parameter_source_precedence"]
+        result["parameter_conflicts"] = merged_params["parameter_conflicts"]
+        result["supplemented_parameters"] = merged_params["supplemented_parameters"]
+        if external_parameter_context:
+            result["external_parameter_context"] = external_parameter_context
         if args.plots:
             result["plots"] = _plot_series_by_mode(result, args.plots)
         write_json(args.json, result)

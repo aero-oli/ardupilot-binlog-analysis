@@ -1119,6 +1119,61 @@ def test_mode_compare_ranks_auto_worse_for_yaw_tracking_with_numeric_modes():
     assert_true(auto["window_quality"]["ground_spool_rows_included"] is True, "mode comparison should record ground/spool contamination")
 
 
+def test_mode_compare_auto_mission_yaw_demand_near_configured_rate_limit():
+    tables = {
+        "MODE": pd.DataFrame({"TimeS": [0.0, 10.0], "Mode": [3, 16]}),
+        "RATE": pd.DataFrame({
+            "TimeS": [1.0, 2.0, 3.0, 4.0],
+            "YDes": [30.0, 34.0, 35.0, 33.0],
+            "Y": [8.0, 12.0, 14.0, 15.0],
+            "YOut": [0.60, 0.72, 0.82, 0.76],
+        }),
+    }
+    result = compare_modes(
+        tables,
+        symptom="yaw_misbehaviour",
+        compare_modes=["AUTO"],
+        index={"parameters": {"ATC_RATE_Y_MAX": 35, "ATC_ACCEL_Y_MAX": 36000, "WP_YAW_BEHAVIOR": 2}},
+    )
+
+    demand = result["mode_comparisons"][0]["metrics"]["mission_yaw_demand"]
+    assert_true(demand["ATC_RATE_Y_MAX"] == 35.0, "mission yaw demand should include configured yaw-rate limit")
+    assert_true(demand["demand_near_configured_rate_limit"] is True, "YDes near ATC_RATE_Y_MAX should be flagged")
+    assert_true(demand["tracking_error_p95_abs"] > 15.0, "tracking error should be summarized")
+    assert_true("may exceed aircraft response" in demand["interpretation_hint"], "high demand plus tracking error should be caveated as response/authority evidence")
+
+
+def test_mode_compare_mission_yaw_decodes_wp_yaw_behavior():
+    tables = {
+        "MODE": pd.DataFrame({"TimeS": [0.0, 10.0], "Mode": [3, 16]}),
+        "RATE": pd.DataFrame({"TimeS": [1.0, 2.0], "YDes": [12.0, 14.0], "Y": [11.5, 13.8], "YOut": [0.2, 0.22]}),
+    }
+    result = compare_modes(
+        tables,
+        symptom="yaw_misbehaviour",
+        compare_modes=["AUTO"],
+        index={"parameters": {"WP_YAW_BEHAVIOR": 2}},
+    )
+
+    wp_yaw = result["mode_comparisons"][0]["metrics"]["mission_yaw_demand"]["WP_YAW_BEHAVIOR"]
+    assert_true(wp_yaw["value"] == 2.0, "WP_YAW_BEHAVIOR value should be retained")
+    assert_true(wp_yaw["meaning"] == "Face next waypoint except RTL", "WP_YAW_BEHAVIOR enum should be decoded from metadata")
+
+
+def test_mode_compare_mission_yaw_missing_params_adds_caveat_not_failure():
+    tables = {
+        "MODE": pd.DataFrame({"TimeS": [0.0, 10.0], "Mode": [3, 16]}),
+        "RATE": pd.DataFrame({"TimeS": [1.0, 2.0], "YDes": [3.0, 4.0], "Y": [14.0, 15.0], "YOut": [0.15, 0.17]}),
+    }
+    result = compare_modes(tables, symptom="yaw_misbehaviour", compare_modes=["AUTO"], index={"parameters": {}})
+
+    demand = result["mode_comparisons"][0]["metrics"]["mission_yaw_demand"]
+    assert_true(demand["ATC_RATE_Y_MAX"] is None, "missing ATC_RATE_Y_MAX should be represented as null")
+    assert_true(demand["WP_YAW_BEHAVIOR"]["value"] is None, "missing WP_YAW_BEHAVIOR should be represented as null")
+    assert_true("missing" in demand["parameter_caveat"].lower(), "missing mission-yaw parameters should add a caveat")
+    assert_true("actual yaw movement is present" in demand["interpretation_hint"], "low demand plus actual motion should produce an uncommanded/estimator/mechanical hint")
+
+
 def test_mode_compare_reports_missing_manual_modes_as_manual_control_limit():
     tables = {
         "MODE": pd.DataFrame({"TimeS": [0.0, 10.0, 20.0], "Mode": [3, 16, 3]}),
@@ -2948,6 +3003,9 @@ def main():
     test_parameter_context_mission_yaw_includes_rate_accel_and_headroom()
     test_manifest_questions_include_mission_yaw_context_for_auto_symptom()
     test_mode_compare_ranks_auto_worse_for_yaw_tracking_with_numeric_modes()
+    test_mode_compare_auto_mission_yaw_demand_near_configured_rate_limit()
+    test_mode_compare_mission_yaw_decodes_wp_yaw_behavior()
+    test_mode_compare_mission_yaw_missing_params_adds_caveat_not_failure()
     test_mode_compare_reports_missing_manual_modes_as_manual_control_limit()
     test_mode_compare_poshold_only_reduces_manual_control_confidence()
     test_mode_compare_althold_improves_manual_control_confidence()

@@ -44,10 +44,18 @@ purely manual yaw PID tuning.
 - Compare `RATE.YDes` vs `RATE.Y` in the mission segment. Large, persistent, or
   continuous `RATE.YDes` in `AUTO` may be mission/navigation yaw demand rather
   than a spontaneous aircraft fault.
+- Inspect `mission_yaw_demand` from `ap_log_mode_compare.py` when available.
+  It summarizes commanded yaw rate, achieved yaw rate, tracking error,
+  `RATE.YOut`, `ATC_RATE_Y_MAX`, `ATC_ACCEL_Y_MAX`, and decoded
+  `WP_YAW_BEHAVIOR` context for AUTO/mission windows.
 - Inspect `WP_YAW_BEHAVIOR`, waypoint geometry, `WPNAV_SPEED`, `WPNAV_ACCEL`,
   `WPNAV_ACCEL_C`, `ATC_RATE_Y_MAX`, `ATC_ACCEL_Y_MAX`, and
   `MOT_YAW_HEADROOM` as context for what the autopilot was allowed or expected
   to command.
+- Treat `WP_YAW_BEHAVIOR` as context for why the mission may command yaw, not
+  proof that the parameter caused the complaint. Compare `RATE.YDes` against
+  `RATE.Y` and actuator/power/vibration evidence before considering yaw gains
+  or mission-yaw parameter changes.
 - Compare the same aircraft in AltHold/PosHold/Loiter/AUTO only if it is safe
   and controllable. A problem that exists only in mission flight needs mission
   demand, navigation behaviour, estimator health, and yaw authority checked
