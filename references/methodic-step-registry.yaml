@@ -1,0 +1,379 @@
+schema_version: 1
+official_guide_url: https://ardupilot.github.io/MethodicConfigurator/TUNING_GUIDE_ArduCopter
+result_values: [pass, conditional_pass, fail, inconclusive, not_applicable]
+safety_gate_values: [proceed, proceed_with_caution, repeat_step, do_not_proceed, bench_check_required]
+steps:
+  - step_id: "7.1"
+    aliases: ["first-flight", "first flight"]
+    title: "First flight: motor thrust hover and harmonic notch data collection"
+    phase: "first_flight"
+    official_anchor: "#71-first-flight-motor-thrust-hover-and-harmonic-notch-data-collection"
+    official_url: "https://ardupilot.github.io/MethodicConfigurator/TUNING_GUIDE_ArduCopter#71-first-flight-motor-thrust-hover-and-harmonic-notch-data-collection"
+    required_messages: [MODE, ATT, RATE, RCOU]
+    strongly_recommended_messages: [CTUN, VIBE, BAT, PARM]
+    optional_messages: [PIDR, PIDP, PIDY, ESC, ESCX, EDT2, MSG, EV, ERR, ARM]
+    relevant_parameters: [MOT_THST_HOVER, MOT_HOVER_LEARN, MOT_PWM_TYPE, INS_HNTCH_ENABLE, INS_HNTCH_MODE, SERVO*_FUNCTION]
+    preferred_window: "First controlled Stabilize ground check plus 30-40 s AltHold hover at 1-2 m, excluding takeoff and landing transients when possible."
+    manual_observations_required: ["Pilot confirmed normal response to small roll/pitch/yaw stick inputs before takeoff", "Pilot confirmed hover was controllable", "Post-landing motor and ESC heat check"]
+    pass_fail_summary: "Pass only when the first hover was controllable, required output/rate evidence is present, and no output oscillation or safety-critical manual observations are reported."
+    next_step_if_pass: "7.1.1"
+    next_step_if_conditional: "7.1.1 with caution and explicit missing-evidence notes"
+    next_step_if_fail: "Repeat ground/bench checks and first-flight setup before any further tuning"
+    safety_gate_notes: "Never continue when the aircraft was hard to control, output saturation is unresolved, motors/ESCs were hot, or the log cannot support the first-flight checks."
+  - step_id: "7.1.1"
+    aliases: ["motor-output-oscillation", "motor output oscillation", "output oscillation"]
+    title: "Motor output oscillation check"
+    phase: "first_flight"
+    official_anchor: "#711-check-for-motor-output-oscillation"
+    official_url: "https://ardupilot.github.io/MethodicConfigurator/TUNING_GUIDE_ArduCopter#711-check-for-motor-output-oscillation"
+    required_messages: [RATE]
+    strongly_recommended_messages: [RCOU, PIDR, PIDP, PIDY, MODE, CTUN, PARM]
+    optional_messages: [ESC, ESCX, EDT2, VIBE, ATT, MSG, EV, ERR, BAT, ARM]
+    relevant_parameters: [ATC_RAT_PIT_D, ATC_RAT_PIT_I, ATC_RAT_PIT_P, ATC_RAT_RLL_D, ATC_RAT_RLL_I, ATC_RAT_RLL_P, PSC_ACCZ_P, PSC_ACCZ_I, PSC_POSXY_*, PSC_VELXY_*, SERVO*_FUNCTION]
+    preferred_window: "First hover immediately before landing; prefer stable AltHold hover and inspect RATE.*Out plus mapped motor outputs."
+    manual_observations_required: ["Motors not excessively hot immediately after landing", "ESCs not excessively hot immediately after landing", "No audible oscillation", "No visible shaking", "No hard-to-control or sluggish behaviour"]
+    pass_fail_summary: "Fail when high or oscillating RATE.*Out, output saturation, hot motors/ESCs, audible oscillation, visible shaking, or hard-to-control behaviour is present."
+    next_step_if_pass: "8.1"
+    next_step_if_conditional: "Repeat 7.1.1 or continue only after missing observations are resolved"
+    next_step_if_fail: "Do not proceed; investigate motor/ESC/frame/control setup and repeat the first-hover check"
+    safety_gate_notes: "Tuning cannot proceed until output oscillation is corrected. Do not recommend blind gain changes; identify evidence first."
+  - step_id: "8.1"
+    aliases: ["harmonic-notch", "filter-review", "notch filter"]
+    title: "Harmonic notch / filter review"
+    phase: "minimal_tuning"
+    official_anchor: "#81-notch-filter-calibration"
+    official_url: "https://ardupilot.github.io/MethodicConfigurator/TUNING_GUIDE_ArduCopter#81-notch-filter-calibration"
+    required_messages: [IMU, VIBE]
+    strongly_recommended_messages: [ISBH, ISBD, ESC, ESCX, EDT2, RATE, PARM]
+    optional_messages: [GYR, ACC, MSG, EV, ERR, MODE]
+    relevant_parameters: [INS_HNTCH_*, INS_HNTC2_*, INS_LOG_BAT_MASK, INS_LOG_BAT_OPT, LOG_BITMASK, LOG_FILE_RATEMAX]
+    preferred_window: "First-flight hover or targeted filter-review hover with representative motor RPM/throttle."
+    manual_observations_required: ["No visible vibration", "No abnormal sound", "No hot motors or ESCs after the filter-review flight"]
+    pass_fail_summary: "Pass requires vibration/noise evidence sufficient for filter review, no clipping concern, and no unresolved output oscillation from 7.1.1."
+    next_step_if_pass: "8.2"
+    next_step_if_conditional: "8.2 only with caution and follow-up filter validation"
+    next_step_if_fail: "Repeat filter setup/log capture after bench vibration and motor/prop checks"
+    safety_gate_notes: "Do not use wide/aggressive filters to hide mechanical vibration; fix mechanical causes first."
+  - step_id: "8.2"
+    aliases: ["throttle-controller", "throttle controller"]
+    title: "Throttle controller"
+    phase: "minimal_tuning"
+    official_anchor: "#82-configure-the-throttle-controller"
+    official_url: "https://ardupilot.github.io/MethodicConfigurator/TUNING_GUIDE_ArduCopter#82-configure-the-throttle-controller"
+    required_messages: [CTUN]
+    strongly_recommended_messages: [RATE, RCOU, MODE, BAT, PARM]
+    optional_messages: [PIDR, PIDP, PIDY, VIBE, MSG, EV, ERR]
+    relevant_parameters: [MOT_THST_HOVER, PSC_ACCZ_P, PSC_ACCZ_I, PSC_ACCZ_D, ATC_THR_MIX_MAX, MOT_HOVER_LEARN]
+    preferred_window: "Stable AltHold hover, ideally the 30-40 s first-flight hover after output oscillation is ruled out."
+    manual_observations_required: ["Stable altitude hold without bounce or pumping", "No hard-to-control behaviour"]
+    pass_fail_summary: "Pass when hover throttle and vertical controller evidence are usable and no vertical oscillation or output headroom issue is present."
+    next_step_if_pass: "8.3"
+    next_step_if_conditional: "8.3 with caution or repeat hover capture"
+    next_step_if_fail: "Repeat throttle-controller review after resolving oscillation, hover-throttle, or output-headroom issues"
+    safety_gate_notes: "Do not tune vertical gains blindly when output oscillation, vibration, or thrust headroom is unresolved."
+  - step_id: "8.3"
+    aliases: ["pid-notch", "frame-resonance", "frame resonance"]
+    title: "PID notch / frame resonance"
+    phase: "minimal_tuning"
+    official_anchor: "#83-suppress-frame-resonance-with-pid-notch-filters-advancedoptional"
+    official_url: "https://ardupilot.github.io/MethodicConfigurator/TUNING_GUIDE_ArduCopter#83-suppress-frame-resonance-with-pid-notch-filters-advancedoptional"
+    required_messages: [RATE]
+    strongly_recommended_messages: [PIDR, PIDP, PIDY, IMU, ISBH, ISBD, PARM]
+    optional_messages: [VIBE, RCOU, MODE, MSG, EV, ERR]
+    relevant_parameters: [FILT*_TYPE, FILT*_NOTCH_FREQ, FILT*_NOTCH_Q, FILT*_NOTCH_ATT, ATC_RAT_RLL_NTF, ATC_RAT_RLL_NEF, ATC_RAT_PIT_NTF, ATC_RAT_PIT_NEF, ATC_RAT_YAW_NTF, ATC_RAT_YAW_NEF, PSC_ACCZ_NTF, PSC_ACCZ_NEF]
+    preferred_window: "Short isolated roll, pitch, and yaw input logs after harmonic notch setup is correct."
+    manual_observations_required: ["No visible shaking", "No abnormal sound", "Vehicle remains controllable during isolated inputs"]
+    pass_fail_summary: "Pass only when frame resonance evidence is reviewed and any PID notch need is supported by spectrum/log evidence."
+    next_step_if_pass: "8.4"
+    next_step_if_conditional: "8.4 only if resonance is minor and documented"
+    next_step_if_fail: "Repeat filter/mechanical review before continuing"
+    safety_gate_notes: "Use PID notch filters only after harmonic notch, vibration, CPU load, and output oscillation checks are healthy."
+  - step_id: "8.4"
+    aliases: ["ekf-altitude-source", "altitude source weights"]
+    title: "EKF altitude source weights"
+    phase: "minimal_tuning"
+    official_anchor: "#84-configure-the-ekf-altitude-source-weights"
+    official_url: "https://ardupilot.github.io/MethodicConfigurator/TUNING_GUIDE_ArduCopter#84-configure-the-ekf-altitude-source-weights"
+    required_messages: [XKF4]
+    strongly_recommended_messages: [BARO, GPS, POS, CTUN, RNGF, PARM]
+    optional_messages: [XKF1, XKF2, XKF3, NKF1, NKF2, NKF3, NKF4, MSG, EV, ERR]
+    relevant_parameters: [EK3_OGN_HGT_MASK, EK3_ALT_SOURCE, EK3_RNG_USE_HGT, EK3_POSNE_M_NSE, EK3_VELD_M_NSE, EK3_ALT_M_NSE, RNGFND*_TYPE]
+    preferred_window: "Representative hover and altitude changes using the intended altitude sensors."
+    manual_observations_required: ["No unexplained altitude jumps", "No surface-effect or airflow condition that invalidates the capture"]
+    pass_fail_summary: "Pass when altitude-source evidence is consistent and EKF height innovations do not indicate a weighting problem."
+    next_step_if_pass: "8.5"
+    next_step_if_conditional: "8.5 with altitude-source caveats"
+    next_step_if_fail: "Resolve altitude source configuration before further tuning"
+    safety_gate_notes: "Do not mask bad barometer/rangefinder/GNSS evidence by weakening EKF checks."
+  - step_id: "8.5"
+    aliases: ["quiktune-manual-pid", "manual pid tuning", "minimal pid tuning"]
+    title: "QuikTune or manual PID tuning"
+    phase: "minimal_tuning"
+    official_anchor: "#85-second-flight-pid-vtol-quiktune-lua-script-or-manual-pid-tune"
+    official_url: "https://ardupilot.github.io/MethodicConfigurator/TUNING_GUIDE_ArduCopter#85-second-flight-pid-vtol-quiktune-lua-script-or-manual-pid-tune"
+    required_messages: [RATE]
+    strongly_recommended_messages: [PIDR, PIDP, PIDY, ATUN, RCOU, MODE, PARM]
+    optional_messages: [VIBE, ESC, ESCX, EDT2, BAT, MSG, EV, ERR]
+    relevant_parameters: [ATC_RAT_RLL_*, ATC_RAT_PIT_*, ATC_RAT_YAW_*, ATC_ANG_RLL_P, ATC_ANG_PIT_P, ATC_ANG_YAW_P, AUTOTUNE_*, QUIK_*]
+    preferred_window: "QuikTune/manual tuning flight in the intended mode, excluding takeoff/landing transients."
+    manual_observations_required: ["Outdoor light wind condition for QuikTune or controlled manual tuning condition", "No dangerous oscillation", "Pilot reports controllable response"]
+    pass_fail_summary: "Pass when tune activity evidence is present and no unsafe oscillation or control-authority issue is found."
+    next_step_if_pass: "9.1"
+    next_step_if_conditional: "9.1 with caution or repeat 8.5 evidence capture"
+    next_step_if_fail: "Repeat tuning setup only after resolving blocker; do not accept aggressive or unstable results"
+    safety_gate_notes: "QuikTune needs disturbance; calm conditions can produce overly aggressive values. Do not fly if oscillation appears."
+  - step_id: "9.1"
+    aliases: ["magfit", "inflight magfit"]
+    title: "MagFit"
+    phase: "standard_tuning"
+    official_anchor: "#91-third-flight-magfit"
+    official_url: "https://ardupilot.github.io/MethodicConfigurator/TUNING_GUIDE_ArduCopter#91-third-flight-magfit"
+    required_messages: [MAG]
+    strongly_recommended_messages: [XKF3, XKF4, GPS, MODE, PARM]
+    optional_messages: [ATT, RATE, RCIN, MSG, EV, ERR]
+    relevant_parameters: [COMPASS_*, COMPASS_OFS_*, COMPASS_DIA_*, COMPASS_ODI_*, MAGH_*, WPNAV_SPEED]
+    preferred_window: "Figure-eight MagFit segment, excluding takeoff and landing."
+    manual_observations_required: ["Obstacle clearance confirmed", "Pilot/GCS confirmed the intended MagFit pattern was flown"]
+    pass_fail_summary: "Pass when the log covers the intended MagFit pattern and magnetometer/EKF evidence is suitable for MagFit review."
+    next_step_if_pass: "9.2"
+    next_step_if_conditional: "9.2 only after documenting compass confidence limits"
+    next_step_if_fail: "Repeat MagFit setup/flight only after compass, mission, and obstacle checks"
+    safety_gate_notes: "Do not continue autonomous pattern work if yaw/compass health is questionable."
+  - step_id: "9.2"
+    aliases: ["quiktune-standard", "quiktune results"]
+    title: "QuikTune standard setup/results"
+    phase: "standard_tuning"
+    official_anchor: "#92-fourth-flight-pid-vtol-quiktune-lua-script-or-manual-pid-tune-optional"
+    official_url: "https://ardupilot.github.io/MethodicConfigurator/TUNING_GUIDE_ArduCopter#92-fourth-flight-pid-vtol-quiktune-lua-script-or-manual-pid-tune-optional"
+    required_messages: [RATE]
+    strongly_recommended_messages: [PIDR, PIDP, PIDY, ATUN, RCOU, MODE, PARM]
+    optional_messages: [VIBE, ESC, ESCX, EDT2, BAT, MSG, EV, ERR]
+    relevant_parameters: [ATC_RAT_*, ATC_ANG_*, AUTOTUNE_*, QUIK_*]
+    preferred_window: "Standard QuikTune/manual PID tuning flight after MagFit."
+    manual_observations_required: ["Appropriate disturbance for QuikTune", "No dangerous oscillation", "Pilot reports stable control"]
+    pass_fail_summary: "Pass when standard tune evidence is present and no instability or unsafe output demand is found."
+    next_step_if_pass: "9.3"
+    next_step_if_conditional: "9.3 with caution and explicit tune limitations"
+    next_step_if_fail: "Repeat standard tune only after resolving instability or bad setup"
+    safety_gate_notes: "Do not accept tune results without reviewing RATE/PID/output evidence."
+  - step_id: "9.3"
+    aliases: ["evaluate-ff-disabled", "feed-forward disabled"]
+    title: "Tune evaluation with feed-forward disabled"
+    phase: "standard_tuning"
+    official_anchor: "#93-fifth-flight-evaluate-the-aircraft-tune---part-1"
+    official_url: "https://ardupilot.github.io/MethodicConfigurator/TUNING_GUIDE_ArduCopter#93-fifth-flight-evaluate-the-aircraft-tune---part-1"
+    required_messages: [RATE]
+    strongly_recommended_messages: [PIDR, PIDP, PIDY, RCOU, MODE, PARM]
+    optional_messages: [ATT, VIBE, BAT, MSG, EV, ERR]
+    relevant_parameters: [ATC_RAT_*, ATC_ANG_*, ATC_INPUT_TC, ATC_ACCEL_*]
+    preferred_window: "Aircraft tune evaluation maneuvers with feed-forward disabled."
+    manual_observations_required: ["Vehicle behaved well during evaluation", "No visible or audible oscillation"]
+    pass_fail_summary: "Pass when RATE.*Out stays low enough for the evaluation and tracking is acceptable without feed-forward."
+    next_step_if_pass: "9.4"
+    next_step_if_conditional: "Repeat 9.3 or manually review tune before 9.4"
+    next_step_if_fail: "Manual PID tune or QuikTune review before proceeding"
+    safety_gate_notes: "Official guide expects RATE.*Out below about 0.1 after landing review; treat exceedance as a blocker or caution depending on context."
+  - step_id: "9.4"
+    aliases: ["evaluate-ff-enabled", "feed-forward enabled"]
+    title: "Tune evaluation with feed-forward enabled"
+    phase: "standard_tuning"
+    official_anchor: "#94-sixth-flight-evaluate-the-aircraft-tune---part-2"
+    official_url: "https://ardupilot.github.io/MethodicConfigurator/TUNING_GUIDE_ArduCopter#94-sixth-flight-evaluate-the-aircraft-tune---part-2"
+    required_messages: [RATE]
+    strongly_recommended_messages: [PIDR, PIDP, PIDY, RCOU, MODE, PARM]
+    optional_messages: [ATT, VIBE, BAT, MSG, EV, ERR]
+    relevant_parameters: [ATC_RAT_*_FF, ATC_RAT_*_D_FF, ATC_ANG_*, ATC_INPUT_TC]
+    preferred_window: "Aircraft tune evaluation maneuvers with feed-forward enabled."
+    manual_observations_required: ["Vehicle behaved well during evaluation", "No visible or audible oscillation"]
+    pass_fail_summary: "Pass when RATE.*Out stays low enough and tracking improves or remains stable with feed-forward enabled."
+    next_step_if_pass: "9.5"
+    next_step_if_conditional: "Repeat 9.4 or review feed-forward setup before 9.5"
+    next_step_if_fail: "Return to tune review before AutoTune sequence"
+    safety_gate_notes: "Do not proceed to AutoTune if feed-forward evaluation produces instability or excessive output demand."
+  - step_id: "9.5"
+    aliases: ["autotune", "autotune sequence"]
+    title: "AutoTune sequence"
+    phase: "standard_tuning"
+    official_anchor: "#95-autotune-flights"
+    official_url: "https://ardupilot.github.io/MethodicConfigurator/TUNING_GUIDE_ArduCopter#95-autotune-flights"
+    required_messages: [ATUN]
+    strongly_recommended_messages: [RATE, PIDR, PIDP, PIDY, MODE, RCOU, BAT, PARM]
+    optional_messages: [ATT, VIBE, ESC, ESCX, EDT2, MSG, EV, ERR]
+    relevant_parameters: [AUTOTUNE_*, AUTOTUNE_MIN_D, ATC_RAT_*, ATC_ANG_*, ATC_ACCEL_*]
+    preferred_window: "AutoTune active mode segments for each tuned axis."
+    manual_observations_required: ["Calm practical environment", "Pilot maintained safe position/height", "No instability during or after AutoTune"]
+    pass_fail_summary: "Pass when the intended axes completed or the interrupted state is clearly understood and safe restart values are evidence-backed."
+    next_step_if_pass: "9.6"
+    next_step_if_conditional: "Repeat incomplete AutoTune axis only after safety review"
+    next_step_if_fail: "Do not use poor or unstable AutoTune results; repeat setup after diagnosing cause"
+    safety_gate_notes: "Partially discovered gains may be unstable. Do not blindly apply ATUN-derived values."
+  - step_id: "9.6"
+    aliases: ["performance-evaluation", "performance evaluation"]
+    title: "Performance evaluation"
+    phase: "standard_tuning"
+    official_anchor: "#96-seventh-flight-evaluate-the-aircraft-performance"
+    official_url: "https://ardupilot.github.io/MethodicConfigurator/TUNING_GUIDE_ArduCopter#96-seventh-flight-evaluate-the-aircraft-performance"
+    required_messages: [RATE, ATT]
+    strongly_recommended_messages: [PIDR, PIDP, PIDY, RCOU, MODE, PARM]
+    optional_messages: [VIBE, BAT, GPS, POS, MSG, EV, ERR]
+    relevant_parameters: [ATC_RAT_*, ATC_ANG_*, ATC_ACCEL_*, ATC_THR_MIX_MAX]
+    preferred_window: "Increasingly aggressive but controlled evaluation maneuvers within the stable envelope."
+    manual_observations_required: ["Pilot remained inside stable envelope", "No overshoot or instability beyond acceptable limits"]
+    pass_fail_summary: "Pass when response, output demand, and pilot observations support the performance objective without safety blockers."
+    next_step_if_pass: "9.7"
+    next_step_if_conditional: "9.7 only for limited axes with clear caveats"
+    next_step_if_fail: "Return to tune review before derivative feed-forward calculation"
+    safety_gate_notes: "Do not increase aggressiveness if current maneuvers show instability or poor control margin."
+  - step_id: "9.7"
+    aliases: ["derivative-feed-forward", "dff calculation"]
+    title: "Derivative feed-forward calculation"
+    phase: "standard_tuning"
+    official_anchor: "#97-angle-rate-derivative-feed-forward-calculation"
+    official_url: "https://ardupilot.github.io/MethodicConfigurator/TUNING_GUIDE_ArduCopter#97-angle-rate-derivative-feed-forward-calculation"
+    required_messages: [RATE]
+    strongly_recommended_messages: [PIDR, PIDP, PIDY, MODE, PARM]
+    optional_messages: [ATT, RCOU, VIBE, MSG, EV, ERR]
+    relevant_parameters: [ATC_RAT_RLL_D_FF, ATC_RAT_PIT_D_FF, ATC_RAT_YAW_D_FF, PSC_ACCZ_D_FF]
+    preferred_window: "Aggressive rate changes after frame resonance is controlled and AutoTune is complete."
+    manual_observations_required: ["Vehicle already passed performance evaluation", "No oscillation during aggressive inputs"]
+    pass_fail_summary: "Pass when the data supports D_FF calculation and follow-up validation requirements are explicit."
+    next_step_if_pass: "10.1"
+    next_step_if_conditional: "10.1 only if D_FF work is optional/deferred"
+    next_step_if_fail: "Do not calculate/apply D_FF from unsuitable data"
+    safety_gate_notes: "D_FF changes actuator demand and pilot feel; validate with logs before treating it as complete."
+  - step_id: "10.1"
+    aliases: ["wind-estimation", "drag coefficients"]
+    title: "Wind estimation / drag coefficients"
+    phase: "altitude_wind"
+    official_anchor: "#101-windspeed-estimation-flights"
+    official_url: "https://ardupilot.github.io/MethodicConfigurator/TUNING_GUIDE_ArduCopter#101-windspeed-estimation-flights"
+    required_messages: [IMU, GPS]
+    strongly_recommended_messages: [MODE, POS, ATT, PARM]
+    optional_messages: [WIND, XKF2, XKF4, BARO, MSG, EV, ERR]
+    relevant_parameters: [EK3_DRAG_BCOEF_X, EK3_DRAG_BCOEF_Y, EK3_DRAG_MCOEF, EK3_DRAG_MCOEF, WPNAV_SPEED]
+    preferred_window: "AltHold acceleration/deceleration tests in each direction with enough GPS speed and acceleration signal quality."
+    manual_observations_required: ["Wind direction/speed context", "Known frontal/side area and vehicle mass", "Pilot confirms test direction and maneuver quality"]
+    pass_fail_summary: "Pass when acceleration/GPS evidence and physical measurements support coefficient review."
+    next_step_if_pass: "10.2"
+    next_step_if_conditional: "10.2 with documented coefficient uncertainty"
+    next_step_if_fail: "Repeat wind-estimation evidence capture only in suitable safe conditions"
+    safety_gate_notes: "Do not compute coefficients without mass/area and maneuver-quality context."
+  - step_id: "10.2"
+    aliases: ["barometer-compensation", "baro compensation"]
+    title: "Barometer compensation"
+    phase: "altitude_wind"
+    official_anchor: "#102-baro-compensation-flights"
+    official_url: "https://ardupilot.github.io/MethodicConfigurator/TUNING_GUIDE_ArduCopter#102-baro-compensation-flights"
+    required_messages: [BARO]
+    strongly_recommended_messages: [CTUN, GPS, POS, XKF4, MODE, PARM]
+    optional_messages: [RNGF, IMU, WIND, MSG, EV, ERR]
+    relevant_parameters: [BARO*_WCF_*, EK3_*, RNGFND*_TYPE]
+    preferred_window: "Baro compensation test maneuvers after wind/drag setup."
+    manual_observations_required: ["Known wind exposure condition", "No unsafe altitude behaviour"]
+    pass_fail_summary: "Pass when barometer altitude is insensitive enough to airflow in the tested operating envelope."
+    next_step_if_pass: "11.1"
+    next_step_if_conditional: "11.1 only if altitude caveats do not affect planned use"
+    next_step_if_fail: "Resolve barometer protection/compensation before advanced tuning"
+    safety_gate_notes: "Do not hide poor barometer placement or airflow exposure with unsupported parameter changes."
+  - step_id: "11.1"
+    aliases: ["system-id", "system identification"]
+    title: "System ID flights"
+    phase: "system_identification"
+    official_anchor: "#111-system-identification-flights"
+    official_url: "https://ardupilot.github.io/MethodicConfigurator/TUNING_GUIDE_ArduCopter#111-system-identification-flights"
+    required_messages: [SID]
+    strongly_recommended_messages: [SIDD, SIDS, RATE, ATT, MODE, PARM]
+    optional_messages: [RCOU, VIBE, BAT, MSG, EV, ERR]
+    relevant_parameters: [SID_*, ATC_RAT_*, ATC_ANG_*, INS_HNTCH_*]
+    preferred_window: "System ID active segments for roll, pitch, and yaw in no-wind conditions."
+    manual_observations_required: ["No-wind condition", "Vehicle remained controllable with detuned PIDs", "Axis under test is known"]
+    pass_fail_summary: "Pass when System ID chirp data is present and suitable for model fitting."
+    next_step_if_pass: "11.2"
+    next_step_if_conditional: "11.2 only for axes with valid System ID data"
+    next_step_if_fail: "Repeat System ID setup/capture after resolving data or stability issues"
+    safety_gate_notes: "System ID requires deliberate excitation; do not run it on an unstable vehicle."
+  - step_id: "11.2"
+    aliases: ["analytical-pid", "analytical pid optimisation", "analytical pid optimization"]
+    title: "Analytical PID optimisation"
+    phase: "system_identification"
+    official_anchor: "#112-analytical-multicopter-flight-controller-pid-optimization"
+    official_url: "https://ardupilot.github.io/MethodicConfigurator/TUNING_GUIDE_ArduCopter#112-analytical-multicopter-flight-controller-pid-optimization"
+    required_messages: [SID]
+    strongly_recommended_messages: [SIDD, SIDS, RATE, ATT, PARM]
+    optional_messages: [PIDR, PIDP, PIDY, RCOU, MSG, EV, ERR]
+    relevant_parameters: [ATC_RAT_*, ATC_ANG_*, ATC_ACCEL_*, SID_*]
+    preferred_window: "Validated System ID datasets and resulting optimisation review."
+    manual_observations_required: ["Optimisation constraints are defined", "Model fit is accepted by the agent/user"]
+    pass_fail_summary: "Pass when model/optimisation evidence is reviewed and resulting changes have explicit validation plan."
+    next_step_if_pass: "12.1"
+    next_step_if_conditional: "12.1 with optimisation caveats or defer analytical optimisation"
+    next_step_if_fail: "Do not use analytical results until System ID/model issues are resolved"
+    safety_gate_notes: "Do not apply analytically derived gains without controlled validation."
+  - step_id: "12.1"
+    aliases: ["position-controller", "position controller"]
+    title: "Position controller tuning"
+    phase: "position_controller"
+    official_anchor: "#121-position-controller"
+    official_url: "https://ardupilot.github.io/MethodicConfigurator/TUNING_GUIDE_ArduCopter#121-position-controller"
+    required_messages: [POS]
+    strongly_recommended_messages: [NTUN, GPS, XKF4, ATT, RATE, MODE, PARM]
+    optional_messages: [RCIN, CTUN, MSG, EV, ERR]
+    relevant_parameters: [PSC_POSXY_*, PSC_VELXY_*, WPNAV_*, LOIT_*]
+    preferred_window: "Position-control maneuvers after attitude/rate loops are tuned."
+    manual_observations_required: ["Position modes were controllable", "No toilet-bowling or runaway drift"]
+    pass_fail_summary: "Pass when position tracking evidence supports the intended mode without estimator or inner-loop blockers."
+    next_step_if_pass: "12.2"
+    next_step_if_conditional: "12.2 only if autonomous/BVLOS use is in scope and caveats are addressed"
+    next_step_if_fail: "Resolve estimator/position-controller issues before guided operation"
+    safety_gate_notes: "Do not tune position control while attitude/rate or EKF/GPS issues remain unresolved."
+  - step_id: "12.2"
+    aliases: ["guided-operation", "guided operation"]
+    title: "Guided operation"
+    phase: "position_controller"
+    official_anchor: "#122-guided-operation-without-rc-transmitter"
+    official_url: "https://ardupilot.github.io/MethodicConfigurator/TUNING_GUIDE_ArduCopter#122-guided-operation-without-rc-transmitter"
+    required_messages: [MODE]
+    strongly_recommended_messages: [POS, GPS, XKF4, RCIN, MSG, EV, ERR, PARM]
+    optional_messages: [CMD, NTUN, ATT, RATE]
+    relevant_parameters: [FS_*, GCS_*, GUID_OPTIONS, WPNAV_*, FENCE_*]
+    preferred_window: "Guided mode command and response segment with failsafe context."
+    manual_observations_required: ["BVLOS/companion-computer requirement is real", "Failsafe and manual recovery plan verified"]
+    pass_fail_summary: "Pass when Guided operation is applicable, command response is understood, and recovery/failsafe evidence is reviewed."
+    next_step_if_pass: "12.3"
+    next_step_if_conditional: "12.3 only if precision landing hardware/use case applies"
+    next_step_if_fail: "Do not proceed with Guided operation until command, failsafe, and recovery issues are resolved"
+    safety_gate_notes: "Guided without RC is optional and high-consequence; do not recommend it without explicit operational need and safety review."
+  - step_id: "12.3"
+    aliases: ["precision-landing", "precision land"]
+    title: "Precision landing"
+    phase: "position_controller"
+    official_anchor: "#123-precision-land"
+    official_url: "https://ardupilot.github.io/MethodicConfigurator/TUNING_GUIDE_ArduCopter#123-precision-land"
+    required_messages: [PL]
+    strongly_recommended_messages: [RNGF, POS, GPS, XKF4, MODE, PARM]
+    optional_messages: [LAND, CTUN, ATT, RATE, MSG, EV, ERR]
+    relevant_parameters: [PLND_*, RNGFND*_TYPE, LAND_*, PSC_*]
+    preferred_window: "Precision landing approach and descent segment with target detection."
+    manual_observations_required: ["Precision landing hardware installed and aligned", "Landing target/environment suitable"]
+    pass_fail_summary: "Pass when precision landing target tracking and descent behaviour are supported by log and observation evidence."
+    next_step_if_pass: "13"
+    next_step_if_conditional: "13 only if precision landing is optional/deferred"
+    next_step_if_fail: "Resolve precision landing hardware/configuration before using the feature"
+    safety_gate_notes: "Do not rely on precision landing without normal landing fallback and range/target evidence."
+  - step_id: "13"
+    aliases: ["13.0", "productive-configuration", "everyday use"]
+    title: "Productive configuration"
+    phase: "productive_configuration"
+    official_anchor: "#13-productive-configuration"
+    official_url: "https://ardupilot.github.io/MethodicConfigurator/TUNING_GUIDE_ArduCopter#13-productive-configuration"
+    required_messages: [PARM]
+    strongly_recommended_messages: [MSG, EV, ERR, MODE, BAT, GPS, XKF4]
+    optional_messages: [RATE, ATT, VIBE, RCOU, ESC, ESCX, EDT2]
+    relevant_parameters: [LOG_BITMASK, LOG_DISARMED, FS_*, BATT_*, ARMING_CHECK, FENCE_*, RTL_*, ATC_*, INS_HNTCH_*]
+    preferred_window: "Final post-tuning parameter/log review before everyday-use configuration."
+    manual_observations_required: ["All prior applicable Methodic steps have been reviewed", "Operational failsafes and logging needs are known"]
+    pass_fail_summary: "Pass when final configuration evidence is complete enough for the agent to recommend everyday-use review items without declaring flight safety."
+    next_step_if_pass: "complete"
+    next_step_if_conditional: "complete with documented caveats and required follow-up checks"
+    next_step_if_fail: "Return to the first failed or inconclusive prerequisite step"
+    safety_gate_notes: "Productive configuration must preserve safety checks, failsafes, and enough logging for post-flight review."

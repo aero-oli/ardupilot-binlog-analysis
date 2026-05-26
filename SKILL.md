@@ -55,6 +55,34 @@ If the decoder confidence is `unknown`, state that the local mapping does not id
 
 Choose the mode from the user's request. If the user reports a symptom, symptom-led diagnosis has priority over a general review.
 
+### Mode 0: Methodic Configurator step review
+
+Use when the user names an ArduPilot Methodic Configurator step, asks whether a Methodic step passed, asks about Methodic Configurator tuning, or asks for step-aware tuning workflow guidance.
+
+First read `references/methodic-configurator-workflows.md`, `references/methodic-step-registry.yaml`, and, when writing the final answer, `references/methodic-output-patterns.md`. The official guide source for the registry is `https://ardupilot.github.io/MethodicConfigurator/TUNING_GUIDE_ArduCopter`.
+
+Run the Methodic step entrypoint:
+
+```bash
+python scripts/ap_methodic_step.py LOG.BIN --step 7.1.1 --out out/methodic_7_1_1.json --summary out/methodic_7_1_1.md --plots out/plots/methodic_7_1_1
+```
+
+If the user gives required observations such as motor/ESC heat, audible oscillation, visible shaking, or hard-to-control behaviour, pass them as repeated `--manual-observation` values. If those observations are not available, preserve that as missing evidence; do not promote the step to a clean pass from log evidence alone.
+
+`ap_methodic_step.py` returns a standard schema with `result`, `safety_gate`, `evidence_used`, `missing_evidence`, `manual_observations_required`, `findings`, `parameter_context`, `plots`, `recommended_next_steps`, `what_not_to_do`, `next_methodic_step`, and `confidence_limits`. Treat the step result as structured evidence, not final truth. Inspect the JSON, summary, and plots before writing conclusions yourself.
+
+Every Methodic final answer must include clear next steps:
+
+1. Methodic step and result.
+2. Safety gate.
+3. Evidence used and missing evidence.
+4. Manual observations still required.
+5. Whether to proceed, proceed with caution, repeat the step, stop for bench checks, or not proceed.
+6. What not to do.
+7. The next Methodic step only if the evidence supports it.
+
+This mode does not auto-tune, upload parameters, or recommend blind gain changes. Never skip Methodic safety gates and never declare the aircraft safe to fly.
+
 ### Mode 1: symptom-led diagnosis
 
 Use when the user says something like:

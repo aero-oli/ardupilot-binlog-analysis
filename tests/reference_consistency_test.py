@@ -3,7 +3,9 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 import yaml
@@ -12,6 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from ap_log_investigation_manifest import PLOT_COMMANDS, SPECIAL_PLOT_GROUPS
+from ap_methodic_registry import MethodicRegistryError, get_step, load_registry
 from ap_next_step_helpers import build_diagnosis_action_plan
 
 
@@ -26,6 +29,48 @@ REQUIRED_SYMPTOM_FIELDS = {
     "likely_fault_branches",
     "recommended_plot_groups",
 }
+REQUIRED_METHODIC_FIELDS = {
+    "step_id",
+    "title",
+    "phase",
+    "official_anchor",
+    "official_url",
+    "required_messages",
+    "strongly_recommended_messages",
+    "optional_messages",
+    "relevant_parameters",
+    "preferred_window",
+    "manual_observations_required",
+    "pass_fail_summary",
+    "next_step_if_pass",
+    "next_step_if_conditional",
+    "next_step_if_fail",
+    "safety_gate_notes",
+}
+REQUIRED_METHODIC_STEPS = [
+    "7.1",
+    "7.1.1",
+    "8.1",
+    "8.2",
+    "8.3",
+    "8.4",
+    "8.5",
+    "9.1",
+    "9.2",
+    "9.3",
+    "9.4",
+    "9.5",
+    "9.6",
+    "9.7",
+    "10.1",
+    "10.2",
+    "11.1",
+    "11.2",
+    "12.1",
+    "12.2",
+    "12.3",
+    "13",
+]
 KEY_LOGGING_PARAMETERS = [
     "LOG_BITMASK",
     "LOG_BACKEND_TYPE",
@@ -139,8 +184,104 @@ def test_skill_references_exist():
         "references/logging-configuration-for-investigation.md",
         "references/corrupt-or-incomplete-log.md",
         "references/timeline-interpretation.md",
+        "references/methodic-configurator-workflows.md",
+        "references/methodic-output-patterns.md",
+        "references/methodic-step-registry.yaml",
     ]:
         assert_true((ROOT / required).exists(), f"symptom guide missing: {required}")
+
+
+def test_methodic_registry_loads_and_required_steps_exist():
+    registry = load_registry()
+    steps = {step["step_id"]: step for step in registry["steps"]}
+    for step_id in REQUIRED_METHODIC_STEPS:
+        assert_true(step_id in steps, f"methodic registry missing step {step_id}")
+    assert_true(get_step("motor output oscillation", registry)["step_id"] == "7.1.1", "methodic alias lookup failed")
+
+
+def test_methodic_registry_entries_have_required_fields():
+    registry = load_registry()
+    for step in registry["steps"]:
+        missing = REQUIRED_METHODIC_FIELDS - set(step)
+        assert_true(not missing, f"methodic step {step.get('step_id')} missing fields: {sorted(missing)}")
+        for field in ["required_messages", "strongly_recommended_messages", "optional_messages", "relevant_parameters", "manual_observations_required"]:
+            assert_true(isinstance(step[field], list), f"methodic step {step['step_id']} {field} must be list")
+        assert_true("TUNING_GUIDE_ArduCopter" in step["official_url"], f"methodic step {step['step_id']} must link official guide")
+
+
+def test_methodic_unknown_step_clean_error():
+    try:
+        get_step("not-a-methodic-step", load_registry())
+    except MethodicRegistryError as exc:
+        assert_true("Unknown Methodic step" in str(exc), "unknown Methodic step error should be clean")
+    else:
+        raise AssertionError("unknown Methodic step should fail")
+
+
+def test_methodic_step_7_1_1_structured_result():
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_path = Path(tmp)
+        fake_log = tmp_path / "empty.BIN"
+        fake_log.write_bytes(b"")
+        out = tmp_path / "methodic.json"
+        summary = tmp_path / "methodic.md"
+        proc = subprocess.run(
+            [
+                sys.executable,
+                str(ROOT / "scripts" / "ap_methodic_step.py"),
+                str(fake_log),
+                "--step",
+                "7.1.1",
+                "--out",
+                str(out),
+                "--summary",
+                str(summary),
+            ],
+            cwd=ROOT,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+        assert_true(proc.returncode == 0, f"methodic step command failed: {proc.stderr}")
+        data = json.loads(out.read_text(encoding="utf-8"))
+        for field in [
+            "methodic_step",
+            "title",
+            "official_reference",
+            "result",
+            "safety_gate",
+            "evidence_used",
+            "missing_evidence",
+            "manual_observations_required",
+            "analysis_window",
+            "findings",
+            "checked_but_not_supported",
+            "parameter_context",
+            "plots",
+            "recommended_next_steps",
+            "what_not_to_do",
+            "next_methodic_step",
+            "confidence_limits",
+        ]:
+            assert_true(field in data, f"methodic result missing {field}")
+        assert_true(data["methodic_step"] == "7.1.1", "wrong Methodic step returned")
+        assert_true(data["result"] in {"pass", "conditional_pass", "fail", "inconclusive", "not_applicable"}, "invalid Methodic result")
+        assert_true(summary.exists(), "methodic summary should be written")
+
+
+def test_skill_links_methodic_reference():
+    skill = (ROOT / "SKILL.md").read_text(encoding="utf-8")
+    for required in [
+        "Mode 0: Methodic Configurator step review",
+        "references/methodic-configurator-workflows.md",
+        "references/methodic-step-registry.yaml",
+        "references/methodic-output-patterns.md",
+        "https://ardupilot.github.io/MethodicConfigurator/TUNING_GUIDE_ArduCopter",
+        "python scripts/ap_methodic_step.py",
+        "Treat the step result as structured evidence, not final truth",
+    ]:
+        assert_true(required in skill, f"SKILL.md missing Methodic reference: {required}")
 
 
 def test_final_answer_patterns_linked_and_complete():
@@ -263,6 +404,11 @@ def test_repo_housekeeping_files():
 def main():
     test_symptom_map_shape_and_plot_groups()
     test_skill_references_exist()
+    test_methodic_registry_loads_and_required_steps_exist()
+    test_methodic_registry_entries_have_required_fields()
+    test_methodic_unknown_step_clean_error()
+    test_methodic_step_7_1_1_structured_result()
+    test_skill_links_methodic_reference()
     test_final_answer_patterns_linked_and_complete()
     test_safety_relevant_final_answer_patterns_have_action_plan_terms()
     test_skill_requires_safety_next_steps()
