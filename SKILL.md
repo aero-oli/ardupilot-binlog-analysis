@@ -72,6 +72,8 @@ First create an investigation manifest. This is a planning artifact only; it ide
 python scripts/ap_log_investigation_manifest.py LOG.BIN --symptom "USER SYMPTOM" --out out/investigation.json
 ```
 
+Inspect `primary_symptom_class`, `secondary_symptom_classes`, `multi_symptom_reasoning`, and `recommended_secondary_commands`. If secondary classes are present, run the relevant secondary diagnosis, mode-comparison, or plot workflows before forming conclusions; do not draw conclusions from the primary branch alone.
+
 Inspect `out/investigation.json`, then run deterministic evidence gathering:
 
 ```bash

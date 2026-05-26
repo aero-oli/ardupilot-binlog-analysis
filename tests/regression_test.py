@@ -1121,6 +1121,39 @@ def test_manifest_recommends_mode_compare_for_mission_symptom():
     assert_true(any("ap_log_mode_compare.py" in cmd for cmd in manifest["recommended_next_commands"]), "manifest should recommend mode comparison for mission/manual symptoms")
 
 
+def test_manifest_yaw_mission_wobble_adds_attitude_secondary():
+    index = {"messages": {"ATT": {}, "RATE": {}, "MODE": {}, "CTUN": {}, "VIBE": {}}, "parameters": {}, "errors": [], "events": [], "modes": []}
+    manifest = build_manifest_from_index(index, "yaw feels off especially during missions, generally wobbly and manual control off", "flight.bin")
+
+    assert_true(manifest["symptom_class"] == "yaw_misbehaviour", "backward-compatible symptom_class should remain primary yaw class")
+    assert_true(manifest["primary_symptom_class"] == "yaw_misbehaviour", "primary_symptom_class should mirror selected class")
+    assert_true("attitude_rate_issue" in manifest["secondary_symptom_classes"], f"wobble/manual control should add attitude secondary: {manifest['secondary_symptom_classes']}")
+    assert_true(any("multiple symptoms" in warning.lower() for warning in manifest["warnings"]), "multi-symptom manifest should warn not to use yaw branch alone")
+    assert_true(any("--symptom \"wobble oscillation unstable manual control\"" in cmd and "diagnosis_wobble.json" in cmd for cmd in manifest["recommended_secondary_commands"]), "manifest should suggest wobble diagnosis command")
+    assert_true(any("mode_compare_attitude.json" in cmd for cmd in manifest["recommended_secondary_commands"]), "mission/manual wobble should suggest attitude mode comparison")
+
+
+def test_manifest_loiter_drift_toilet_bowling_adds_yaw_secondary():
+    index = {"messages": {"GPS": {}, "ATT": {}, "RATE": {}, "MODE": {}, "MAG": {}, "XKF4": {}}, "parameters": {}, "errors": [], "events": [], "modes": []}
+    manifest = build_manifest_from_index(index, "Loiter drift and toilet bowling", "flight.bin")
+
+    assert_true(manifest["primary_symptom_class"] == "ekf_gps_issue", f"Loiter drift should stay EKF/GPS primary: {manifest['primary_symptom_class']}")
+    assert_true("yaw_misbehaviour" in manifest["secondary_symptom_classes"] or "compass_yaw_source_issue" in manifest["secondary_symptom_classes"], f"toilet bowling should add yaw/compass secondary: {manifest['secondary_symptom_classes']}")
+    assert_true(any("ap_log_diagnose.py" in cmd for cmd in manifest["recommended_secondary_commands"]), "secondary yaw/compass branch should have a diagnosis command")
+
+
+def test_manifest_motor_pulsed_then_dropped_adds_power_or_crash_secondary():
+    index = {"messages": {"RATE": {}, "BAT": {}, "POWR": {}, "RCOU": {}}, "parameters": {}, "errors": [], "events": [], "modes": []}
+    manifest = build_manifest_from_index(index, "motor pulsed then dropped", "flight.bin")
+
+    assert_true(manifest["primary_symptom_class"] == "motor_esc_issue", f"motor symptom should stay primary motor/ESC: {manifest['primary_symptom_class']}")
+    assert_true(
+        "battery_power_issue" in manifest["secondary_symptom_classes"] or "crash_or_loss_of_control" in manifest["secondary_symptom_classes"],
+        f"dropped motor symptom should add power or crash secondary: {manifest['secondary_symptom_classes']}",
+    )
+    assert_true(any("battery_power_issue" in cmd or "crash_or_loss_of_control" in cmd for cmd in manifest["recommended_secondary_commands"]), "secondary power/crash branch should have a command")
+
+
 def test_event_markers_collect_mode_err_ev_msg():
     tables = {
         "MODE": pd.DataFrame({"TimeS": [10.0], "Mode": ["LOITER"]}),
@@ -2602,6 +2635,9 @@ def main():
     test_manifest_questions_include_mission_yaw_context_for_auto_symptom()
     test_mode_compare_ranks_auto_worse_for_yaw_tracking_with_numeric_modes()
     test_manifest_recommends_mode_compare_for_mission_symptom()
+    test_manifest_yaw_mission_wobble_adds_attitude_secondary()
+    test_manifest_loiter_drift_toilet_bowling_adds_yaw_secondary()
+    test_manifest_motor_pulsed_then_dropped_adds_power_or_crash_secondary()
     test_event_markers_collect_mode_err_ev_msg()
     test_mode_segments_are_derived_from_mode_rows()
     test_validate_marks_non_copter_scope_as_partial()

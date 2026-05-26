@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 from pathlib import Path
 
@@ -68,6 +69,15 @@ HIGH_RATE_LOGGING_SETTINGS = ["INS_RAW_LOG_OPT", "INS_LOG_BAT_MASK", "INS_LOG_BA
 ACTUATOR_OUTPUT_MESSAGES = {"RCOU", "RCO2", "RCO3"}
 ESC_TELEMETRY_MESSAGES = {"ESC", "ESCX", "EDT2"}
 RAW_OR_HIGH_RATE_IMU_MESSAGES = {"GYR", "ACC", "IMU", "IMU_FAST", "RAW_IMU", "ISBH", "ISBD"}
+SECONDARY_SYMPTOM_RULES = [
+    ("yaw_misbehaviour", ["yaw", "heading", "spin", "spun", "toilet bowling", "pirouette"]),
+    ("attitude_rate_issue", ["wobble", "wobbly", "unstable", "oscillation", "oscillating", "manual control off", "manual control", "control off"]),
+    ("vibration_issue", ["vibration", "vibes", "noisy", "resonance", "clipping"]),
+    ("ekf_gps_issue", ["drift", "loiter", "gps", "ekf", "position jump", "toilet bowling"]),
+    ("battery_power_issue", ["battery", "low voltage", "voltage", "power", "brownout", "sag"]),
+    ("motor_esc_issue", ["motor", "esc", "prop", "desync", "pulsed", "pulsing"]),
+    ("rc_failsafe_prearm_issue", ["failsafe", "prearm", "pre-arm", "radio", "would not arm", "arming"]),
+]
 
 SYMPTOM_EVIDENCE_PLANS = {
     "yaw_misbehaviour": {
@@ -362,6 +372,118 @@ def _mode_compare_requested(symptom_text):
     return any(token in text for token in ["mission", "auto", "waypoint", "manual", "poshold", "loiter", "during missions"])
 
 
+def _contains_phrase(text, phrase):
+    return re.search(r"(?<!\w)" + re.escape(phrase) + r"(?!\w)", text) is not None
+
+
+def _multi_symptom_analysis(symptom_text, primary_symptom_class, present):
+    text = str(symptom_text or "").lower()
+    secondary = []
+    reasoning = []
+    mission_compare = _mode_compare_requested(text)
+
+    for symptom_class, phrases in SECONDARY_SYMPTOM_RULES:
+        matched = [phrase for phrase in phrases if _contains_phrase(text, phrase)]
+        if matched:
+            if symptom_class != primary_symptom_class and symptom_class not in secondary:
+                secondary.append(symptom_class)
+                reasoning.append(f"{symptom_class}: matched user text {', '.join(matched[:4])}.")
+            elif symptom_class == primary_symptom_class:
+                reasoning.append(f"primary {symptom_class}: matched user text {', '.join(matched[:4])}.")
+
+    if primary_symptom_class == "yaw_misbehaviour" and any(_contains_phrase(text, phrase) for phrase in ["wobbly", "wobble", "unstable", "manual control", "manual control off", "oscillation"]):
+        if "attitude_rate_issue" not in secondary:
+            secondary.append("attitude_rate_issue")
+            reasoning.append("attitude_rate_issue: yaw report also mentions wobble, instability, manual-control concern, or oscillation.")
+
+    yaw_or_attitude = primary_symptom_class in {"yaw_misbehaviour", "attitude_rate_issue"} or any(item in secondary for item in ["yaw_misbehaviour", "attitude_rate_issue"])
+    vibration_suspected = any(_contains_phrase(text, phrase) for phrase in ["vibration", "vibes", "noisy", "resonance", "clipping"])
+    if yaw_or_attitude and ("VIBE" in present or vibration_suspected):
+        if "vibration_issue" != primary_symptom_class and "vibration_issue" not in secondary:
+            secondary.append("vibration_issue")
+            reason = "vibration_issue: VIBE evidence is present for a yaw/attitude symptom." if "VIBE" in present else "vibration_issue: vibration/noise/resonance is mentioned with yaw/attitude symptoms."
+            reasoning.append(reason)
+
+    if primary_symptom_class == "ekf_gps_issue" and "toilet bowling" in text:
+        for symptom_class, reason in [
+            ("yaw_misbehaviour", "yaw_misbehaviour: toilet bowling can involve yaw/heading control or estimator interaction."),
+            ("compass_yaw_source_issue", "compass_yaw_source_issue: toilet bowling can involve compass/yaw-source evidence."),
+        ]:
+            if symptom_class not in secondary:
+                secondary.append(symptom_class)
+                reasoning.append(reason)
+
+    if primary_symptom_class == "motor_esc_issue" and any(_contains_phrase(text, phrase) for phrase in ["dropped", "fell", "drop"]):
+        for symptom_class, reason in [
+            ("battery_power_issue", "battery_power_issue: motor drop/pulsing can be power related."),
+            ("crash_or_loss_of_control", "crash_or_loss_of_control: dropped/fell wording may indicate a loss-of-control outcome."),
+        ]:
+            if symptom_class not in secondary:
+                secondary.append(symptom_class)
+                reasoning.append(reason)
+
+    if mission_compare:
+        reasoning.append("mode comparison: mission/AUTO/waypoint/manual/Loiter wording means mode-scoped evidence should be compared.")
+
+    return {
+        "secondary_symptom_classes": secondary,
+        "multi_symptom_reasoning": _dedupe(reasoning),
+        "mission_compare_requested": mission_compare,
+    }
+
+
+def _secondary_command_slug(symptom_class):
+    return {
+        "attitude_rate_issue": "wobble",
+        "yaw_misbehaviour": "yaw",
+        "vibration_issue": "vibration",
+        "ekf_gps_issue": "ekf_gps",
+        "compass_yaw_source_issue": "compass_yaw",
+        "battery_power_issue": "power",
+        "motor_esc_issue": "motor_esc",
+        "rc_failsafe_prearm_issue": "rc_failsafe",
+        "crash_or_loss_of_control": "crash",
+    }.get(symptom_class, symptom_class.replace("_issue", ""))
+
+
+def _secondary_mode_compare_slug(symptom_class):
+    if symptom_class == "attitude_rate_issue":
+        return "attitude"
+    return _secondary_command_slug(symptom_class)
+
+
+def _secondary_symptom_text(symptom_class):
+    return {
+        "attitude_rate_issue": "wobble oscillation unstable manual control",
+        "yaw_misbehaviour": "yaw heading spin toilet bowling",
+        "vibration_issue": "vibration noisy resonance",
+        "ekf_gps_issue": "Loiter drift GPS EKF",
+        "compass_yaw_source_issue": "compass heading yaw source",
+        "battery_power_issue": "battery low voltage power battery_power_issue",
+        "motor_esc_issue": "motor ESC prop desync",
+        "rc_failsafe_prearm_issue": "failsafe prearm radio",
+        "crash_or_loss_of_control": "crash loss of control dropped crash_or_loss_of_control",
+    }.get(symptom_class, symptom_class)
+
+
+def _recommended_secondary_commands(log_path, secondary_symptom_classes, mission_compare_requested):
+    commands = []
+    for symptom_class in secondary_symptom_classes:
+        slug = _secondary_command_slug(symptom_class)
+        mode_slug = _secondary_mode_compare_slug(symptom_class)
+        symptom_text = _secondary_symptom_text(symptom_class)
+        commands.append(
+            f"python scripts/ap_log_diagnose.py {log_path} --symptom \"{symptom_text}\" --out out/diagnosis_{slug}.json --plots out/plots/{slug}"
+        )
+        if mission_compare_requested and symptom_class in {"attitude_rate_issue", "yaw_misbehaviour", "ekf_gps_issue", "compass_yaw_source_issue"}:
+            commands.append(
+                f"python scripts/ap_log_mode_compare.py {log_path} --symptom {symptom_class} "
+                "--compare-modes AUTO,POSHOLD,ALTHOLD,STABILIZE --active-flight-only "
+                f"--json out/mode_compare_{mode_slug}.json --plots out/plots/mode_compare_{mode_slug}"
+            )
+    return _dedupe(commands)
+
+
 def _recommended_commands(log_path, symptom_text, spec, present, missing, index):
     commands = [
         f"python scripts/ap_log_diagnose.py {log_path} --symptom \"{symptom_text}\" --out out/diagnosis.json --plots out/plots/diagnosis"
@@ -610,6 +732,7 @@ def build_manifest_from_index(index, symptom_text, log_path, external_parameter_
     symptom_class = classify_symptom(symptom_text)
     spec = requirement_spec(symptom_class)
     present = _present_messages(index)
+    multi = _multi_symptom_analysis(symptom_text, symptom_class, present)
     missing = _missing_evidence(index, spec)
     plot_groups = _available_plot_groups(spec, present, index)
     rcin_mapping_limitation = _rcin_mapping_limitation(spec, present, parameter_index)
@@ -627,9 +750,14 @@ def build_manifest_from_index(index, symptom_text, log_path, external_parameter_
         warnings.append("Possible logging dropout context was found; inspect index.logging_health.possible_dropouts.")
     if logging_health.get("limits_diagnosis"):
         warnings.append("Logging health limits diagnosis confidence: " + logging_health.get("confidence_impact", "inspect logging_health"))
+    if multi["secondary_symptom_classes"]:
+        warnings.append("User reported multiple symptoms; do not draw conclusions from yaw branch alone.")
     return {
         "symptom_text": symptom_text,
         "symptom_class": symptom_class,
+        "primary_symptom_class": symptom_class,
+        "secondary_symptom_classes": multi["secondary_symptom_classes"],
+        "multi_symptom_reasoning": multi["multi_symptom_reasoning"],
         "warnings": warnings,
         "logging_health": logging_health,
         "parameter_context": select_relevant_parameters(symptom_class, index=parameter_index),
@@ -640,6 +768,7 @@ def build_manifest_from_index(index, symptom_text, log_path, external_parameter_
         "missing_evidence": missing,
         "next_evidence_gathering": _next_evidence_gathering(symptom_class, symptom_text, spec, present, missing, confidence_limits, index=parameter_index),
         "recommended_next_commands": _recommended_commands(log_path, symptom_text, spec, present, missing, index),
+        "recommended_secondary_commands": _recommended_secondary_commands(log_path, multi["secondary_symptom_classes"], multi["mission_compare_requested"]),
         "recommended_plots": plot_groups,
         "questions_to_answer": _yaw_questions_first(symptom_class, spec.get("diagnostic_questions", []), symptom_text),
         "confidence_limits": confidence_limits,

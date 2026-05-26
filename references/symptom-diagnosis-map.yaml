@@ -171,7 +171,7 @@ symptom_classes:
       - gps_yaw_or_moving_baseline_issue
 
   - name: motor_esc_issue
-    aliases: [motor pulsing, esc desync, motor stopped, motor hot, rpm mismatch, prop, output]
+    aliases: [motor pulsing, motor pulsed, esc desync, motor stopped, motor hot, rpm mismatch, prop, output]
     required_messages: []
     strongly_recommended_messages: [RCOU, RATE]
     optional_context_messages: [ESC, ESCX, EDT2, PIDR, PIDP, PIDY, BAT, POWR, VIBE, MSG, EV, ERR]

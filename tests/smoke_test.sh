@@ -65,6 +65,8 @@ for required in [
     "missing_optional",
     "what_cannot_be_concluded",
     "next_evidence_gathering",
+    "secondary_symptom_classes",
+    "recommended_secondary_commands",
     "flight_status",
     "recommended_next_steps",
     "python scripts/ap_next_steps.py",
