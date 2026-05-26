@@ -26,6 +26,7 @@ from ap_log_diagnose import diagnose_yaw
 from ap_log_diagnose import add_event_findings
 from ap_err_decode import decode_err_entries
 from ap_evidence_completeness import build_control_evidence_completeness
+from ap_artifact_recommendations import recommend_mode_compare_artifacts
 from ap_log_extract import write_jsonl_stream
 from ap_timeline_context import build_events_relative_to_window
 from ap_log_diagnose import make_targeted_plots_from_tables
@@ -1179,6 +1180,44 @@ def test_timeline_context_multiple_mode_intervals_classify_correctly():
     assert_true(("MODE", 12.0) in inside and ("EV", 32.0) in inside and ("MODE", 35.0) in inside, f"events inside either selected interval should be inside: {inside}")
     assert_true(("ARM", 2.0) in before and ("MODE", 5.0) in before, f"events before first interval should be before: {before}")
     assert_true(("ARM", 45.0) in after, f"events after last interval should be after: {after}")
+
+
+def test_mode_compare_recommends_yaw_rate_plot_for_yaw_symptom():
+    result = {
+        "symptom_class": "yaw_misbehaviour",
+        "ranking": [{"decoded_mode": "AUTO", "score": 9.0}, {"decoded_mode": "POSHOLD", "score": 2.0}],
+        "mode_comparisons": [{"decoded_mode": "AUTO", "ranking_score": 9.0}, {"decoded_mode": "POSHOLD", "ranking_score": 2.0}],
+    }
+    artifacts, note = recommend_mode_compare_artifacts(result, ["out/plots/yaw_rate_comparison_by_mode.html"])
+
+    assert_true(note is None, f"plots exist so no missing-plot note should be emitted: {note}")
+    assert_true(artifacts[0]["label"] == "Yaw rate comparison by mode", f"yaw artifact should be first: {artifacts}")
+    assert_true(artifacts[0]["path"].endswith("yaw_rate_comparison_by_mode.html"), "yaw-rate plot path should be retained")
+    assert_true("AUTO worse than POSHOLD" in artifacts[0]["why"], "reason should explain mode comparison value")
+
+
+def test_mode_compare_recommends_vibration_plot_when_elevated():
+    result = {
+        "symptom_class": "yaw_misbehaviour",
+        "mode_comparisons": [
+            {"decoded_mode": "AUTO", "metrics": {"vibration": {"VibeX": {"max": 42.0}}}},
+            {"decoded_mode": "POSHOLD", "metrics": {"vibration": {"VibeX": {"max": 12.0}}}},
+        ],
+    }
+    artifacts, _note = recommend_mode_compare_artifacts(result, ["out/plots/vibration_comparison_by_mode.html"])
+
+    labels = [item["label"] for item in artifacts]
+    assert_true("Vibration comparison by mode" in labels, f"elevated vibration should recommend vibration plot: {artifacts}")
+    vibe = next(item for item in artifacts if item["label"] == "Vibration comparison by mode")
+    assert_true("vibration elevated in AUTO" in vibe["why"], "vibration artifact should explain why it matters")
+
+
+def test_artifact_recommendations_empty_when_no_plots_generated():
+    result = {"symptom_class": "yaw_misbehaviour", "ranking": [{"decoded_mode": "AUTO", "score": 9.0}]}
+    artifacts, note = recommend_mode_compare_artifacts(result, [])
+
+    assert_true(artifacts == [], f"no generated plots should produce no artifacts: {artifacts}")
+    assert_true("No plots were generated" in note, "no-plot note should be explicit")
 
 
 def test_mode_compare_ranks_auto_worse_for_yaw_tracking_with_numeric_modes():
@@ -2526,7 +2565,7 @@ def test_evidence_digest_preserves_missing_evidence_caveats_and_next_steps():
     assert_true("RATE" in "\n".join(digest["missing_evidence"]) and "RCOU" in "\n".join(digest["missing_evidence"]), "manifest missing evidence should be retained")
     assert_true("PIDY/PIDR/PIDP" in "\n".join(digest["missing_evidence"]), "next-step missing evidence should be retained")
     assert_true(any("Pause AUTO" in item for item in digest["safety_gate_next_steps"]), "next steps should be included")
-    assert_true("out/diagnosis.json" in digest["recommended_user_artifacts"], "recommended artifacts should be included")
+    assert_true(any(item.get("path") == "out/diagnosis.json" for item in digest["recommended_user_artifacts"]), "recommended artifacts should be included")
 
 
 def test_evidence_digest_avoids_final_diagnosis_language():
@@ -3099,6 +3138,9 @@ def main():
     test_timeline_context_post_window_warning_is_not_in_window_cause()
     test_timeline_context_in_window_err_is_candidate_causal_evidence()
     test_timeline_context_multiple_mode_intervals_classify_correctly()
+    test_mode_compare_recommends_yaw_rate_plot_for_yaw_symptom()
+    test_mode_compare_recommends_vibration_plot_when_elevated()
+    test_artifact_recommendations_empty_when_no_plots_generated()
     test_mode_compare_ranks_auto_worse_for_yaw_tracking_with_numeric_modes()
     test_mode_compare_auto_mission_yaw_demand_near_configured_rate_limit()
     test_mode_compare_mission_yaw_decodes_wp_yaw_behavior()

@@ -5,6 +5,7 @@ import argparse
 import json
 from pathlib import Path
 
+from ap_artifact_recommendations import merge_recommended_artifacts
 from ap_common import write_json
 
 
@@ -260,23 +261,16 @@ def _confidence_limits(diagnosis, mode_compare, manifest, fft, input_limitations
 
 
 def _recommended_artifacts(diagnosis, mode_compare, param_lookup, fft, manifest, next_steps):
+    merged = merge_recommended_artifacts(mode_compare or {}, diagnosis or {}, next_steps or {}, manifest or {}, fft or {})
+    if merged:
+        return merged
     out = []
-    for label, source in [
-        ("diagnosis", diagnosis),
-        ("mode comparison", mode_compare),
-        ("parameter lookup", param_lookup),
-        ("FFT", fft),
-        ("manifest", manifest),
-        ("next steps", next_steps),
-    ]:
-        if source:
-            out.append(label)
-    for source in [next_steps or {}, diagnosis or {}, manifest or {}]:
-        out.extend(_as_list(source.get("recommended_user_artifacts")))
+    for source in [manifest or {}]:
         artifacts = source.get("key_artifacts") or {}
         if isinstance(artifacts, dict):
-            out.extend(str(v) for v in artifacts.values())
-    return _dedupe(out)
+            for label, path in artifacts.items():
+                out.append({"label": str(label).replace("_", " "), "path": str(path), "why": "case-level evidence artifact for agent review", "priority": 99})
+    return out[:8]
 
 
 def _control_evidence_completeness(diagnosis, mode_compare, manifest):
@@ -342,7 +336,7 @@ def markdown_summary(digest):
         ("Timeline/failsafe context", digest.get("timeline_failsafe_context", [])),
         ("Control evidence completeness", _format_control_evidence_completeness(digest.get("control_evidence_completeness"))),
         ("Safety gate / next steps", digest.get("safety_gate_next_steps", [])),
-        ("Recommended user artifacts", digest.get("recommended_user_artifacts", [])),
+        ("Recommended user artifacts", _format_user_artifacts(digest.get("recommended_user_artifacts", []))),
     ]
     lines = ["# Evidence Digest", "", digest.get("digest_note", "Evidence digest for the agent. This is not a final diagnosis."), ""]
     for title, items in sections:
@@ -378,6 +372,22 @@ def _format_control_evidence_completeness(completeness):
     items = [f"{key}: {completeness.get(key)}" for key in order if completeness.get(key)]
     items.extend(str(item) for item in completeness.get("confidence_limits", [])[:6])
     return items
+
+
+def _format_user_artifacts(artifacts):
+    out = []
+    for item in artifacts or []:
+        if isinstance(item, dict):
+            label = item.get("label") or item.get("path")
+            path = item.get("path")
+            why = item.get("why")
+            if path and why:
+                out.append(f"{label}: {path} ({why})")
+            elif path:
+                out.append(f"{label}: {path}")
+        elif item:
+            out.append(str(item))
+    return out
 
 
 def build_from_paths(args):

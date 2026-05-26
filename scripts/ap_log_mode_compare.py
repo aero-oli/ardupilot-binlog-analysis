@@ -27,6 +27,7 @@ from ap_common import (
     write_json,
 )
 from ap_modes import decode_copter_mode, mode_label
+from ap_artifact_recommendations import recommend_mode_compare_artifacts
 from ap_evidence_completeness import build_control_evidence_completeness
 from ap_param_context import merge_external_parameters, parse_param_file
 from ap_parameters import enrich_parameter_entry
@@ -452,6 +453,8 @@ def compare_modes(
         "ranking": [{"decoded_mode": m["decoded_mode"], "query": m["query"], "score": m["ranking_score"]} for m in ranked],
         "confidence_limits": list(dict.fromkeys(confidence_limits)),
         "missing_evidence": missing,
+        "recommended_user_artifacts": [],
+        "recommended_user_artifacts_note": "No plots were generated; recommended_user_artifacts is empty.",
         "diagnostic_aid_note": "Mode comparison is a diagnostic aid for scoping symptoms across flight modes; it is not a final conclusion.",
     }
 
@@ -546,6 +549,12 @@ def main() -> int:
             result["external_parameter_context"] = external_parameter_context
         if args.plots:
             result["plots"] = _plot_series_by_mode(result, args.plots)
+        artifacts, artifact_note = recommend_mode_compare_artifacts(result, result.get("plots", []))
+        result["recommended_user_artifacts"] = artifacts
+        if artifact_note:
+            result["recommended_user_artifacts_note"] = artifact_note
+        else:
+            result.pop("recommended_user_artifacts_note", None)
         write_json(args.json, result)
         print(f"Compared {len(result['mode_comparisons'])} modes; plots={len(result.get('plots', []))}")
         return 0

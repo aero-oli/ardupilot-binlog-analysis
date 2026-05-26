@@ -12,6 +12,7 @@ from ap_common import (
     numeric_series, output_channel_columns, output_channel_label, output_mapping_from_tables,
     parse_time_window, percentile, rms, rows_to_dataframe, safe_float, severity_rank, vehicle_scope, write_json
 )
+from ap_artifact_recommendations import recommend_diagnosis_artifacts
 from ap_diag_helpers import add_motor_esc_findings, add_power_findings, vals
 from ap_diag_requirements import missing_by_tier
 from ap_evidence_completeness import build_control_evidence_completeness
@@ -999,6 +1000,12 @@ def main() -> int:
             index=parameter_index,
             parameters=merged_params["parameters"],
         ) if args.plots else []
+        artifact_result = {
+            "symptom_class": symptom_class,
+            "findings": findings,
+            "checked_but_not_supported": checked,
+        }
+        recommended_user_artifacts, artifact_note = recommend_diagnosis_artifacts(artifact_result, plots)
         warnings = []
         if stats.get("max_messages_reached"):
             warnings.append("Diagnosis stopped at --max-messages; evidence may be partial.")
@@ -1072,6 +1079,7 @@ def main() -> int:
             "flight_status": action_plan["flight_status"],
             "recommended_next_steps": action_plan["recommended_next_steps"],
             "plots": plots,
+            "recommended_user_artifacts": recommended_user_artifacts,
             "logging_dropouts": index.get("logging_dropouts", []),
             "possible_logging_dropouts": index.get("possible_logging_dropouts", []),
             "safety_note": "Do not treat this diagnosis as clearance to fly. Bench and ground checks are required after any configuration, mechanical, power, or tuning changes.",
@@ -1084,6 +1092,8 @@ def main() -> int:
                 index=parameter_index,
             ),
         }
+        if artifact_note:
+            result["recommended_user_artifacts_note"] = artifact_note
         write_json(args.out, result)
         print(f"Diagnosis class={symptom_class}; findings={len(findings)}; plots={len(plots)}")
         return 0

@@ -104,6 +104,7 @@ python scripts/ap_log_diagnose.py LOG.BIN --symptom "USER SYMPTOM" --out out/dia
 - `missing_required`, `missing_strongly_recommended`, and `missing_optional`: unavailable messages separated by diagnostic importance. For yaw, only `ATT` and `RATE` are required; `PIDY`, `RCOU`, and `MODE` strengthen confidence, while timeline/context messages such as `MSG`, `EV`, and `ERR` are optional evidence.
 - `control_evidence_completeness`: standard completeness status for tracking, PID, actuator, ESC, RC input, vibration, FFT, GPS/EKF, and parameter context. Inspect this before ranking causes or deciding whether tuning/controller conclusions are supportable.
 - `events_relative_to_window`: `MSG`, `EV`, `ERR`, `ARM`, and `MODE` entries grouped as before-window, inside-window, and after-window. Use this to separate symptom-window evidence from post-flight or disarmed safety context.
+- `recommended_user_artifacts`: concise shortlist of plots/files worth linking in the final answer, with reasons. Use it as a starting point, not a requirement to link every generated file.
 - `next_evidence_gathering`: structured planning guidance for what to collect next when evidence is missing. Read this before recommending a parameter review, bench check, ground test, restrained test, controlled flight, or no-fly-until-checked path. It is a safety planning aid, not a diagnosis.
 - `flight_status` and `recommended_next_steps`: structured planning aids for the final user answer. Read them, verify they match the findings and missing evidence, and surface the relevant ordered next steps in your own words. Do not treat them as an automatically generated final answer.
 
@@ -134,7 +135,7 @@ Then inspect `out/diagnosis.json`, generated plots, validation/index summaries, 
 - causes checked but not supported;
 - missing data;
 - safety-critical checks before further flight;
-- generated plots;
+- top relevant generated plots/files, usually from `recommended_user_artifacts`, without cluttering the answer with every generated file;
 - what cannot be concluded.
 
 ## When evidence is missing

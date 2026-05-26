@@ -12,6 +12,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
+from ap_artifact_recommendations import merge_recommended_artifacts
 from ap_common import read_json, write_json
 
 
@@ -285,6 +286,13 @@ def build_case_investigation(logs, symptom, out_dir, runner=None):
             next_steps_cmd.extend(["--fft", str(artifacts["fft"])])
         _run_step(runner, next_steps_cmd, failures, artifact=artifacts["next_steps"], label="next_steps")
 
+        recommended_user_artifacts = merge_recommended_artifacts(
+            _read_json_if_exists(mode_compare_paths[0]) if mode_compare_paths else {},
+            _read_json_if_exists(artifacts["diagnosis"]),
+            _read_json_if_exists(artifacts["next_steps"]),
+            manifest,
+        )
+
         warnings = []
         warnings.extend(_read_json_if_exists(artifacts["validate"]).get("warnings", []))
         warnings.extend(manifest.get("warnings", []))
@@ -300,6 +308,7 @@ def build_case_investigation(logs, symptom, out_dir, runner=None):
             "primary_symptom_class": primary,
             "secondary_symptom_classes": secondary,
             "key_artifacts": key_artifacts,
+            "recommended_user_artifacts": recommended_user_artifacts,
             "missing_evidence": manifest.get("missing_evidence", {}),
             "confidence_limits": confidence_limits,
         })
@@ -326,6 +335,7 @@ def build_case_investigation(logs, symptom, out_dir, runner=None):
             "cross_log_summary": str(out_dir / "comparisons" / "cross_log_summary.json"),
             "mode_compare_summary": str(out_dir / "comparisons" / "mode_compare_summary.json"),
         },
+        "recommended_user_artifacts": merge_recommended_artifacts(*log_records),
         "planning_note": "Case investigation produces an evidence pack for the agent. It does not write the final diagnosis.",
     }
     write_json(out_dir / "case_manifest.json", case_manifest)
