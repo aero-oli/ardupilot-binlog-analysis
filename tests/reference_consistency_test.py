@@ -119,8 +119,29 @@ def test_skill_references_exist():
         "references/battery-power-diagnosis.md",
         "references/rc-failsafe-prearm-diagnosis.md",
         "references/crash-or-loss-of-control-diagnosis.md",
+        "references/final-answer-patterns.md",
     ]:
         assert_true((ROOT / required).exists(), f"symptom guide missing: {required}")
+
+
+def test_final_answer_patterns_linked_and_complete():
+    skill = (ROOT / "SKILL.md").read_text(encoding="utf-8")
+    path = ROOT / "references" / "final-answer-patterns.md"
+    assert_true("references/final-answer-patterns.md" in skill, "SKILL.md should link final-answer patterns")
+    text = path.read_text(encoding="utf-8")
+    for phrase in [
+        "Most likely issue",
+        "Mission Yaw And Wobble",
+        "Motor/ESC Issue",
+        "Vibration/Filter Issue",
+        "EKF/GPS/Loiter Issue",
+        "RC/Failsafe/Pre-Arm Issue",
+        "Crash/Loss-Of-Control",
+        "Recommended next steps",
+        "What not to do",
+        "Do not overstate confidence",
+    ]:
+        assert_true(phrase in text, f"final-answer patterns missing phrase: {phrase}")
 
 
 def test_skill_requires_safety_next_steps():
