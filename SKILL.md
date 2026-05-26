@@ -75,6 +75,14 @@ python scripts/ap_methodic_711_motor_oscillation.py LOG.BIN --out out/methodic_7
 
 This tool gathers hover-window, RC-centered RATE output, PID term, mapped motor output, vibration, and ESC telemetry evidence. It classifies the step conservatively and never changes gains.
 
+For Methodic 8.1 harmonic notch / filter review, the dispatcher uses the dedicated notch evidence tool. You may also run it directly:
+
+```bash
+python scripts/ap_methodic_notch_review.py LOG.BIN --out out/methodic_8_1.json --summary out/methodic_8_1.md --plots out/plots/methodic_8_1
+```
+
+This tool gathers VIBE/clipping, raw/high-rate IMU or ISBH/ISBD FFT readiness, dominant peaks, PID Dmod/Flags, ESC/RPM evidence, logging health, and current notch parameter context. It gives safe next actions and must not be treated as an automatic notch-parameter setter.
+
 If the user gives required observations such as motor/ESC heat, audible oscillation, visible shaking, or hard-to-control behaviour, pass them as repeated `--manual-observation` values. If those observations are not available, preserve that as missing evidence; do not promote the step to a clean pass from log evidence alone.
 
 `ap_methodic_step.py` returns a standard schema with `result`, `safety_gate`, `evidence_used`, `missing_evidence`, `manual_observations_required`, `findings`, `parameter_context`, `plots`, `recommended_next_steps`, `what_not_to_do`, `next_methodic_step`, and `confidence_limits`. Treat the step result as structured evidence, not final truth. Inspect the JSON, summary, and plots before writing conclusions yourself.

@@ -43,9 +43,9 @@ steps:
     phase: "minimal_tuning"
     official_anchor: "#81-notch-filter-calibration"
     official_url: "https://ardupilot.github.io/MethodicConfigurator/TUNING_GUIDE_ArduCopter#81-notch-filter-calibration"
-    required_messages: [IMU, VIBE]
-    strongly_recommended_messages: [ISBH, ISBD, ESC, ESCX, EDT2, RATE, PARM]
-    optional_messages: [GYR, ACC, MSG, EV, ERR, MODE]
+    required_messages: [VIBE]
+    strongly_recommended_messages: [IMU, GYR, ACC, ISBH, ISBD, RATE, PIDR, PIDP, PIDY, PARM]
+    optional_messages: [ESC, ESCX, EDT2, RPM, BAT, POWR, RCOU, RCO2, RCO3, MSG, EV, ERR, MODE]
     relevant_parameters: [INS_HNTCH_*, INS_HNTC2_*, INS_LOG_BAT_MASK, INS_LOG_BAT_OPT, LOG_BITMASK, LOG_FILE_RATEMAX]
     preferred_window: "First-flight hover or targeted filter-review hover with representative motor RPM/throttle."
     manual_observations_required: ["No visible vibration", "No abnormal sound", "No hot motors or ESCs after the filter-review flight"]
