@@ -264,6 +264,14 @@ def _recommended_artifacts(diagnosis, mode_compare, param_lookup, fft, manifest,
     return _dedupe(out)
 
 
+def _control_evidence_completeness(diagnosis, mode_compare, manifest):
+    for source in [diagnosis or {}, mode_compare or {}, manifest or {}]:
+        completeness = source.get("control_evidence_completeness")
+        if completeness:
+            return completeness
+    return None
+
+
 def build_evidence_digest(*, diagnosis=None, mode_compare=None, param_lookup=None, fft=None, manifest=None, next_steps=None, input_limitations=None):
     input_limitations = list(input_limitations or [])
     observations = []
@@ -273,6 +281,7 @@ def build_evidence_digest(*, diagnosis=None, mode_compare=None, param_lookup=Non
         observations.append("Diagnosis, mode comparison, and parameter context are all present; cross-check timing before promoting any hypothesis.")
     observations = _dedupe(observations)
 
+    completeness = _control_evidence_completeness(diagnosis, mode_compare, manifest)
     digest = {
         "digest_note": "Evidence digest for the agent. This is not a final diagnosis and does not replace final reasoning.",
         "strongest_supported_observations": observations,
@@ -285,6 +294,7 @@ def build_evidence_digest(*, diagnosis=None, mode_compare=None, param_lookup=Non
         "parameter_context": _parameter_context(param_lookup),
         "fft_noise_status": _fft_status(fft),
         "timeline_failsafe_context": _timeline_context(diagnosis, manifest),
+        "control_evidence_completeness": completeness,
         "safety_gate_next_steps": _next_steps(next_steps, diagnosis),
         "recommended_user_artifacts": _recommended_artifacts(diagnosis, mode_compare, param_lookup, fft, manifest, next_steps),
         "confidence_limits": _confidence_limits(diagnosis, mode_compare, manifest, fft, input_limitations),
@@ -315,6 +325,7 @@ def markdown_summary(digest):
         ("Parameter context", digest.get("parameter_context", [])),
         ("FFT/noise status", digest.get("fft_noise_status", [])),
         ("Timeline/failsafe context", digest.get("timeline_failsafe_context", [])),
+        ("Control evidence completeness", _format_control_evidence_completeness(digest.get("control_evidence_completeness"))),
         ("Safety gate / next steps", digest.get("safety_gate_next_steps", [])),
         ("Recommended user artifacts", digest.get("recommended_user_artifacts", [])),
     ]
@@ -331,6 +342,27 @@ def markdown_summary(digest):
         lines.extend(f"- {item}" for item in digest["confidence_limits"])
         lines.append("")
     return "\n".join(lines).rstrip() + "\n"
+
+
+def _format_control_evidence_completeness(completeness):
+    if not completeness:
+        return []
+    order = [
+        "overall",
+        "attitude_tracking",
+        "rate_tracking",
+        "pid_terms",
+        "actuator_outputs",
+        "esc_telemetry",
+        "rc_input",
+        "vibration",
+        "fft",
+        "gps_ekf",
+        "parameter_context",
+    ]
+    items = [f"{key}: {completeness.get(key)}" for key in order if completeness.get(key)]
+    items.extend(str(item) for item in completeness.get("confidence_limits", [])[:6])
+    return items
 
 
 def build_from_paths(args):

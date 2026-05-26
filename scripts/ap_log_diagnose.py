@@ -14,6 +14,7 @@ from ap_common import (
 )
 from ap_diag_helpers import add_motor_esc_findings, add_power_findings, vals
 from ap_diag_requirements import missing_by_tier
+from ap_evidence_completeness import build_control_evidence_completeness
 from ap_next_step_helpers import build_diagnosis_action_plan
 from ap_symptom_map import requirement_spec
 from ap_window_select import select_analysis_window
@@ -978,6 +979,12 @@ def main() -> int:
         )
         rcin_summary = summarize_rcin(tables, parameter_index)
         parameter_context = select_relevant_parameters(symptom_class, index=parameter_index, tables=full_tables)
+        control_evidence_completeness = build_control_evidence_completeness(
+            symptom_class,
+            index=parameter_index,
+            tables=tables,
+            external_parameter_context=external_parameter_context,
+        )
         if symptom_class == "yaw_misbehaviour":
             findings, context, checked, missing_required, missing_strongly, missing_optional = diagnose_yaw(tables, parameter_index, vibration_assessment=vibration_assessment)
         else:
@@ -1047,6 +1054,7 @@ def main() -> int:
             "context": context,
             "checked_but_not_supported": checked,
             "parameter_context": parameter_context,
+            "control_evidence_completeness": control_evidence_completeness,
             "external_parameter_context": merged_params["external_parameter_context"],
             "parameter_conflicts": merged_params["parameter_conflicts"],
             "parameter_source_precedence": merged_params["parameter_source_precedence"],

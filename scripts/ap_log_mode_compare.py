@@ -27,6 +27,7 @@ from ap_common import (
     write_json,
 )
 from ap_modes import decode_copter_mode, mode_label
+from ap_evidence_completeness import build_control_evidence_completeness
 from ap_param_context import merge_external_parameters, parse_param_file
 from ap_parameters import enrich_parameter_entry
 from ap_rcin import rc_channel_mapping, rcin_channel_col
@@ -439,6 +440,7 @@ def compare_modes(
     return {
         "symptom": symptom,
         "symptom_class": symptom_class,
+        "control_evidence_completeness": build_control_evidence_completeness(symptom_class, index=index, tables=tables),
         "requested_modes": modes,
         "selected_modes": modes,
         "decoded_modes": [decode_copter_mode(m) or mode_label(m) for m in modes],

@@ -25,6 +25,7 @@ from ap_log_diagnose import diagnose_by_class
 from ap_log_diagnose import diagnose_yaw
 from ap_log_diagnose import add_event_findings
 from ap_err_decode import decode_err_entries
+from ap_evidence_completeness import build_control_evidence_completeness
 from ap_log_extract import write_jsonl_stream
 from ap_log_diagnose import make_targeted_plots_from_tables
 from ap_log_fft import fft_from_isb_rows, fft_from_tables
@@ -1089,6 +1090,51 @@ def test_manifest_questions_include_mission_yaw_context_for_auto_symptom():
     assert_true("Is the yaw issue mostly in AUTO/mission?" in questions, "mission yaw manifest should ask whether symptom is mission-specific")
     assert_true("Is RATE.YDes unusually high or continuous in AUTO?" in questions, "mission yaw manifest should ask about commanded yaw demand")
     assert_true("Does WP_YAW_BEHAVIOR explain mission yaw demands?" in questions, "mission yaw manifest should ask about mission yaw behaviour")
+
+
+def test_control_evidence_completeness_full_evidence_is_high():
+    index = {
+        "messages": {name: {} for name in ["ATT", "RATE", "PIDY", "RCOU", "ESC", "RCIN", "VIBE", "GYR", "GPS", "XKF4", "MAG", "PARM"]},
+        "parameters": {"WP_YAW_BEHAVIOR": 2},
+    }
+    completeness = build_control_evidence_completeness("yaw_misbehaviour", index=index, fft_result={"fft_available": True})
+
+    assert_true(completeness["overall"] == "high", f"full yaw evidence should be high completeness: {completeness}")
+    assert_true(completeness["pid_terms"] == "available", "PIDY should satisfy yaw PID completeness")
+    assert_true(completeness["esc_telemetry"] == "available", "ESC telemetry should be available")
+    assert_true(completeness["fft"] == "available", "available FFT result should be reflected")
+
+
+def test_control_evidence_completeness_missing_pid_and_esc_is_medium_for_yaw():
+    index = {
+        "messages": {name: {} for name in ["ATT", "RATE", "RCOU", "RCIN", "VIBE", "GPS", "XKF4", "PARM"]},
+        "parameters": {"WP_YAW_BEHAVIOR": 2},
+    }
+    completeness = build_control_evidence_completeness("yaw_misbehaviour", index=index)
+
+    assert_true(completeness["overall"] == "medium", f"missing PIDY/ESC should cap yaw completeness at medium: {completeness}")
+    assert_true(completeness["pid_terms"] == "missing", "missing PIDY should be visible")
+    assert_true(completeness["esc_telemetry"] == "missing", "missing ESC telemetry should be visible")
+    limits = "\n".join(completeness["confidence_limits"])
+    assert_true("PIDY" in limits and "ESC-level confirmation" in limits, "PIDY and ESC limits should be human-readable")
+
+
+def test_control_evidence_completeness_missing_att_rate_is_low():
+    index = {"messages": {"RCOU": {}, "PARM": {}}, "parameters": {"FRAME_CLASS": 1}}
+    completeness = build_control_evidence_completeness("attitude_rate_issue", index=index)
+
+    assert_true(completeness["overall"] == "low", f"missing ATT/RATE should make control completeness low: {completeness}")
+    assert_true(completeness["attitude_tracking"] == "missing", "missing ATT should be visible")
+    assert_true(completeness["rate_tracking"] == "missing", "missing RATE should be visible")
+
+
+def test_control_evidence_completeness_fft_unusable_adds_confidence_limit():
+    index = {"messages": {name: {} for name in ["ATT", "RATE", "PIDR", "PIDP", "RCOU", "VIBE", "GYR", "PARM"]}, "parameters": {"FRAME_CLASS": 1}}
+    fft = {"fft_available": False, "reason": "sample timestamps are sparse or irregular"}
+    completeness = build_control_evidence_completeness("attitude_rate_issue", index=index, fft_result=fft)
+
+    assert_true(completeness["fft"] == "unusable", f"unusable FFT should be reported: {completeness}")
+    assert_true(any("FFT unusable" in item and "sparse or irregular" in item for item in completeness["confidence_limits"]), "FFT unusable reason should limit vibration/filter confidence")
 
 
 def test_mode_compare_ranks_auto_worse_for_yaw_tracking_with_numeric_modes():
@@ -3002,6 +3048,10 @@ def main():
     test_parameter_context_yaw_includes_mission_yaw_parameters()
     test_parameter_context_mission_yaw_includes_rate_accel_and_headroom()
     test_manifest_questions_include_mission_yaw_context_for_auto_symptom()
+    test_control_evidence_completeness_full_evidence_is_high()
+    test_control_evidence_completeness_missing_pid_and_esc_is_medium_for_yaw()
+    test_control_evidence_completeness_missing_att_rate_is_low()
+    test_control_evidence_completeness_fft_unusable_adds_confidence_limit()
     test_mode_compare_ranks_auto_worse_for_yaw_tracking_with_numeric_modes()
     test_mode_compare_auto_mission_yaw_demand_near_configured_rate_limit()
     test_mode_compare_mission_yaw_decodes_wp_yaw_behavior()

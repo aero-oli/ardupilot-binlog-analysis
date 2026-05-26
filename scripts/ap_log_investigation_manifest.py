@@ -8,6 +8,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from ap_common import AnalysisError, classify_symptom, collect_dataflash, missing_messages, write_json
+from ap_evidence_completeness import build_control_evidence_completeness
 from ap_param_context import merge_external_parameters, parse_param_file
 from ap_parameters import find_parameter_metadata, load_parameter_metadata, log_bitmask_missing_guidance, select_relevant_parameters
 from ap_rcin import rc_channel_mapping, rcin_channel_col
@@ -737,6 +738,11 @@ def build_manifest_from_index(index, symptom_text, log_path, external_parameter_
     plot_groups = _available_plot_groups(spec, present, index)
     rcin_mapping_limitation = _rcin_mapping_limitation(spec, present, parameter_index)
     confidence_limits = _confidence_limits(missing, rcin_mapping_limitation=rcin_mapping_limitation)
+    control_evidence_completeness = build_control_evidence_completeness(
+        symptom_class,
+        index=parameter_index,
+        external_parameter_context=external_parameter_context,
+    )
     warnings = []
     stats = index.get("parser_stats", {})
     if stats.get("max_messages_reached"):
@@ -761,6 +767,7 @@ def build_manifest_from_index(index, symptom_text, log_path, external_parameter_
         "warnings": warnings,
         "logging_health": logging_health,
         "parameter_context": select_relevant_parameters(symptom_class, index=parameter_index),
+        "control_evidence_completeness": control_evidence_completeness,
         "external_parameter_context": merged_params["external_parameter_context"],
         "parameter_conflicts": merged_params["parameter_conflicts"],
         "parameter_source_precedence": merged_params["parameter_source_precedence"],
