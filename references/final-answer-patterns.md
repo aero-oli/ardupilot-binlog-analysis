@@ -60,14 +60,14 @@ feel, or yaw/attitude authority concerns.
 6. Is EKF/GPS/compass supported or not?
    Distinguish in-window EKF/GPS/compass evidence from after-window pre-arm or
    disarmed warnings.
-7. What evidence is missing?
+7. Missing evidence.
    Name missing `PIDY`, actuator outputs, ESC telemetry, RC input, raw/high-rate
    IMU, pure manual modes, or parameter context.
 8. What are the ordered next steps?
-   Start with the safety gate. Pause AUTO/mission flying when mission behaviour
-   is suspect. Then bench/mechanical checks, configuration/logging checks,
+   Safety gate: pause AUTO/mission flying when mission behaviour is suspect.
+   Recommended next steps: bench/mechanical checks, configuration/logging checks,
    controlled hover only if safe, and reanalysis before tuning.
-9. What should not be changed or attempted yet?
+9. What not to do.
    Do not repeat the mission to see if it happens again. Do not tune yaw or
    attitude gains until vibration, actuator authority, power, and missing
    controller evidence are understood. Do not disable safety checks or failsafes.
@@ -80,13 +80,14 @@ feel, or yaw/attitude authority concerns.
    battery/current, rate tracking, and any abrupt log ending.
 3. Say what was checked but not supported, such as no active-flight output
    saturation or no ESC error rows.
-4. State missing evidence: `RCOU`/`RCO2`/`RCO3`, `PARM` mapping, ESC telemetry,
+4. Missing evidence: state missing `RCOU`/`RCO2`/`RCO3`, `PARM` mapping, ESC telemetry,
    battery/current, or rate evidence.
-5. Recommended next steps: bench-only or do-not-fly gate when hardware/power is
-   unresolved; inspect props, motors, bearings, ESC wiring, connectors, frame
-   arms, motor order/direction, and output mapping; collect ground/bench evidence
-   before any controlled hover.
-6. What not to do: do not repeat flight after suspected motor/ESC/power fault;
+5. Safety gate: bench-only or do-not-fly gate when hardware/power is
+   unresolved.
+6. Recommended next steps: inspect props, motors, bearings, ESC wiring,
+   connectors, frame arms, motor order/direction, and output mapping; collect
+   ground/bench evidence before any controlled hover.
+7. What not to do: do not repeat flight after suspected motor/ESC/power fault;
    do not increase gains to overcome a possible hardware issue; do not bypass
    arming, battery, or motor safety checks.
 
@@ -96,11 +97,14 @@ feel, or yaw/attitude authority concerns.
    unsupported.
 2. Use `control_evidence_completeness`, `VIBE`, clipping deltas, raw/high-rate
    IMU, FFT availability, and correlations with rate/attitude errors.
-3. Mention if FFT is missing or unusable and what that prevents.
-4. Recommended next steps: mechanical inspection first, then logging/config
+3. Missing evidence: mention if FFT, raw/high-rate IMU, PID, or actuator evidence
+   is missing or unusable and what that prevents.
+4. Safety gate: do not fly through severe vibration or clipping; use bench or
+   controlled-hover-only limits according to severity.
+5. Recommended next steps: mechanical inspection first, then logging/config
    review for raw/high-rate IMU or batch sampler if needed, then only a short
    controlled capture if the aircraft is otherwise stable.
-5. What not to do: do not tune filters or gains blindly; do not fly through
+6. What not to do: do not tune filters or gains blindly; do not fly through
    severe vibration or clipping; do not leave high-volume diagnostic logging on
    after the test.
 
@@ -112,13 +116,13 @@ feel, or yaw/attitude authority concerns.
    vibration, and mode comparison.
 3. Separate Loiter/POSHOLD/AUTO navigation evidence from Stabilize/AltHold
    attitude-control evidence.
-4. State missing evidence: GPS quality, EKF innovations/test ratios, MAG,
+4. Missing evidence: state missing GPS quality, EKF innovations/test ratios, MAG,
    timeline messages, pure manual modes, vibration/power context, or parameters.
-5. Recommended next steps: no navigation/mission flight if navigation behaviour
-   is suspect; inspect GPS/compass placement, wiring, power, antenna view,
-   vibration, and EKF/yaw-source configuration; collect controlled evidence only
-   after manual/altitude control is stable.
-6. What not to do: do not disable EKF/GPS/compass checks or failsafes as a
+5. Safety gate: no navigation/mission flight if navigation behaviour is suspect.
+6. Recommended next steps: inspect GPS/compass placement, wiring, power, antenna
+   view, vibration, and EKF/yaw-source configuration; collect controlled evidence
+   only after manual/altitude control is stable.
+7. What not to do: do not disable EKF/GPS/compass checks or failsafes as a
    routine fix; do not call post-flight pre-arm warnings the cause of an
    in-window event unless timing supports it.
 
@@ -130,25 +134,27 @@ feel, or yaw/attitude authority concerns.
    post-flight/disarmed context, or missing.
 3. Use `RCIN`, `RCMAP_*`, arming/failsafe parameters, battery/board power,
    GPS/EKF/compass pre-arm evidence, and decoded ERR context.
-4. State missing evidence: `MSG`, `ERR`, `ARM`, `RCIN`, `PARM`, power, GPS/EKF,
+4. Missing evidence: state missing `MSG`, `ERR`, `ARM`, `RCIN`, `PARM`, power, GPS/EKF,
    or `LOG_DISARMED` for boot/pre-arm cases.
-5. Recommended next steps: ground-test or bench-only gate; record exact GCS
-   messages; use `LOG_DISARMED` only when needed for boot/pre-arm evidence;
-   check RC mapping, receiver health, safety switch, power, GPS/EKF/compass
-   warnings, and failsafe settings.
-6. What not to do: do not bypass arming checks, RC failsafe, battery failsafe,
+5. Safety gate: ground-test or bench-only gate until arming, RC, or failsafe
+   evidence is understood.
+6. Recommended next steps: record exact GCS messages; use `LOG_DISARMED` only
+   when needed for boot/pre-arm evidence; check RC mapping, receiver health,
+   safety switch, power, GPS/EKF/compass warnings, and failsafe settings.
+7. What not to do: do not bypass arming checks, RC failsafe, battery failsafe,
    EKF/GPS/compass checks, or safety switch as a routine fix.
 
 ## Crash/Loss-Of-Control
 
-1. Put safety status first: do not fly until checked unless the evidence clearly
-   shows a non-flight-only issue and the relevant checks are complete.
+1. Safety gate: put safety status first; do not fly until checked unless the
+   evidence clearly shows a non-flight-only issue and the relevant checks are
+   complete.
 2. Build the timeline from in-window attitude/rate, motor outputs, power,
    vibration, GPS/EKF, RC input, mode changes, ERR/EV/MSG, and log ending.
 3. Rank causes only by strongest time-aligned evidence. Separate safety context
    from causal proof.
-4. State checked-but-not-supported hypotheses and all missing evidence that
-   prevents a stronger conclusion.
+4. Missing evidence: state checked-but-not-supported hypotheses and all missing
+   evidence that prevents a stronger conclusion.
 5. Recommended next steps: preserve logs and parameters, bench inspect airframe,
    props, motors, ESCs, wiring, FC mounting, power system, GPS/compass, and RC
    link; verify configuration and logging; reanalyse before any test.

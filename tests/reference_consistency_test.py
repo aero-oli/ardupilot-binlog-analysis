@@ -12,6 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from ap_log_investigation_manifest import PLOT_COMMANDS, SPECIAL_PLOT_GROUPS
+from ap_next_step_helpers import build_diagnosis_action_plan
 
 
 SYMPTOM_MAP = ROOT / "references" / "symptom-diagnosis-map.yaml"
@@ -61,6 +62,14 @@ CAUTION_TERMS = [
     "not proof",
     "not declare",
 ]
+SAFETY_PATTERN_HEADINGS = [
+    "Mission Yaw And Wobble",
+    "Motor/ESC Issue",
+    "Vibration/Filter Issue",
+    "EKF/GPS/Loiter Issue",
+    "RC/Failsafe/Pre-Arm Issue",
+    "Crash/Loss-Of-Control",
+]
 
 
 def assert_true(condition, message):
@@ -84,6 +93,12 @@ def markdown_refs(text):
     refs.update(re.findall(r"\]\((references/[^)]+?\.(?:md|yaml|json))\)", text))
     refs.update(re.findall(r"(?<![\w/])(references/[A-Za-z0-9_./-]+\.(?:md|yaml|json))", text))
     return refs
+
+
+def markdown_section(text, heading):
+    match = re.search(rf"^## {re.escape(heading)}\n(.*?)(?=^## |\Z)", text, flags=re.M | re.S)
+    assert_true(match is not None, f"final-answer patterns missing section: {heading}")
+    return match.group(1)
 
 
 def test_symptom_map_shape_and_plot_groups():
@@ -120,6 +135,10 @@ def test_skill_references_exist():
         "references/rc-failsafe-prearm-diagnosis.md",
         "references/crash-or-loss-of-control-diagnosis.md",
         "references/final-answer-patterns.md",
+        "references/evidence-gathering-flights.md",
+        "references/logging-configuration-for-investigation.md",
+        "references/corrupt-or-incomplete-log.md",
+        "references/timeline-interpretation.md",
     ]:
         assert_true((ROOT / required).exists(), f"symptom guide missing: {required}")
 
@@ -142,6 +161,14 @@ def test_final_answer_patterns_linked_and_complete():
         "Do not overstate confidence",
     ]:
         assert_true(phrase in text, f"final-answer patterns missing phrase: {phrase}")
+
+
+def test_safety_relevant_final_answer_patterns_have_action_plan_terms():
+    text = (ROOT / "references" / "final-answer-patterns.md").read_text(encoding="utf-8")
+    for heading in SAFETY_PATTERN_HEADINGS:
+        section = markdown_section(text, heading).lower()
+        for phrase in ["safety gate", "missing evidence", "recommended next steps", "what not to do"]:
+            assert_true(phrase in section, f"{heading} pattern missing required action-plan phrase: {phrase}")
 
 
 def test_skill_requires_safety_next_steps():
@@ -167,15 +194,46 @@ def test_reference_coverage_and_key_files():
         assert_true(param in logging_text, f"logging reference missing {param}")
 
     assert_true((ROOT / "references" / "corrupt-or-incomplete-log.md").exists(), "corrupt/incomplete reference should exist")
+    assert_true((ROOT / "references" / "timeline-interpretation.md").exists(), "timeline interpretation reference should exist")
     assert_true((ROOT / "references" / "parameter-metadata.md").exists(), "parameter metadata reference should exist")
 
 
 def test_reference_safety_wording():
-    for path in sorted((ROOT / "references").glob("*.md")):
+    checked_paths = [ROOT / "SKILL.md", ROOT / "README.md"]
+    checked_paths.extend(sorted((ROOT / "references").glob("*.md")))
+    for path in checked_paths:
         text = path.read_text(encoding="utf-8").lower()
         for match in re.finditer("|".join(re.escape(p) for p in UNSAFE_PATTERNS), text):
             context = text[max(0, match.start() - 120): match.end() + 120]
             assert_true(any(term in context for term in CAUTION_TERMS), f"{path} contains uncautioned unsafe wording near: {match.group(0)}")
+
+
+def test_next_step_helper_output_shape():
+    plan = build_diagnosis_action_plan(
+        symptom_class="yaw_misbehaviour",
+        symptom_text="yaw feels off especially during missions, generally wobbly and unstable",
+        findings=[
+            {
+                "possible_cause": "AUTO yaw tracking worse than non-AUTO",
+                "severity": "likely-issue",
+                "evidence": ["mode comparison", "RATE yaw tracking error"],
+            }
+        ],
+        missing_strongly_recommended=["PIDY", "PIDR", "PIDP"],
+        missing_optional=["ESC"],
+        mode_comparison={"ranking": [{"decoded_mode": "AUTO", "ranking_score": 8.0}]},
+        fft_availability={"fft_available": False, "reason": "raw/high-rate IMU missing"},
+    )
+    assert_true(isinstance(plan.get("flight_status"), dict), "next-step helper output missing flight_status object")
+    assert_true(plan["flight_status"].get("classification"), "flight_status missing classification")
+    assert_true(isinstance(plan.get("recommended_next_steps"), list), "next-step helper output missing recommended_next_steps list")
+    assert_true(plan["recommended_next_steps"], "recommended_next_steps should not be empty")
+    step_types = [step.get("type") for step in plan["recommended_next_steps"]]
+    assert_true(step_types[0] == "immediate_safety_gate", "first next step should be the immediate safety gate")
+    assert_true("what_not_to_do" in step_types, "recommended_next_steps should include what_not_to_do")
+    for step in plan["recommended_next_steps"]:
+        for key in ["priority", "type", "action", "reason", "applies_to", "source_evidence"]:
+            assert_true(key in step, f"recommended_next_steps entry missing {key}")
 
 
 def test_parameter_metadata_schema_and_samples():
@@ -205,9 +263,12 @@ def test_repo_housekeeping_files():
 def main():
     test_symptom_map_shape_and_plot_groups()
     test_skill_references_exist()
+    test_final_answer_patterns_linked_and_complete()
+    test_safety_relevant_final_answer_patterns_have_action_plan_terms()
     test_skill_requires_safety_next_steps()
     test_reference_coverage_and_key_files()
     test_reference_safety_wording()
+    test_next_step_helper_output_shape()
     test_parameter_metadata_schema_and_samples()
     test_repo_housekeeping_files()
     print("reference consistency tests passed")

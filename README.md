@@ -91,11 +91,15 @@ Run regression tests:
 uv run --with pymavlink --with pandas --with numpy --with plotly --with pyyaml python tests/regression_test.py
 ```
 
-Run reference and metadata consistency checks:
+Run reference, metadata, and action-plan consistency checks:
 
 ```bash
 uv run --with pyyaml python tests/reference_consistency_test.py
 ```
+
+These checks do not require real `.BIN` logs. They verify the safety next-step
+requirements in `SKILL.md`, linked references, final-answer pattern scaffolds,
+next-step helper output shape, metadata samples, and conservative safety wording.
 
 Run the real-log fixture check with a local, non-committed `.bin` file:
 
