@@ -67,6 +67,14 @@ Run the Methodic step entrypoint:
 python scripts/ap_methodic_step.py LOG.BIN --step 7.1.1 --out out/methodic_7_1_1.json --summary out/methodic_7_1_1.md --plots out/plots/methodic_7_1_1
 ```
 
+For Methodic 7.1.1 specifically, the dispatcher uses the dedicated motor-output oscillation evidence tool. You may also run it directly when iterating on evidence collection:
+
+```bash
+python scripts/ap_methodic_711_motor_oscillation.py LOG.BIN --out out/methodic_711.json --summary out/methodic_711.md --plots out/plots/methodic_711
+```
+
+This tool gathers hover-window, RC-centered RATE output, PID term, mapped motor output, vibration, and ESC telemetry evidence. It classifies the step conservatively and never changes gains.
+
 If the user gives required observations such as motor/ESC heat, audible oscillation, visible shaking, or hard-to-control behaviour, pass them as repeated `--manual-observation` values. If those observations are not available, preserve that as missing evidence; do not promote the step to a clean pass from log evidence alone.
 
 `ap_methodic_step.py` returns a standard schema with `result`, `safety_gate`, `evidence_used`, `missing_evidence`, `manual_observations_required`, `findings`, `parameter_context`, `plots`, `recommended_next_steps`, `what_not_to_do`, `next_methodic_step`, and `confidence_limits`. Treat the step result as structured evidence, not final truth. Inspect the JSON, summary, and plots before writing conclusions yourself.

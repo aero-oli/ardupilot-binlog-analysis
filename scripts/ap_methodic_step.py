@@ -12,6 +12,7 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from ap_common import AnalysisError, ensure_dir, iter_dataflash_messages, message_to_dict, message_type, safe_float, write_json
+from ap_methodic_711_motor_oscillation import analyze_motor_oscillation_711
 from ap_methodic_first_flight import analyze_first_flight
 from ap_methodic_oscillation import classify_oscillation
 from ap_methodic_rc import analyze_rc_input_contamination
@@ -257,6 +258,22 @@ def filter_params(params: dict[str, Any], patterns: list[str]) -> tuple[dict[str
 
 
 def analyze_7_1_1(log_path: Path, step: dict[str, Any], plots_dir: Path | None, manual_observations: list[str]) -> dict[str, Any]:
+    try:
+        result = analyze_motor_oscillation_711(log_path, plots_dir=plots_dir, manual_observations=manual_observations)
+        return normalize_schema(result)
+    except Exception as exc:
+        result = empty_result(step)
+        result["result"] = "inconclusive"
+        result["safety_gate"] = "repeat_step"
+        result["missing_evidence"] = [f"Step 7.1.1 evidence could not be read: {exc}"]
+        result["checked_but_not_supported"] = ["methodic_711_motor_oscillation_analysis"]
+        result["recommended_next_steps"] = [
+            "Collect a readable DataFlash log with RATE, MODE, ATT, and RCOU/RCO2/RCO3 before classifying Methodic 7.1.1.",
+            "Do not make gain changes from an unreadable or empty log.",
+        ]
+        result["confidence_limits"] = ["No deterministic 7.1.1 evidence was available because log parsing failed."]
+        return normalize_schema(result)
+
     result = empty_result(step)
     wanted = set(step.get("required_messages", [])) | set(step.get("strongly_recommended_messages", [])) | set(step.get("optional_messages", []))
     rows_by_message, params, read_errors = read_step_evidence(log_path, wanted)
