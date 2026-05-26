@@ -87,6 +87,14 @@ python scripts/ap_log_diagnose.py LOG.BIN --symptom "USER SYMPTOM" --out out/dia
 - `next_evidence_gathering`: structured planning guidance for what to collect next when evidence is missing. Read this before recommending a parameter review, bench check, ground test, restrained test, controlled flight, or no-fly-until-checked path. It is a safety planning aid, not a diagnosis.
 - `flight_status` and `recommended_next_steps`: structured planning aids for the final user answer. Read them, verify they match the findings and missing evidence, and surface the relevant ordered next steps in your own words. Do not treat them as an automatically generated final answer.
 
+For safety-relevant cases, after diagnosis and any mode comparison, create an explicit planning aid from the available JSON outputs:
+
+```bash
+python scripts/ap_next_steps.py --diagnosis out/diagnosis.json --mode-compare out/mode_compare.json --param-lookup out/param_lookup.json --fft out/fft.json --manifest out/investigation.json --json out/next_steps.json --summary out/next_steps.md
+```
+
+All inputs are optional; pass whichever outputs exist. Inspect `out/next_steps.json` and `out/next_steps.md`, then write the final answer yourself from the evidence. Do not treat the planner summary as a final diagnosis.
+
 When required or strongly recommended evidence is missing, load `references/logging-configuration-for-investigation.md` and `references/evidence-gathering-flights.md` before writing the missing-data section. Explain the confidence limit and, when appropriate, give conservative guidance for a future diagnostic capture. Do not turn missing evidence into automatic parameter changes or a recommendation to repeat unsafe flight.
 
 Then inspect `out/diagnosis.json`, generated plots, validation/index summaries, and any relevant extracted tables before writing conclusions. The final answer must include:

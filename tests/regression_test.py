@@ -30,6 +30,7 @@ from ap_log_investigation_manifest import build_manifest_from_index, validate_re
 from ap_log_metrics import compute_metrics
 from ap_log_mode_compare import compare_modes
 from ap_next_step_helpers import build_diagnosis_action_plan
+from ap_next_steps import build_next_steps_plan, markdown_summary
 from ap_param_context import merge_external_parameters, parse_param_file
 from ap_param_lookup import lookup_parameters
 from ap_log_plots import health_plots
@@ -2111,6 +2112,89 @@ def test_next_steps_use_mode_comparison_when_auto_ranks_worse():
     assert_true(any("mode_comparison" in step["source_evidence"] for step in plan["recommended_next_steps"]), "mode comparison should be recorded as source evidence")
 
 
+def test_next_steps_script_partial_inputs_still_valid():
+    plan = build_next_steps_plan(diagnosis={"symptom_class": "general_investigation", "findings": []})
+    assert_true(plan["flight_status"]["classification"] in {"normal_analysis_only", "controlled_hover_only"}, f"partial inputs should produce valid status: {plan['flight_status']}")
+    assert_true(plan["recommended_next_steps"], "partial inputs should still produce ordered steps")
+    assert_true(any("mode comparison input missing" in item for item in plan["confidence_limits"]), "missing optional input should be reported as a limitation")
+    summary = markdown_summary(plan)
+    for heading in ["Immediate safety gate", "Bench checks first", "Logging/configuration checks", "Controlled evidence capture", "Reanalyse", "What not to do"]:
+        assert_true(heading in summary, f"summary missing heading: {heading}")
+
+
+def test_next_steps_script_yaw_vibration_missing_pid_esc_ordered():
+    diagnosis = {
+        "symptom_class": "yaw_misbehaviour",
+        "symptom_text": "AUTO mission yaw wobble",
+        "findings": [
+            {"possible_cause": "Yaw rate tracking error", "severity": "likely-issue", "evidence": ["RATE yaw error p95 is 50 deg/s"]},
+            {"possible_cause": "Vibration/clipping is relevant to symptom", "severity": "likely-issue", "evidence": ["VIBE high within analysis window"]},
+        ],
+        "missing_strongly_recommended": ["PIDY"],
+        "missing_optional": ["ESC"],
+        "what_cannot_be_concluded": ["Cannot confirm ESC-level yaw authority without ESC telemetry."],
+    }
+    mode_compare = {
+        "ranking": [{"decoded_mode": "AUTO", "ranking_score": 8}, {"decoded_mode": "POSHOLD", "ranking_score": 2}],
+        "confidence_limits": ["AUTO/POSHOLD comparison has short intervals."],
+        "missing_evidence": {"strongly_recommended": ["MODE"]},
+    }
+    plan = build_next_steps_plan(diagnosis=diagnosis, mode_compare=mode_compare)
+    priorities = [step["priority"] for step in plan["recommended_next_steps"]]
+    text = "\n".join(step["action"] for step in plan["recommended_next_steps"])
+    assert_true(priorities == sorted(priorities), f"script next steps should be ordered: {priorities}")
+    assert_true(plan["flight_status"]["classification"] == "no_auto_missions", f"yaw mission plan should pause AUTO: {plan['flight_status']}")
+    assert_true("Pause AUTO/mission flying" in text, "AUTO-worse yaw plan should pause missions")
+    assert_true("PIDY" in "\n".join(plan["missing_evidence_to_capture"]), "missing PIDY should be captured")
+    assert_true("MODE" in "\n".join(plan["missing_evidence_to_capture"]), "mode comparison missing evidence should be carried into capture list")
+    assert_true(any("ESC telemetry" in item for item in plan["logging_changes_to_review"]), "missing ESC telemetry should be called out")
+    assert_true(any("vibration" in item.lower() or "props" in item.lower() for item in plan["bench_checks_first"]), "high vibration should trigger mechanical checks")
+
+
+def test_next_steps_script_crash_loss_of_control_no_fly():
+    plan = build_next_steps_plan(diagnosis={
+        "symptom_class": "crash_or_loss_of_control",
+        "symptom_text": "crash loss of control",
+        "findings": [{"possible_cause": "Motor output saturation", "severity": "safety-critical", "evidence": ["RCOU.C1 high"]}],
+    })
+    assert_true(plan["flight_status"]["classification"] == "do_not_fly_until_checked", f"crash should be no-fly: {plan['flight_status']}")
+    assert_true(any("repeat" in item.lower() for item in plan["what_not_to_do"]), "crash plan should forbid repeat flight")
+
+
+def test_next_steps_script_fft_unavailable_safe_capture_guidance():
+    plan = build_next_steps_plan(
+        diagnosis={"symptom_class": "vibration_issue", "symptom_text": "filter FFT issue", "findings": []},
+        fft={"fft_available": False, "reason": "No raw/high-rate IMU messages", "next_capture_guidance": ["Use short batch-sampler capture only if mechanically sound."]},
+    )
+    text = "\n".join(plan["controlled_capture_plan"] + plan["logging_changes_to_review"])
+    assert_true("raw/high-rate IMU" in text or "batch-sampler" in text, "FFT unavailable should produce raw/high-rate capture guidance")
+    assert_true(any("only if safe" in item.lower() or "after checks" in item.lower() for item in plan["controlled_capture_plan"]), "FFT capture guidance must remain safety-gated")
+
+
+def test_next_steps_cli_writes_json_and_summary():
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_path = Path(tmp)
+        diagnosis_path = tmp_path / "diagnosis.json"
+        out_json = tmp_path / "next_steps.json"
+        out_md = tmp_path / "next_steps.md"
+        diagnosis_path.write_text(json.dumps({
+            "symptom_class": "crash_or_loss_of_control",
+            "symptom_text": "crash loss of control",
+            "findings": [{"possible_cause": "Motor output saturation", "severity": "safety-critical", "evidence": ["RCOU high"]}],
+        }), encoding="utf-8")
+        subprocess.run([
+            sys.executable,
+            "scripts/ap_next_steps.py",
+            "--diagnosis", str(diagnosis_path),
+            "--json", str(out_json),
+            "--summary", str(out_md),
+        ], check=True)
+        plan = json.loads(out_json.read_text(encoding="utf-8"))
+        summary = out_md.read_text(encoding="utf-8")
+    assert_true(plan["flight_status"]["classification"] == "do_not_fly_until_checked", "CLI should write no-fly crash plan")
+    assert_true("Immediate safety gate" in summary and "What not to do" in summary, "CLI summary should include required headings")
+
+
 def test_manifest_next_evidence_field_shape_for_all_symptom_classes():
     required_keys = {
         "safe_to_request_flight",
@@ -2579,6 +2663,11 @@ def main():
     test_next_steps_rc_failsafe_prearm_ground_only()
     test_next_steps_missing_pid_esc_evidence_adds_logging_capture_steps()
     test_next_steps_use_mode_comparison_when_auto_ranks_worse()
+    test_next_steps_script_partial_inputs_still_valid()
+    test_next_steps_script_yaw_vibration_missing_pid_esc_ordered()
+    test_next_steps_script_crash_loss_of_control_no_fly()
+    test_next_steps_script_fft_unavailable_safe_capture_guidance()
+    test_next_steps_cli_writes_json_and_summary()
     test_manifest_next_evidence_field_shape_for_all_symptom_classes()
     test_validate_module_availability_separates_required_and_optional_messages()
     test_compare_summarizes_metric_deltas()
