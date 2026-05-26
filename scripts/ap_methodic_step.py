@@ -12,6 +12,7 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from ap_common import AnalysisError, ensure_dir, iter_dataflash_messages, message_to_dict, message_type, safe_float, write_json
+from ap_methodic_first_flight import analyze_first_flight
 from ap_methodic_oscillation import classify_oscillation
 from ap_methodic_rc import analyze_rc_input_contamination
 from ap_methodic_registry import MethodicRegistryError, get_step, load_registry
@@ -38,7 +39,7 @@ STANDARD_SCHEMA_KEYS = [
     "confidence_limits",
 ]
 
-STEP_IMPLEMENTATIONS = {"7.1.1": "analyze_7_1_1"}
+STEP_IMPLEMENTATIONS = {"7.1": "analyze_7_1", "7.1.1": "analyze_7_1_1"}
 
 
 def empty_result(step: dict[str, Any]) -> dict[str, Any]:
@@ -101,6 +102,45 @@ def not_implemented_result(step: dict[str, Any]) -> dict[str, Any]:
     ]
     result["next_methodic_step"] = step.get("next_step_if_conditional")
     result["confidence_limits"] = ["Registered Methodic step, but no deterministic step-specific analysis has been implemented."]
+    return normalize_schema(result)
+
+
+def analyze_7_1(log_path: Path, step: dict[str, Any], plots_dir: Path | None, manual_observations: list[str]) -> dict[str, Any]:
+    first = analyze_first_flight(log_path, plots_dir=plots_dir)
+    result = empty_result(step)
+    result["result"] = first["result"]
+    result["safety_gate"] = first["safety_gate"]
+    result["evidence_used"] = [
+        {"type": "first_flight_window", "value": first.get("first_flight_window")},
+        {"type": "hover_quality", "value": first.get("hover_quality")},
+        {"type": "detected", "value": first.get("detected")},
+        {"type": "analysis", "value": first.get("analysis")},
+    ]
+    result["missing_evidence"] = first.get("missing_evidence", [])
+    result["manual_observations_required"] = first.get("manual_observations_required", [])
+    hover = ((first.get("first_flight_window") or {}).get("hover_selector") or {}).get("selected_window") or {}
+    result["analysis_window"] = {
+        "selection": "methodic_7.1_first_flight",
+        "preferred_window": step.get("preferred_window"),
+        "start_s": hover.get("start_s"),
+        "end_s": hover.get("end_s"),
+        "first_flight_window": first.get("first_flight_window"),
+    }
+    result["findings"] = first.get("safety_findings", [])
+    result["checked_but_not_supported"] = []
+    result["parameter_context"] = {
+        "relevant_parameters": list(step.get("relevant_parameters") or []),
+        "present": {},
+        "missing_or_not_logged": [],
+        "source": "see first-flight analysis payload",
+    }
+    result["plots"] = first.get("plots", [])
+    result["recommended_next_steps"] = first.get("recommended_next_steps", [])
+    result["what_not_to_do"] = first.get("what_not_to_do", result["what_not_to_do"])
+    result["next_methodic_step"] = first.get("next_step")
+    result["confidence_limits"] = first.get("confidence_limits", [])
+    if manual_observations:
+        result["evidence_used"].append({"type": "manual_observations_provided_to_dispatcher", "value": manual_observations})
     return normalize_schema(result)
 
 
