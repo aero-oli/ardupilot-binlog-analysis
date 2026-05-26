@@ -99,6 +99,14 @@ python scripts/ap_methodic_pid_notch_review.py LOG.BIN --out out/methodic_8_3.js
 
 This tool checks whether PID notch review is `not_needed`, a `candidate`, `unsafe_to_attempt`, or `inconclusive`. It requires the agent to inspect the evidence before any conclusion and must not generate final FILTn/ATC_RAT notch parameter changes.
 
+For Methodic 8.4 EKF altitude-source review, the dispatcher uses the dedicated altitude-source evidence tool. You may also run it directly:
+
+```bash
+python scripts/ap_methodic_ekf_altitude_source.py LOG.BIN --out out/methodic_8_4.json --summary out/methodic_8_4.md --plots out/plots/methodic_8_4
+```
+
+This tool reviews `CTUN.DAlt`/`Alt`, `BARO`, GPS/GPA altitude context, optional `RNGF`, EKF height test ratios/innovations, vibration, power, and mode/event context. It must not change EKF height-source parameters automatically.
+
 If the user gives required observations such as motor/ESC heat, audible oscillation, visible shaking, or hard-to-control behaviour, pass them as repeated `--manual-observation` values. If those observations are not available, preserve that as missing evidence; do not promote the step to a clean pass from log evidence alone.
 
 `ap_methodic_step.py` returns a standard schema with `result`, `safety_gate`, `evidence_used`, `missing_evidence`, `manual_observations_required`, `findings`, `parameter_context`, `plots`, `recommended_next_steps`, `what_not_to_do`, `next_methodic_step`, and `confidence_limits`. Treat the step result as structured evidence, not final truth. Inspect the JSON, summary, and plots before writing conclusions yourself.

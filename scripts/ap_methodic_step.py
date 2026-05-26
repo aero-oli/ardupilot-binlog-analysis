@@ -13,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from ap_common import AnalysisError, ensure_dir, iter_dataflash_messages, message_to_dict, message_type, safe_float, write_json
 from ap_methodic_711_motor_oscillation import analyze_motor_oscillation_711
+from ap_methodic_ekf_altitude_source import analyze_ekf_altitude_source
 from ap_methodic_first_flight import analyze_first_flight
 from ap_methodic_notch_review import analyze_notch_review
 from ap_methodic_pid_notch_review import analyze_pid_notch_review
@@ -43,7 +44,7 @@ STANDARD_SCHEMA_KEYS = [
     "confidence_limits",
 ]
 
-STEP_IMPLEMENTATIONS = {"7.1": "analyze_7_1", "7.1.1": "analyze_7_1_1", "8.1": "analyze_8_1", "8.2": "analyze_8_2", "8.3": "analyze_8_3"}
+STEP_IMPLEMENTATIONS = {"7.1": "analyze_7_1", "7.1.1": "analyze_7_1_1", "8.1": "analyze_8_1", "8.2": "analyze_8_2", "8.3": "analyze_8_3", "8.4": "analyze_8_4"}
 
 
 def empty_result(step: dict[str, Any]) -> dict[str, Any]:
@@ -490,6 +491,26 @@ def analyze_8_3(log_path: Path, step: dict[str, Any], plots_dir: Path | None, ma
             "Do not add PID notch parameters from an unreadable or inconclusive log.",
         ]
         result["confidence_limits"] = ["No deterministic 8.3 evidence was available because log parsing failed."]
+        return normalize_schema(result)
+
+
+def analyze_8_4(log_path: Path, step: dict[str, Any], plots_dir: Path | None, manual_observations: list[str]) -> dict[str, Any]:
+    try:
+        result = analyze_ekf_altitude_source(log_path, plots_dir=plots_dir)
+        if manual_observations:
+            result["evidence_used"].append({"type": "manual_observations_provided_to_dispatcher", "value": manual_observations})
+        return result
+    except Exception as exc:
+        result = empty_result(step)
+        result["result"] = "inconclusive"
+        result["safety_gate"] = "repeat_step"
+        result["missing_evidence"] = [f"Step 8.4 EKF altitude-source evidence could not be read: {exc}"]
+        result["checked_but_not_supported"] = ["methodic_8_4_ekf_altitude_source"]
+        result["recommended_next_steps"] = [
+            "Collect a readable log with CTUN, BARO, GPS/GPA, XKF*/NKF*, VIBE, BAT/POWR, and PARM before classifying Methodic 8.4.",
+            "Do not change EKF height-source parameters from an unreadable or inconclusive log.",
+        ]
+        result["confidence_limits"] = ["No deterministic 8.4 evidence was available because log parsing failed."]
         return normalize_schema(result)
 
 

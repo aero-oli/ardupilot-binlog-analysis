@@ -94,10 +94,10 @@ steps:
     phase: "minimal_tuning"
     official_anchor: "#84-configure-the-ekf-altitude-source-weights"
     official_url: "https://ardupilot.github.io/MethodicConfigurator/TUNING_GUIDE_ArduCopter#84-configure-the-ekf-altitude-source-weights"
-    required_messages: [XKF4]
-    strongly_recommended_messages: [BARO, GPS, POS, CTUN, RNGF, PARM]
-    optional_messages: [XKF1, XKF2, XKF3, NKF1, NKF2, NKF3, NKF4, MSG, EV, ERR]
-    relevant_parameters: [EK3_OGN_HGT_MASK, EK3_ALT_SOURCE, EK3_RNG_USE_HGT, EK3_POSNE_M_NSE, EK3_VELD_M_NSE, EK3_ALT_M_NSE, RNGFND*_TYPE]
+    required_messages: [CTUN, BARO, XKF4]
+    strongly_recommended_messages: [GPS, GPA, XKF1, XKF3, VIBE, BAT, POWR, PARM]
+    optional_messages: [RNGF, ATT, RATE, MODE, MSG, ERR, EV, NKF1, NKF2, NKF3, NKF4]
+    relevant_parameters: [EK3_SRC1_POSZ, EK3_OGN_HGT_MASK, EK3_PRIMARY, RNGFND*_TYPE, RNGFND*_ORIENT, RNGFND*_MIN_CM, RNGFND*_MAX_CM, PSC_POSZ_P, PSC_VELZ_P, PSC_VELZ_I, PSC_ACCZ_P, PSC_ACCZ_I, PSC_ACCZ_D]
     preferred_window: "Representative hover and altitude changes using the intended altitude sensors."
     manual_observations_required: ["No unexplained altitude jumps", "No surface-effect or airflow condition that invalidates the capture"]
     pass_fail_summary: "Pass when altitude-source evidence is consistent and EKF height innovations do not indicate a weighting problem."
