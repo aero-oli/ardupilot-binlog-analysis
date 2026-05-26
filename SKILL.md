@@ -210,7 +210,13 @@ For mission-vs-manual complaints, especially yaw or wobble that appears in AUTO/
 python scripts/ap_log_mode_compare.py LOG.BIN --symptom yaw_misbehaviour --compare-modes AUTO,POSHOLD,ALTHOLD,STABILIZE --active-flight-only --json out/mode_compare.json --plots out/plots/mode_compare
 ```
 
-Treat mode comparison as scoping evidence. Inspect the intervals, active-flight criteria, missing evidence, and confidence limits before deciding whether AUTO behaviour reflects mission yaw demand, estimator/navigation context, or a control/authority issue.
+When the user reports mode-specific behaviour and you need full diagnosis outputs per mode, run the mode-scoped diagnosis helper after or alongside mode comparison:
+
+```bash
+python scripts/ap_log_diagnose_modes.py LOG.BIN --symptom "yaw feels off especially during missions" --modes AUTO,POSHOLD --active-flight-only --out out/mode_diagnosis
+```
+
+Treat mode comparison and mode-scoped diagnosis as supporting evidence. Inspect the intervals, active-flight criteria, missing evidence, warnings, key differences, and confidence limits before deciding whether AUTO behaviour reflects mission yaw demand, estimator/navigation context, or a control/authority issue. Do not treat `mode_diagnosis_summary.json` as a final answer.
 
 Selectors include `--mode`, `--around-msg`, `--around-event`, `--around-error`, `--takeoff-only`, `--hover-candidates`, and `--high-throttle-only`. For diagnosis and custom plots, `--mode` uses all matching mode intervals and excludes intervening non-matching gaps; inspect `analysis_window.intervals_found`, `analysis_window.intervals_used`, and `analysis_window.non_matching_gaps_excluded` when reporting scope. If a requested selector cannot be resolved from available log messages, the script should fail with a clear error rather than silently using whole-log averages.
 

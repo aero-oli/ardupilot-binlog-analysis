@@ -30,6 +30,7 @@ from ap_log_investigation_manifest import build_manifest_from_index, validate_re
 from ap_log_metrics import compute_metrics
 from ap_log_mode_compare import compare_modes
 from ap_case_investigate import build_case_investigation
+from ap_log_diagnose_modes import diagnose_modes_for_log
 from ap_next_step_helpers import build_diagnosis_action_plan
 from ap_next_steps import build_next_steps_plan, markdown_summary
 from ap_param_context import merge_external_parameters, parse_param_file
@@ -2291,6 +2292,94 @@ def test_case_investigate_fake_runner_builds_evidence_pack_and_continues_after_f
         assert_true(any("ap_next_steps.py" in call[1] for call in calls), "case runner should run next-step planner")
 
 
+def test_diagnose_modes_runs_per_mode_and_summarizes_differences():
+    calls = []
+
+    def fake_runner(cmd, cwd=None):
+        calls.append(cmd)
+        mode = cmd[cmd.index("--mode") + 1]
+        out_path = Path(cmd[cmd.index("--out") + 1])
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        error = 9.0 if mode == "AUTO" else 2.0
+        payload = {
+            "symptom_class": "yaw_misbehaviour",
+            "analysis_window": {
+                "rule": "mode+active_flight" if "--active-flight-only" in cmd else "mode",
+                "source": mode,
+                "intervals_found": [{"start_s": 10.0, "end_s": 20.0}],
+                "intervals_used": [{"start_s": 11.0, "end_s": 20.0}] if "--active-flight-only" in cmd else [{"start_s": 10.0, "end_s": 20.0}],
+            },
+            "findings": [{"possible_cause": "Yaw tracking error", "severity": "medium", "evidence": {"p95_abs_error": error}}],
+            "missing_required": [],
+            "missing_strongly_recommended": ["PIDY"] if mode == "POSHOLD" else [],
+            "warnings": [f"{mode} warning"],
+        }
+        out_path.write_text(json.dumps(payload), encoding="utf-8")
+        return 0, "ok", ""
+
+    with tempfile.TemporaryDirectory() as tmp:
+        out = Path(tmp) / "mode_diagnosis"
+        summary = diagnose_modes_for_log(
+            "LOG.BIN",
+            symptom="yaw feels off especially during missions",
+            modes=["AUTO", "POSHOLD"],
+            out_dir=out,
+            active_flight_only=True,
+            runner=fake_runner,
+            mode_segments=[
+                {"raw_mode": 3, "decoded_mode": "AUTO", "start_s": 10.0, "end_s": 20.0},
+                {"raw_mode": 16, "decoded_mode": "POSHOLD", "start_s": 25.0, "end_s": 35.0},
+            ],
+        )
+        assert_true((out / "AUTO" / "diagnosis.json").exists(), "AUTO diagnosis should be written")
+        assert_true((out / "POSHOLD" / "diagnosis.json").exists(), "POSHOLD diagnosis should be written")
+        assert_true((out / "mode_diagnosis_summary.json").exists(), "combined summary should be written")
+        assert_true(summary["modes"] == ["AUTO", "POSHOLD"], f"requested modes should be preserved: {summary}")
+        assert_true(not summary["requested_modes_missing"], "available modes should not be reported missing")
+        assert_true(summary["per_mode"]["AUTO"]["analysis_window"]["intervals_used"][0]["start_s"] == 11.0, "active-flight intervals should be preserved")
+        assert_true(any("higher-severity findings" in diff for diff in summary["key_differences"]), "summary should record per-mode differences")
+        assert_true(all("--active-flight-only" in call for call in calls), "active-flight flag should pass through to each diagnosis command")
+
+
+def test_diagnose_modes_records_missing_mode_without_failing_available_modes():
+    calls = []
+
+    def fake_runner(cmd, cwd=None):
+        calls.append(cmd)
+        out_path = Path(cmd[cmd.index("--out") + 1])
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(json.dumps({"analysis_window": {"rule": "mode"}, "findings": [], "missing_required": [], "warnings": []}), encoding="utf-8")
+        return 0, "ok", ""
+
+    with tempfile.TemporaryDirectory() as tmp:
+        summary = diagnose_modes_for_log(
+            "LOG.BIN",
+            symptom="yaw feels off",
+            modes=["AUTO", "LOITER"],
+            out_dir=Path(tmp) / "mode_diagnosis",
+            exclude_ground_spool=True,
+            runner=fake_runner,
+            mode_segments=[{"raw_mode": 3, "decoded_mode": "AUTO", "start_s": 10.0, "end_s": 20.0}],
+        )
+        assert_true(summary["requested_modes_missing"] == ["LOITER"], f"missing mode should be recorded: {summary}")
+        assert_true(list(summary["per_mode"].keys()) == ["AUTO"], "available mode should still run")
+        assert_true(len(calls) == 1 and "--exclude-ground-spool" in calls[0], "ground-spool flag should pass through")
+
+
+def test_diagnose_modes_all_missing_records_confidence_limit():
+    with tempfile.TemporaryDirectory() as tmp:
+        summary = diagnose_modes_for_log(
+            "LOG.BIN",
+            symptom="yaw feels off",
+            modes=["AUTO"],
+            out_dir=Path(tmp) / "mode_diagnosis",
+            runner=lambda cmd, cwd=None: (0, "not called", ""),
+            mode_segments=[{"raw_mode": 16, "decoded_mode": "POSHOLD", "start_s": 10.0, "end_s": 20.0}],
+        )
+        assert_true(summary["requested_modes_missing"] == ["AUTO"], f"missing AUTO should be recorded: {summary}")
+        assert_true(any("No requested modes were found" in item for item in summary["confidence_limits"]), "all-missing case should limit confidence")
+
+
 def test_manifest_next_evidence_field_shape_for_all_symptom_classes():
     required_keys = {
         "safe_to_request_flight",
@@ -2768,6 +2857,9 @@ def main():
     test_next_steps_script_fft_unavailable_safe_capture_guidance()
     test_next_steps_cli_writes_json_and_summary()
     test_case_investigate_fake_runner_builds_evidence_pack_and_continues_after_failure()
+    test_diagnose_modes_runs_per_mode_and_summarizes_differences()
+    test_diagnose_modes_records_missing_mode_without_failing_available_modes()
+    test_diagnose_modes_all_missing_records_confidence_limit()
     test_manifest_next_evidence_field_shape_for_all_symptom_classes()
     test_validate_module_availability_separates_required_and_optional_messages()
     test_compare_summarizes_metric_deltas()
