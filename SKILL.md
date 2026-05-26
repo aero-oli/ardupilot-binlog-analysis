@@ -66,6 +66,14 @@ Use when the user says something like:
 - “crashed”
 - “loss of control”
 
+For multi-log cases or complex multi-symptom reports, prefer the case-level investigation runner first. It orchestrates validation, indexing, manifest generation, primary and secondary diagnoses, mode comparison, parameter lookup, FFT where relevant, and next-step planning into a structured evidence pack for the agent. It does not write the final user-facing diagnosis.
+
+```bash
+python scripts/ap_case_investigate.py --logs LOG1.BIN LOG2.BIN --symptom "USER SYMPTOM" --out out/case
+```
+
+Inspect `out/case/case_manifest.json`, `out/case/case_summary.md`, `out/case/recommended_agent_reading_order.md`, and the per-log artifacts under `out/case/logs/`. Treat failures recorded in the case manifest as confidence limits, then write the final answer yourself from the evidence.
+
 First create an investigation manifest. This is a planning artifact only; it identifies available evidence, missing evidence, suggested next commands/plots, confidence limits, and questions to answer. Do not treat it as a diagnosis or final conclusion.
 
 ```bash

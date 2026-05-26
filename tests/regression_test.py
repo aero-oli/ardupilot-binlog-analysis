@@ -29,6 +29,7 @@ from ap_log_fft import fft_from_isb_rows, fft_from_tables
 from ap_log_investigation_manifest import build_manifest_from_index, validate_recommended_plot_groups
 from ap_log_metrics import compute_metrics
 from ap_log_mode_compare import compare_modes
+from ap_case_investigate import build_case_investigation
 from ap_next_step_helpers import build_diagnosis_action_plan
 from ap_next_steps import build_next_steps_plan, markdown_summary
 from ap_param_context import merge_external_parameters, parse_param_file
@@ -2228,6 +2229,68 @@ def test_next_steps_cli_writes_json_and_summary():
     assert_true("Immediate safety gate" in summary and "What not to do" in summary, "CLI summary should include required headings")
 
 
+def test_case_investigate_fake_runner_builds_evidence_pack_and_continues_after_failure():
+    calls = []
+
+    def fake_runner(cmd, cwd=None):
+        calls.append(cmd)
+        out_args = {"--json", "--out", "--summary"}
+        for i, part in enumerate(cmd[:-1]):
+            if part in out_args:
+                path = Path(cmd[i + 1])
+                path.parent.mkdir(parents=True, exist_ok=True)
+                if path.suffix == ".json":
+                    payload = {"command": cmd, "warnings": [], "confidence_limits": []}
+                    if "ap_log_index.py" in cmd[1]:
+                        payload.update({"vehicle": "ArduCopter", "firmware": "synthetic", "messages": {"ATT": {}, "RATE": {}, "MODE": {}, "VIBE": {}}, "parameters": {"WP_YAW_BEHAVIOR": 1}})
+                    if "ap_log_investigation_manifest.py" in cmd[1]:
+                        payload.update({
+                            "symptom_class": "yaw_misbehaviour",
+                            "primary_symptom_class": "yaw_misbehaviour",
+                            "secondary_symptom_classes": ["attitude_rate_issue"],
+                            "warnings": ["User reported multiple symptoms; do not draw conclusions from yaw branch alone."],
+                            "missing_evidence": {"required": [], "strongly_recommended": ["PIDY"], "optional_context": ["ESC"]},
+                            "confidence_limits": ["Do not claim high confidence while PIDY missing."],
+                            "recommended_secondary_commands": [
+                                f"{sys.executable} scripts/ap_log_diagnose.py LOG --symptom \"wobble oscillation unstable manual control\" --out out/diagnosis_wobble.json --plots out/plots/wobble"
+                            ],
+                        })
+                    if "ap_log_diagnose.py" in cmd[1]:
+                        payload.update({"symptom_class": "yaw_misbehaviour", "findings": [], "missing_strongly_recommended": ["PIDY"], "flight_status": {"classification": "no_auto_missions"}})
+                    if "ap_next_steps.py" in cmd[1]:
+                        payload.update({"flight_status": {"classification": "no_auto_missions"}, "recommended_next_steps": [{"priority": 1, "type": "immediate_safety_gate", "action": "Pause AUTO/mission flying."}]})
+                    path.write_text(json.dumps(payload), encoding="utf-8")
+                else:
+                    path.write_text("# synthetic\n", encoding="utf-8")
+        if "ap_log_mode_compare.py" in cmd[1] and "15-59-01" in cmd[2]:
+            return 2, "", "synthetic mode compare failure"
+        return 0, "ok", ""
+
+    with tempfile.TemporaryDirectory() as tmp:
+        out = Path(tmp) / "case"
+        result = build_case_investigation(
+            logs=["2026-03-23 14-47-58.bin", "2026-03-23 15-59-01.bin"],
+            symptom="yaw feels off especially during missions, generally wobbly and unstable, manual control off",
+            out_dir=out,
+            runner=fake_runner,
+        )
+        case_manifest = json.loads((out / "case_manifest.json").read_text(encoding="utf-8"))
+        summary = (out / "case_summary.md").read_text(encoding="utf-8")
+        reading = (out / "recommended_agent_reading_order.md").read_text(encoding="utf-8")
+        assert_true((out / "logs" / "2026-03-23_14-47-58").exists(), "per-log output directory should be slugged and created")
+        assert_true((out / "comparisons" / "cross_log_summary.json").exists(), "cross-log summary should be written")
+        assert_true((out / "comparisons" / "mode_compare_summary.json").exists(), "mode compare summary should be written")
+        assert_true(case_manifest["logs_processed"] == 2, f"case manifest should include both logs: {case_manifest}")
+        assert_true(any(log["primary_symptom_class"] == "yaw_misbehaviour" for log in case_manifest["logs"]), "manifest should carry primary class per log")
+        assert_true(any("attitude_rate_issue" in log["secondary_symptom_classes"] for log in case_manifest["logs"]), "manifest should carry secondary classes")
+        assert_true(case_manifest["failures"], "failed sub-command should be recorded, not hidden")
+        assert_true(any("mode compare" in item.lower() for item in case_manifest["confidence_limits"]), "failures should become confidence limits")
+        assert_true("evidence-pack summary" in summary.lower() and "not a final diagnosis" in summary.lower(), "summary should be an evidence pack, not final diagnosis")
+        assert_true("validation warnings" in reading.lower() and "next steps" in reading.lower(), "reading order should include required sections")
+        assert_true(any("ap_skill_doctor.py" in call[1] for call in calls), "case runner should check skill doctor before work")
+        assert_true(any("ap_next_steps.py" in call[1] for call in calls), "case runner should run next-step planner")
+
+
 def test_manifest_next_evidence_field_shape_for_all_symptom_classes():
     required_keys = {
         "safe_to_request_flight",
@@ -2704,6 +2767,7 @@ def main():
     test_next_steps_script_crash_loss_of_control_no_fly()
     test_next_steps_script_fft_unavailable_safe_capture_guidance()
     test_next_steps_cli_writes_json_and_summary()
+    test_case_investigate_fake_runner_builds_evidence_pack_and_continues_after_failure()
     test_manifest_next_evidence_field_shape_for_all_symptom_classes()
     test_validate_module_availability_separates_required_and_optional_messages()
     test_compare_summarizes_metric_deltas()

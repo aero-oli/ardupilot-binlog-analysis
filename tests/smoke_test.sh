@@ -69,6 +69,7 @@ for required in [
     "recommended_secondary_commands",
     "flight_status",
     "recommended_next_steps",
+    "python scripts/ap_case_investigate.py",
     "python scripts/ap_next_steps.py",
     "python scripts/ap_log_investigation_manifest.py LOG.BIN --symptom \"USER SYMPTOM\" --out out/investigation.json",
     "Do not automatically recommend another flight",
