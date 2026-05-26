@@ -202,6 +202,7 @@ python scripts/ap_symptom_classifier.py "compass interference" | grep compass_ya
 python scripts/ap_symptom_classifier.py "rangefinder altitude jumps" | grep baro_rangefinder_altitude_issue >/dev/null
 python scripts/ap_fault_tree.py yaw_misbehaviour | grep RATE.YDes >/dev/null
 python tests/reference_consistency_test.py
+python tests/methodic_helpers_test.py
 python - <<'PY'
 import sys
 sys.path.insert(0, "scripts")

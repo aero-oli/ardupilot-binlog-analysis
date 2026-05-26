@@ -28,7 +28,7 @@ steps:
     official_url: "https://ardupilot.github.io/MethodicConfigurator/TUNING_GUIDE_ArduCopter#711-check-for-motor-output-oscillation"
     required_messages: [RATE]
     strongly_recommended_messages: [RCOU, PIDR, PIDP, PIDY, MODE, CTUN, PARM]
-    optional_messages: [ESC, ESCX, EDT2, VIBE, ATT, MSG, EV, ERR, BAT, ARM]
+    optional_messages: [ESC, ESCX, EDT2, VIBE, ATT, RCIN, MSG, EV, ERR, BAT, ARM]
     relevant_parameters: [ATC_RAT_PIT_D, ATC_RAT_PIT_I, ATC_RAT_PIT_P, ATC_RAT_RLL_D, ATC_RAT_RLL_I, ATC_RAT_RLL_P, PSC_ACCZ_P, PSC_ACCZ_I, PSC_POSXY_*, PSC_VELXY_*, SERVO*_FUNCTION]
     preferred_window: "First hover immediately before landing; prefer stable AltHold hover and inspect RATE.*Out plus mapped motor outputs."
     manual_observations_required: ["Motors not excessively hot immediately after landing", "ESCs not excessively hot immediately after landing", "No audible oscillation", "No visible shaking", "No hard-to-control or sluggish behaviour"]

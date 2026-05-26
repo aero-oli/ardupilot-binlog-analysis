@@ -12,8 +12,11 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from ap_common import AnalysisError, ensure_dir, iter_dataflash_messages, message_to_dict, message_type, safe_float, write_json
+from ap_methodic_oscillation import classify_oscillation
+from ap_methodic_rc import analyze_rc_input_contamination
 from ap_methodic_registry import MethodicRegistryError, get_step, load_registry
 from ap_methodic_safety_gates import classify_from_findings, missing_manual_observations, normalize_manual_observations
+from ap_methodic_windows import select_methodic_window
 
 STANDARD_SCHEMA_KEYS = [
     "methodic_step",
@@ -241,6 +244,28 @@ def analyze_7_1_1(log_path: Path, step: dict[str, Any], plots_dir: Path | None, 
         "source": "log PARM messages" if params else "no PARM messages found",
     }
 
+    tables = rows_to_tables(rows_by_message)
+    if tables:
+        try:
+            window_result = select_methodic_window(tables, "methodic_hover", min_duration_s=5.0)
+            result["analysis_window"]["methodic_selector"] = window_result
+            if window_result.get("selected_window"):
+                result["analysis_window"]["selection"] = "methodic_hover"
+                result["analysis_window"]["start_s"] = window_result["selected_window"]["start_s"]
+                result["analysis_window"]["end_s"] = window_result["selected_window"]["end_s"]
+            result["confidence_limits"].extend(window_result.get("warnings", []))
+        except Exception as exc:
+            result["confidence_limits"].append(f"Methodic hover-window helper could not select a window: {exc}")
+        try:
+            rc_context = analyze_rc_input_contamination(tables, params, yaw_only_centered=False)
+            result["evidence_used"].append({"type": "rc_input_contamination", "summary": _trim_rc_context(rc_context)})
+            if rc_context.get("hands_off_confidence") == "low":
+                result["confidence_limits"].append("RC input was not sufficiently centered; oscillation claims must be checked against a centered-stick subset.")
+            elif not rc_context.get("available"):
+                result["confidence_limits"].append("RCIN was unavailable; pilot stick contamination could not be ruled out before oscillation classification.")
+        except Exception as exc:
+            result["confidence_limits"].append(f"RC input contamination helper failed: {exc}")
+
     rate_rows = rows_by_message.get("RATE") or []
     if rate_rows:
         axes = {
@@ -250,6 +275,27 @@ def analyze_7_1_1(log_path: Path, step: dict[str, Any], plots_dir: Path | None, 
         }
         result["evidence_used"].append({"type": "rate_output_summary", "axes": axes})
         for axis, summary in axes.items():
+            axis_fields = {"roll": "ROut", "pitch": "POut", "yaw": "YOut"}
+            series = numeric_values(rate_rows, [axis_fields[axis]])
+            series_times = [time_value(row) for row in rate_rows]
+            osc = classify_oscillation(series, series_times, threshold=0.15)
+            result["evidence_used"].append({"type": "oscillation_classification", "axis": axis, "classification": osc})
+            if osc["classification"] == "oscillatory":
+                result["findings"].append({
+                    "severity": "safety-critical",
+                    "finding": f"{axis} RATE output is classified as oscillatory",
+                    "evidence_values": [{"name": key, "value": value, "unit": "normalized"} for key, value in osc.get("metrics", {}).items() if key in {"p95_abs", "highpass_residual_p95_abs", "sign_change_rate_hz"}],
+                    "interpretation": "The RATE output has repeated high-pass sign changes and should be reviewed as a possible output oscillation only after RC stick contamination is checked.",
+                    "recommended_checks": ["Inspect the Methodic hover window", "Use RC-centered subsets where available", "Check motor/ESC/frame health before further tuning"],
+                })
+            elif osc["classification"] == "steady_bias":
+                result["findings"].append({
+                    "severity": "worth-checking",
+                    "finding": f"{axis} RATE output is classified as steady bias rather than oscillation",
+                    "evidence_values": [{"name": "mean", "value": osc.get("metrics", {}).get("mean"), "unit": "normalized"}],
+                    "interpretation": "A steady controller output can reflect trim, wind, CG, frame asymmetry, or sustained command; it should not be treated as oscillation without supporting evidence.",
+                    "recommended_checks": ["Compare with RC input, attitude, wind, and output mapping before tuning gains"],
+                })
             out95 = summary.get("output_abs_p95")
             outmax = summary.get("output_abs_max")
             err95 = summary.get("tracking_error_p95_abs")
@@ -325,6 +371,35 @@ def analyze_7_1_1(log_path: Path, step: dict[str, Any], plots_dir: Path | None, 
 
     result["recommended_next_steps"] = next_steps_for_result(step, result)
     return normalize_schema(result)
+
+
+def rows_to_tables(rows_by_message: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
+    try:
+        import pandas as pd
+    except Exception:
+        return {}
+    return {name: pd.DataFrame(rows) for name, rows in rows_by_message.items() if rows}
+
+
+def _trim_rc_context(rc_context: dict[str, Any]) -> dict[str, Any]:
+    axes = {}
+    for axis, data in (rc_context.get("axis_activity") or {}).items():
+        axes[axis] = {
+            "available": data.get("available"),
+            "channel": data.get("channel"),
+            "field": data.get("field"),
+            "active_percent_by_deadband_us": data.get("active_percent_by_deadband_us"),
+            "centered_percent": data.get("centered_percent"),
+            "mapping_source": data.get("mapping_source"),
+        }
+    return {
+        "available": rc_context.get("available"),
+        "hands_off_confidence": rc_context.get("hands_off_confidence"),
+        "centered_percent": rc_context.get("centered_percent"),
+        "rc_centered_windows": rc_context.get("rc_centered_windows"),
+        "warnings": rc_context.get("warnings"),
+        "axes": axes,
+    }
 
 
 def make_7_1_1_plots(rate_rows: list[dict[str, Any]], rows_by_message: dict[str, list[dict[str, Any]]], plots_dir: Path) -> list[str]:
