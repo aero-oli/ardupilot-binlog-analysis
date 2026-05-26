@@ -75,6 +75,7 @@ for required in [
     "references/err-subsys-ecode.md",
     "python scripts/ap_err_decode.py",
     "python scripts/ap_case_investigate.py",
+    "python scripts/ap_evidence_digest.py",
     "python scripts/ap_log_diagnose_modes.py",
     "python scripts/ap_next_steps.py",
     "python scripts/ap_log_investigation_manifest.py LOG.BIN --symptom \"USER SYMPTOM\" --out out/investigation.json",

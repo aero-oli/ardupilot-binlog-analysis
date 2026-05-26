@@ -33,6 +33,7 @@ from ap_log_metrics import compute_metrics
 from ap_log_mode_compare import compare_modes
 from ap_case_investigate import build_case_investigation
 from ap_log_diagnose_modes import diagnose_modes_for_log
+from ap_evidence_digest import build_evidence_digest, markdown_summary as digest_markdown_summary
 from ap_next_step_helpers import build_diagnosis_action_plan
 from ap_next_steps import build_next_steps_plan, markdown_summary
 from ap_param_context import merge_external_parameters, parse_param_file
@@ -2316,6 +2317,81 @@ def test_next_steps_cli_writes_json_and_summary():
     assert_true("Immediate safety gate" in summary and "What not to do" in summary, "CLI summary should include required headings")
 
 
+def test_evidence_digest_from_diagnosis_only_preserves_findings_and_missing_evidence():
+    diagnosis = {
+        "findings": [
+            {"possible_cause": "Yaw rate tracking issue", "confidence": "high", "severity": "likely-issue", "evidence": ["RATE.Y p95 error high"]}
+        ],
+        "checked_but_not_supported": [{"check": "Motor outputs", "result": "No output saturation found"}],
+        "missing_required": [],
+        "missing_strongly_recommended": ["PIDY"],
+        "missing_optional": ["ESC"],
+        "what_cannot_be_concluded": ["ESC telemetry is missing, so ESC health cannot be confirmed."],
+        "warnings": ["Confirmed logging dropout/drop count evidence was found; inspect logging_health.confirmed_dropouts."],
+    }
+
+    digest = build_evidence_digest(diagnosis=diagnosis)
+    summary = digest_markdown_summary(digest)
+
+    assert_true("Yaw rate tracking issue" in "\n".join(digest["strongest_supported_observations"]), "digest should carry diagnosis findings")
+    assert_true("PIDY" in "\n".join(digest["missing_evidence"]), "missing PID evidence should be explicit")
+    assert_true("ESC telemetry is missing" in "\n".join(digest["confidence_limits"]), "cannot-conclude caveat should be preserved")
+    assert_true("Findings checked but not supported" in summary, "markdown should include required section")
+    assert_true("final diagnosis" in digest["digest_note"].lower(), "digest should state it is not the final answer")
+
+
+def test_evidence_digest_from_mode_compare_fft_and_params_promotes_cross_source_context():
+    mode_compare = {
+        "ranking": [{"decoded_mode": "AUTO", "score": 9.0}, {"decoded_mode": "POSHOLD", "score": 2.0}],
+        "mode_comparisons": [{"decoded_mode": "AUTO", "ranking_score": 9.0}, {"decoded_mode": "POSHOLD", "ranking_score": 2.0}],
+        "manual_control_confidence": "low",
+        "manual_control_limitations": ["POSHOLD/LOITER are not pure manual attitude modes; manual-control conclusions are limited without STABILIZE, ALTHOLD, or ACRO segments."],
+        "confidence_limits": ["missing pure manual modes"],
+        "missing_evidence": {"strongly_recommended": ["PIDY"]},
+    }
+    fft = {"fft_available": False, "reason": "no_raw_or_high_rate_imu_messages", "next_capture_guidance": ["Capture raw/high-rate IMU only if safe."]}
+    params = {
+        "parameters": [{"name": "WP_YAW_BEHAVIOR", "logged_value": 2, "units": None, "metadata_note": "mission yaw behaviour"}],
+        "note": "Parameter metadata is explanatory context only.",
+    }
+
+    digest = build_evidence_digest(mode_compare=mode_compare, fft=fft, param_lookup=params)
+
+    observations = "\n".join(digest["strongest_supported_observations"])
+    assert_true("AUTO ranks worse" in observations, f"mode comparison highlight should be promoted: {observations}")
+    assert_true("WP_YAW_BEHAVIOR" in "\n".join(digest["parameter_context"]), "parameter context should be included")
+    assert_true("FFT unavailable" in "\n".join(digest["fft_noise_status"]), "FFT limitation should be included")
+    assert_true(any("manual" in item.lower() for item in digest["confidence_limits"]), "manual-mode limitation should be carried")
+
+
+def test_evidence_digest_preserves_missing_evidence_caveats_and_next_steps():
+    manifest = {
+        "missing_evidence": {"required": ["RATE"], "strongly_recommended": ["RCOU"], "optional_context": ["ESC"]},
+        "confidence_limits": ["MODE missing limits mode comparison."],
+    }
+    next_steps = {
+        "recommended_next_steps": [{"priority": 1, "type": "immediate_safety_gate", "action": "Pause AUTO/mission flying.", "reason": "AUTO behaviour is not trusted."}],
+        "recommended_user_artifacts": ["out/diagnosis.json", "out/mode_compare.json"],
+        "missing_evidence_to_capture": ["PIDY/PIDR/PIDP"],
+        "what_not_to_do": ["Do not tune before reanalysis."],
+    }
+
+    digest = build_evidence_digest(manifest=manifest, next_steps=next_steps)
+
+    assert_true("RATE" in "\n".join(digest["missing_evidence"]) and "RCOU" in "\n".join(digest["missing_evidence"]), "manifest missing evidence should be retained")
+    assert_true("PIDY/PIDR/PIDP" in "\n".join(digest["missing_evidence"]), "next-step missing evidence should be retained")
+    assert_true(any("Pause AUTO" in item for item in digest["safety_gate_next_steps"]), "next steps should be included")
+    assert_true("out/diagnosis.json" in digest["recommended_user_artifacts"], "recommended artifacts should be included")
+
+
+def test_evidence_digest_avoids_final_diagnosis_language():
+    digest = build_evidence_digest(diagnosis={"findings": [{"possible_cause": "Battery sag", "confidence": "medium", "evidence": ["BAT.Volt dipped"]}]})
+    text = json.dumps(digest) + "\n" + digest_markdown_summary(digest)
+
+    assert_true("the cause is definitely" not in text.lower(), "digest must not use final diagnosis certainty language")
+    assert_true("not a final diagnosis" in text.lower(), "digest should label itself as supporting evidence")
+
+
 def test_case_investigate_fake_runner_builds_evidence_pack_and_continues_after_failure():
     calls = []
 
@@ -2948,6 +3024,10 @@ def main():
     test_next_steps_script_crash_loss_of_control_no_fly()
     test_next_steps_script_fft_unavailable_safe_capture_guidance()
     test_next_steps_cli_writes_json_and_summary()
+    test_evidence_digest_from_diagnosis_only_preserves_findings_and_missing_evidence()
+    test_evidence_digest_from_mode_compare_fft_and_params_promotes_cross_source_context()
+    test_evidence_digest_preserves_missing_evidence_caveats_and_next_steps()
+    test_evidence_digest_avoids_final_diagnosis_language()
     test_case_investigate_fake_runner_builds_evidence_pack_and_continues_after_failure()
     test_diagnose_modes_runs_per_mode_and_summarizes_differences()
     test_diagnose_modes_records_missing_mode_without_failing_available_modes()
