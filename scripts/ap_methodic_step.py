@@ -25,6 +25,7 @@ from ap_methodic_notch_review import analyze_notch_review
 from ap_methodic_pid_notch_review import analyze_pid_notch_review
 from ap_methodic_position_controller_review import analyze_position_controller_review
 from ap_methodic_precision_land_review import analyze_precision_land_review
+from ap_methodic_productive_config_check import analyze_productive_config_check
 from ap_methodic_quicktune_review import analyze_quicktune_review
 from ap_methodic_sysid_review import analyze_sysid_review
 from ap_methodic_throttle_controller import analyze_throttle_controller
@@ -78,6 +79,7 @@ STEP_IMPLEMENTATIONS = {
     "12.1": "analyze_12_1",
     "12.2": "analyze_12_2",
     "12.3": "analyze_12_3",
+    "13": "analyze_13",
 }
 
 
@@ -785,6 +787,28 @@ def analyze_12_3(log_path: Path, step: dict[str, Any], plots_dir: Path | None, m
             "Do not recommend operational precision landing until target tracking, rangefinder health, descent behaviour, failsafes, and recovery path are reviewed.",
         ]
         result["confidence_limits"] = ["No deterministic 12.3 evidence was available because log parsing failed."]
+        return normalize_schema(result)
+
+
+def analyze_13(log_path: Path, step: dict[str, Any], plots_dir: Path | None, manual_observations: list[str]) -> dict[str, Any]:
+    try:
+        result = analyze_productive_config_check(index_path=log_path if log_path.suffix.lower() == ".json" else None, params_path=None, methodic_progress_path=None)
+        if manual_observations:
+            result["evidence_used"].append({"type": "manual_observations_provided_to_dispatcher", "value": manual_observations})
+        result["recommended_next_steps"].insert(0, "For a complete Methodic 13 audit, run scripts/ap_methodic_productive_config_check.py with --index, --params, and --methodic-progress.")
+        return normalize_schema(result)
+    except Exception as exc:
+        result = empty_result(step)
+        result["result"] = "inconclusive"
+        result["safety_gate"] = "repeat_step"
+        result["missing_evidence"] = [f"Step 13 productive-configuration evidence could not be read: {exc}"]
+        result["checked_but_not_supported"] = ["methodic_13_productive_config_check"]
+        result["recommended_next_steps"] = [
+            "Run scripts/ap_methodic_productive_config_check.py --index out/index.json --params vehicle.param --methodic-progress out/methodic_progress.json --out out/methodic_13.json.",
+            "Resolve disabled safety checks/failsafes, diagnostic logging leftovers, and parameter provenance conflicts before accepting everyday-use configuration.",
+            "Do not declare flight safety from this configuration audit.",
+        ]
+        result["confidence_limits"] = ["Dispatcher cannot supply the complete Step 13 index, final parameter file, and Methodic progress inputs."]
         return normalize_schema(result)
 
 

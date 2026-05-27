@@ -204,6 +204,14 @@ python scripts/ap_methodic_precision_land_review.py LOG.BIN --out out/methodic_1
 
 This tool reviews precision-landing target messages where present, rangefinder health, descent profile, landing/mode timeline, failsafe/error context, RC intervention, GPS/EKF quality, and power/vibration confounders. It may classify evidence as ready for further controlled precision-land tests, sensor review needed, fail, inconclusive, or not applicable; it must not certify precision landing as operationally safe from one log.
 
+For Methodic 13 productive configuration, run the dedicated final audit tool directly because it needs an index, final parameter file, and Methodic progress record:
+
+```bash
+python scripts/ap_methodic_productive_config_check.py --index out/index.json --params vehicle.param --methodic-progress out/methodic_progress.json --out out/methodic_13.json --summary out/methodic_13.md
+```
+
+This tool checks diagnostic logging cleanup, normal logging adequacy, `ARMING_CHECK`, battery/RC/GCS/EKF/geofence failsafes, battery monitor setup, notch/filter validation, prior Methodic progress, mode/RC mapping context, compass/GPS/yaw-source caveats, and conflicts between logged/index parameters and the external final `.param` file. It may say `ready_for_operational_checks`, `not_ready`, or `inconclusive`; it must never provide a flight-safety signoff.
+
 If the user gives required observations such as motor/ESC heat, audible oscillation, visible shaking, or hard-to-control behaviour, pass them as repeated `--manual-observation` values. If those observations are not available, preserve that as missing evidence; do not promote the step to a clean pass from log evidence alone.
 
 `ap_methodic_step.py` returns a standard schema with `result`, `safety_gate`, `evidence_used`, `missing_evidence`, `manual_observations_required`, `findings`, `parameter_context`, `plots`, `recommended_next_steps`, `what_not_to_do`, `next_methodic_step`, and `confidence_limits`. Treat the step result as structured evidence, not final truth. Inspect the JSON, summary, and plots before writing conclusions yourself.
