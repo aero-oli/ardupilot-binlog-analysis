@@ -15,6 +15,7 @@ from ap_common import AnalysisError, ensure_dir, iter_dataflash_messages, messag
 from ap_methodic_711_motor_oscillation import analyze_motor_oscillation_711
 from ap_methodic_ekf_altitude_source import analyze_ekf_altitude_source
 from ap_methodic_first_flight import analyze_first_flight
+from ap_methodic_magfit_review import analyze_magfit_review
 from ap_methodic_notch_review import analyze_notch_review
 from ap_methodic_pid_notch_review import analyze_pid_notch_review
 from ap_methodic_quicktune_review import analyze_quicktune_review
@@ -53,6 +54,7 @@ STEP_IMPLEMENTATIONS = {
     "8.3": "analyze_8_3",
     "8.4": "analyze_8_4",
     "8.5": "analyze_8_5",
+    "9.1": "analyze_9_1",
     "9.2": "analyze_9_2",
 }
 
@@ -526,6 +528,27 @@ def analyze_8_4(log_path: Path, step: dict[str, Any], plots_dir: Path | None, ma
 
 def analyze_8_5(log_path: Path, step: dict[str, Any], plots_dir: Path | None, manual_observations: list[str]) -> dict[str, Any]:
     return analyze_quicktune_step(log_path, step, plots_dir, manual_observations, methodic_step="8.5")
+
+
+def analyze_9_1(log_path: Path, step: dict[str, Any], plots_dir: Path | None, manual_observations: list[str]) -> dict[str, Any]:
+    try:
+        result = analyze_magfit_review(log_path, plots_dir=plots_dir)
+        if manual_observations:
+            result["evidence_used"].append({"type": "manual_observations_provided_to_dispatcher", "value": manual_observations})
+        return result
+    except Exception as exc:
+        result = empty_result(step)
+        result["result"] = "inconclusive"
+        result["safety_gate"] = "repeat_step"
+        result["missing_evidence"] = [f"Step 9.1 MagFit evidence could not be read: {exc}"]
+        result["checked_but_not_supported"] = ["methodic_9_1_magfit_review"]
+        result["recommended_next_steps"] = [
+            "Collect a readable MagFit flight log with MAG, XKF*/NKF*, ATT/RATE, GPS/GPA, MODE, MSG/ERR/EV, BAT/POWR, RCIN, and PARM evidence.",
+            "Repeat the MagFit evidence capture if the log does not include enough heading diversity or the intended figure-eight segment.",
+            "Do not write compass offsets or yaw-source parameters from unreadable or inconclusive evidence.",
+        ]
+        result["confidence_limits"] = ["No deterministic 9.1 evidence was available because log parsing failed."]
+        return normalize_schema(result)
 
 
 def analyze_9_2(log_path: Path, step: dict[str, Any], plots_dir: Path | None, manual_observations: list[str]) -> dict[str, Any]:

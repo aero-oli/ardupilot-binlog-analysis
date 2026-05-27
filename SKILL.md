@@ -115,6 +115,14 @@ python scripts/ap_methodic_quicktune_review.py LOG.BIN --before-params before.pa
 
 This tool reviews QuikTune/script messages, before/after or log PARM tuning changes, ATT/RATE tracking, PID terms, RATE output oscillation, RC contamination, vibration, motor outputs, and battery/power evidence. It must not write gains, auto-accept QuikTune output, or recommend gain increases when vibration, noise, saturation, or unstable tracking is present.
 
+For Methodic 9.1 MagFit review, the dispatcher uses the dedicated MagFit evidence tool. You may also run it directly:
+
+```bash
+python scripts/ap_methodic_magfit_review.py LOG.BIN --out out/methodic_9_1.json --summary out/methodic_9_1.md --plots out/plots/methodic_9_1
+```
+
+This tool reviews MAG field evidence, heading diversity, MagFit flight-profile suitability, MAG timing correlation with current/throttle, EKF yaw/mag test ratios, GPS/yaw-source context, and compass/EKF warnings. It must not write compass offsets, compass orientation, motor-compensation, or EKF yaw-source parameters automatically.
+
 If the user gives required observations such as motor/ESC heat, audible oscillation, visible shaking, or hard-to-control behaviour, pass them as repeated `--manual-observation` values. If those observations are not available, preserve that as missing evidence; do not promote the step to a clean pass from log evidence alone.
 
 `ap_methodic_step.py` returns a standard schema with `result`, `safety_gate`, `evidence_used`, `missing_evidence`, `manual_observations_required`, `findings`, `parameter_context`, `plots`, `recommended_next_steps`, `what_not_to_do`, `next_methodic_step`, and `confidence_limits`. Treat the step result as structured evidence, not final truth. Inspect the JSON, summary, and plots before writing conclusions yourself.

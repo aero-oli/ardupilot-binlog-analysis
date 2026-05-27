@@ -129,9 +129,9 @@ steps:
     official_anchor: "#91-third-flight-magfit"
     official_url: "https://ardupilot.github.io/MethodicConfigurator/TUNING_GUIDE_ArduCopter#91-third-flight-magfit"
     required_messages: [MAG]
-    strongly_recommended_messages: [XKF3, XKF4, GPS, MODE, PARM]
-    optional_messages: [ATT, RATE, RCIN, MSG, EV, ERR]
-    relevant_parameters: [COMPASS_*, COMPASS_OFS_*, COMPASS_DIA_*, COMPASS_ODI_*, MAGH_*, WPNAV_SPEED]
+    strongly_recommended_messages: [XKF3, XKF4, NKF3, NKF4, ATT, RATE, GPS, GPA, MODE, MSG, ERR, EV, BAT, POWR, RCIN, PARM]
+    optional_messages: [GPS2, XKY0, XKY1, RMGI, RCOU, RCO2, RCO3]
+    relevant_parameters: [COMPASS_USE, COMPASS_USE2, COMPASS_USE3, COMPASS_ORIENT*, COMPASS_OFS*, COMPASS_MOT*, EK3_SRC1_YAW, GPS_TYPE, GPS_TYPE2, GPS_AUTO_SWITCH, LOG_BITMASK]
     preferred_window: "Figure-eight MagFit segment, excluding takeoff and landing."
     manual_observations_required: ["Obstacle clearance confirmed", "Pilot/GCS confirmed the intended MagFit pattern was flown"]
     pass_fail_summary: "Pass when the log covers the intended MagFit pattern and magnetometer/EKF evidence is suitable for MagFit review."
