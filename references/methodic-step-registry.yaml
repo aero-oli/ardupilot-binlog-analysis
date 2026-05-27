@@ -333,9 +333,9 @@ steps:
     official_anchor: "#122-guided-operation-without-rc-transmitter"
     official_url: "https://ardupilot.github.io/MethodicConfigurator/TUNING_GUIDE_ArduCopter#122-guided-operation-without-rc-transmitter"
     required_messages: [MODE]
-    strongly_recommended_messages: [POS, GPS, XKF4, RCIN, MSG, EV, ERR, PARM]
-    optional_messages: [CMD, NTUN, ATT, RATE]
-    relevant_parameters: [FS_*, GCS_*, GUID_OPTIONS, WPNAV_*, FENCE_*]
+    strongly_recommended_messages: [GPS, GPA, XKF4, ATT, RATE, CTUN, RCIN, MSG, EV, ERR, BAT, POWR, VIBE, PARM]
+    optional_messages: [CMD, MAV, MAVC, POS, NTUN, PSC, XKF1, XKF3, NKF1, NKF3, NKF4]
+    relevant_parameters: [GUID_OPTIONS, FS_*, GCS_*, FENCE_*, WPNAV_*, PSC_POSXY_P, PSC_VELXY_P, PSC_ACCXY_P, PSC_POSZ_P, PSC_VELZ_P, PSC_ACCZ_P]
     preferred_window: "Guided mode command and response segment with failsafe context."
     manual_observations_required: ["BVLOS/companion-computer requirement is real", "Failsafe and manual recovery plan verified"]
     pass_fail_summary: "Pass when Guided operation is applicable, command response is understood, and recovery/failsafe evidence is reviewed."

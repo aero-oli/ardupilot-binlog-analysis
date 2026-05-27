@@ -188,6 +188,14 @@ python scripts/ap_methodic_position_controller_review.py LOG.BIN --out out/metho
 
 This tool reviews Loiter/PosHold or other position-control evidence only after checking GPS/EKF confidence and inner attitude/rate loop prerequisites. It inspects `GPS`/`GPA`, `XKF*`/`NKF*`, `ATT`/`RATE`, `CTUN`, `RCIN`, `MODE`, `VIBE`, `BAT`/`POWR`, `PARM`, and optional `POS`/`NTUN`/`PSC`/`RNGF` messages. It must not tune outer loops when inner loops or GPS/EKF are poor, and it must not auto-change `PSC_*`, `LOIT_*`, or `WPNAV_*` parameters.
 
+For Methodic 12.2 Guided-operation review, the dispatcher uses the dedicated Guided evidence tool. You may also run it directly:
+
+```bash
+python scripts/ap_methodic_guided_operation_review.py LOG.BIN --out out/methodic_12_2.json --summary out/methodic_12_2.md --plots out/plots/methodic_12_2
+```
+
+This tool reviews whether Guided mode was present, position/velocity/altitude tracking, failsafe/error context, RC override or pilot intervention, companion/GCS command context when logged, GPS/EKF quality, and power/vibration confounders. It may classify evidence as ready for further Guided checks, not ready, inconclusive, or not applicable, but it must not certify Guided operation as safe or operationally ready.
+
 If the user gives required observations such as motor/ESC heat, audible oscillation, visible shaking, or hard-to-control behaviour, pass them as repeated `--manual-observation` values. If those observations are not available, preserve that as missing evidence; do not promote the step to a clean pass from log evidence alone.
 
 `ap_methodic_step.py` returns a standard schema with `result`, `safety_gate`, `evidence_used`, `missing_evidence`, `manual_observations_required`, `findings`, `parameter_context`, `plots`, `recommended_next_steps`, `what_not_to_do`, `next_methodic_step`, and `confidence_limits`. Treat the step result as structured evidence, not final truth. Inspect the JSON, summary, and plots before writing conclusions yourself.
