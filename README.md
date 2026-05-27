@@ -10,6 +10,7 @@ The skill is strongest for Copter and multirotor logs. Generic parsing, extracti
 - Extract log messages to CSV or Parquet tables.
 - Generate health metrics, tuning summaries, FFT/noise plots, and interactive Plotly graph packs for the agent to interpret.
 - Run symptom-led investigations for yaw, attitude, GPS/EKF, vibration, battery/power, motor/ESC, altitude/throttle, and crash/loss-of-control events.
+- Review ArduCopter Methodic Configurator tuning steps with step-aware evidence, safety gates, plots, and next-step guidance.
 - Compare before/after logs with optional segment-specific time windows.
 - Create custom plots from any extracted `MESSAGE.FIELD`, including derived expressions such as `GPS.Alt-BARO.Alt`.
 - Interpret Copter output channels using `SERVOx_FUNCTION`, including `RCOU`, `RCO2`, and `RCO3`.
@@ -17,6 +18,8 @@ The skill is strongest for Copter and multirotor logs. Generic parsing, extracti
 ## Safety Boundary
 
 This skill cannot declare an aircraft safe to fly. It is designed to separate abnormal evidence from normal telemetry context, with diagnosis output shaped as `findings`, `context`, `checked_but_not_supported`, `missing_required`, `missing_strongly_recommended`, and `missing_optional`. Mechanical inspection, bench testing, configuration review, and controlled ground checks are still required after any serious log finding.
+
+The Methodic Configurator tools are not an automatic tuner. They do not upload parameters, write gains, certify operational readiness, or replace the agent's evidence inspection.
 
 ## Install
 
@@ -66,6 +69,14 @@ Compare these two logs and tell me whether the tuning change improved things.
 ```
 
 ```text
+I am on Methodic step 7.1.1. Check motor output oscillation and tell me whether I can proceed to the notch step.
+```
+
+```text
+Review this AutoTune log against the Methodic workflow.
+```
+
+```text
 Plot GPS altitude and barometric pressure, and include mode/error markers.
 ```
 
@@ -76,6 +87,45 @@ The agent reads `SKILL.md`, follows the safety rules, chooses the relevant inves
 The `scripts/` directory is mainly for the agent. It provides deterministic helpers for validation, indexing, extraction, metrics, plotting, tuning review, symptom diagnosis, FFT, comparison, and segment discovery.
 
 You can run the scripts manually while developing or debugging the skill, but normal use is to ask the agent for the analysis you want and let it choose the workflow.
+
+## Methodic Configurator Support
+
+The skill supports ArduCopter Methodic Configurator tuning step review. The scripts gather deterministic evidence and classify a step result/safety gate; the agent still inspects the JSON, plots, missing evidence, and manual observations before writing conclusions.
+
+Supported Methodic steps and groups:
+
+- 7.1 First flight
+- 7.1.1 Motor output oscillation check
+- 8.1 Harmonic notch / filter review
+- 8.2 Throttle controller
+- 8.3 PID notch / frame resonance
+- 8.4 EKF altitude source weights
+- 8.5 QuikTune or manual PID tuning
+- 9.1 MagFit
+- 9.2 QuikTune standard setup/results
+- 9.3 Tune evaluation with feed-forward disabled
+- 9.4 Tune evaluation with feed-forward enabled
+- 9.5 AutoTune sequence
+- 9.6 Performance evaluation
+- 9.7 Derivative feed-forward calculation
+- 10.1 Wind estimation / drag coefficients
+- 10.2 Barometer compensation
+- 11.1 System ID flights
+- 11.2 Analytical PID optimisation review
+- 12.1 Position controller tuning
+- 12.2 Guided operation
+- 12.3 Precision landing
+- 13 Productive configuration
+
+Core entrypoints:
+
+```bash
+python scripts/ap_methodic_step.py LOG.BIN --step 7.1.1 --out out/methodic_7_1_1.json --summary out/methodic_7_1_1.md --plots out/plots/methodic_7_1_1
+python scripts/ap_methodic_progress.py out/methodic_7_1.json out/methodic_7_1_1.json --out out/methodic_progress.json --summary out/methodic_progress.md
+python scripts/ap_methodic_compare.py BEFORE.BIN AFTER.BIN --step 8.1 --out out/methodic_compare_8_1.json
+```
+
+Methodic outputs must be treated as evidence, not final truth. Failed, inconclusive, and conditional safety gates should not be skipped without user confirmation and a documented safety rationale.
 
 ## Tests
 

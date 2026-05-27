@@ -11,9 +11,17 @@ Use this as an operating sequence before forming conclusions. The scripts provid
    python scripts/ap_log_index.py LOG.BIN --json out/index.json --summary out/index.md
    ```
 
-   Check vehicle type, firmware hints, duration, message availability, logging-health warnings, and whether core messages exist after arming.
+    Check vehicle type, firmware hints, duration, message availability, logging-health warnings, and whether core messages exist after arming.
 
-2. If the user reports a symptom, run the investigation manifest first.
+2. If the user names a Methodic Configurator step or asks whether a Methodic tuning step can proceed, switch to Methodic tuning step review.
+
+   ```bash
+   python scripts/ap_methodic_step.py LOG.BIN --step STEP --out out/methodic_STEP.json --summary out/methodic_STEP.md --plots out/plots/methodic_STEP
+   ```
+
+   Inspect the step `result`, `safety_gate`, `evidence_used`, `missing_evidence`, plots, `recommended_next_steps`, and `what_not_to_do`. Use `references/methodic-configurator-workflows.md`, `references/methodic-step-registry.yaml`, `references/methodic-output-patterns.md`, and `references/final-answer-patterns.md`. Do not skip failed, conditional, or inconclusive Methodic safety gates without user confirmation and a documented safety rationale.
+
+3. If the user reports a symptom, run the investigation manifest first.
 
    ```bash
    python scripts/ap_log_investigation_manifest.py LOG.BIN --symptom "USER SYMPTOM" --out out/investigation.json
@@ -21,11 +29,11 @@ Use this as an operating sequence before forming conclusions. The scripts provid
 
    Treat the manifest as a plan: available evidence, missing evidence, questions to answer, suggested plots, and confidence limits. It is not a diagnosis.
 
-3. Choose a relevant time window before interpreting metrics.
+4. Choose a relevant time window before interpreting metrics.
 
    Prefer `--window`, `--mode`, `--around-msg`, `--around-event`, `--around-error`, `--takeoff-only`, `--hover-candidates`, or `--high-throttle-only` over whole-log averages when the symptom occurred in a specific phase. If a requested selector cannot be resolved, state that and avoid silently falling back to whole-log conclusions.
 
-4. Plot desired vs actual signals.
+5. Plot desired vs actual signals.
 
    For attitude/rate symptoms, compare desired and achieved values before looking for causes. Use custom plots when the standard diagnosis plots are not enough.
 
@@ -34,23 +42,23 @@ Use this as an operating sequence before forming conclusions. The scripts provid
    python scripts/ap_log_custom_plot.py --tables out/tables --series RATE.YDes --series RATE.Y --out out/plots/yaw_rate.html
    ```
 
-5. Check actuator authority and saturation.
+6. Check actuator authority and saturation.
 
    Inspect `RATE.*Out`, `RCOU`/`RCO2`/`RCO3`, motor mapping from `SERVOx_FUNCTION`, and ESC telemetry if available. Saturation, output clipping, one motor/ESC behaving differently, or PID limit flags can support an authority hypothesis.
 
-6. Check estimator, GPS, and compass evidence.
+7. Check estimator, GPS, and compass evidence.
 
    Use `GPS`, `MAG`, `XKF3`, `XKF4`, mode/timeline messages, and yaw-source helpers where available. Do not infer compass interference from MAG ranges alone; require timing, correlation, or estimator evidence.
 
-7. For arming, pre-arm, RC, or failsafe symptoms, follow `rc-failsafe-prearm-diagnosis.md`.
+8. For arming, pre-arm, RC, or failsafe symptoms, follow `rc-failsafe-prearm-diagnosis.md`.
 
    Start with the `MSG`/`ERR`/`EV`/`ARM`/`MODE` timeline, then inspect `RCIN`, `RCMAP_*`, failsafe parameters, battery/board power, and GPS/EKF/compass pre-arm evidence. If the issue happened before arming and the log lacks timeline evidence, ask for a ground-only `LOG_DISARMED` capture rather than a flight.
 
-8. Check battery/power and vibration as time-correlated contributors.
+9. Check battery/power and vibration as time-correlated contributors.
 
    Battery sag, high current, board power flags, high vibration, and clipping are relevant when they occur in the symptom window or correlate with the affected signal. Whole-log maxima are context unless timing supports relevance.
 
-9. Separate in-window timeline evidence from outside-window context.
+10. Separate in-window timeline evidence from outside-window context.
 
    Inspect `events_relative_to_window` in `diagnosis.json` or the evidence
    digest. `inside_window` entries are candidate causal/supporting evidence.
@@ -60,16 +68,16 @@ Use this as an operating sequence before forming conclusions. The scripts provid
    selected in-flight symptom unless timing links them. Use
    `timeline-interpretation.md` when writing this distinction.
 
-10. Treat script findings as hypotheses.
+11. Treat script findings as hypotheses.
 
    A finding means a threshold or rule fired. Confirm it against plots, timing, available messages, and missing evidence before ranking it as a likely cause.
 
-11. Always state missing data and confidence limits.
+12. Always state missing data and confidence limits.
 
    Separate missing required data from missing strongly recommended or optional context. Explain when log dropouts, timestamp gaps, message sparsity, absent RCIN, absent ESC telemetry, or missing parameters limit confidence.
    If the current log is insufficient, use `logging-configuration-for-investigation.md` to describe the missing logging/messages and `evidence-gathering-flights.md` to choose the safest next evidence-gathering activity. The next step may be a parameter dump, bench inspection, ground test, restrained test, or controlled flight.
 
-12. For safety-relevant cases, build a next-step planning aid after diagnosis and any mode comparison outputs exist.
+13. For safety-relevant cases, build a next-step planning aid after diagnosis and any mode comparison outputs exist.
 
    ```bash
    python scripts/ap_next_steps.py --diagnosis out/diagnosis.json --mode-compare out/mode_compare.json --param-lookup out/param_lookup.json --fft out/fft.json --manifest out/investigation.json --json out/next_steps.json --summary out/next_steps.md
@@ -77,7 +85,7 @@ Use this as an operating sequence before forming conclusions. The scripts provid
 
    Pass only the outputs that exist. Inspect the generated plan for the immediate safety gate, bench checks, logging/configuration checks, controlled evidence capture, reanalysis, and what not to do. Treat it as planning guidance, not an automatic final diagnosis.
 
-13. Do not recommend unsafe flight or disabling checks.
+14. Do not recommend unsafe flight or disabling checks.
 
     Never declare the aircraft safe from a log alone. Do not recommend disabling arming, EKF, GPS, compass, battery, logging, or failsafe checks as a routine fix. Prefer targeted inspection, bench verification, and conservative ground checks.
 

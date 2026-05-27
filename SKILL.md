@@ -55,17 +55,56 @@ If the decoder confidence is `unknown`, state that the local mapping does not id
 
 Choose the mode from the user's request. If the user reports a symptom, symptom-led diagnosis has priority over a general review.
 
-### Mode 0: Methodic Configurator step review
+### Mode 0: Methodic Configurator tuning step review
 
 Use when the user names an ArduPilot Methodic Configurator step, asks whether a Methodic step passed, asks about Methodic Configurator tuning, or asks for step-aware tuning workflow guidance.
 
+Trigger examples:
+
+- "I am on Methodic step 7.1.1"
+- "Check motor output oscillation"
+- "Can I proceed to the notch step?"
+- "Review this AutoTune log"
+- "Review this QuikTune log"
+- "Check if this System ID flight is usable"
+
 First read `references/methodic-configurator-workflows.md`, `references/methodic-step-registry.yaml`, and, when writing the final answer, `references/methodic-output-patterns.md`. The official guide source for the registry is `https://ardupilot.github.io/MethodicConfigurator/TUNING_GUIDE_ArduCopter`.
 
-Run the Methodic step entrypoint:
+Workflow:
+
+1. Run validation and indexing first:
+
+   ```bash
+   python scripts/ap_log_validate.py LOG.BIN --json out/validate.json --summary out/validate.md
+   python scripts/ap_log_index.py LOG.BIN --json out/index.json --summary out/index.md
+   ```
+
+2. Run the Methodic step entrypoint:
+
+   ```bash
+   python scripts/ap_methodic_step.py LOG.BIN --step STEP --out out/methodic_STEP.json --summary out/methodic_STEP.md --plots out/plots/methodic_STEP
+   ```
+
+3. Inspect the JSON result, safety gate, evidence used, missing evidence, plots, recommended next steps, and `what_not_to_do`.
+4. Treat conditional, failed, and inconclusive safety gates as blockers or caveated gates. Do not skip them without user confirmation and a documented safety rationale.
+5. Write the final conclusion yourself. The scripts gather evidence; they do not produce final tuning conclusions or change parameters.
+
+Example:
 
 ```bash
 python scripts/ap_methodic_step.py LOG.BIN --step 7.1.1 --out out/methodic_7_1_1.json --summary out/methodic_7_1_1.md --plots out/plots/methodic_7_1_1
 ```
+
+For Methodic answers, the final response must include:
+
+1. Methodic step result.
+2. Can proceed?
+3. Why.
+4. Evidence.
+5. Missing evidence.
+6. Before proceeding.
+7. Next Methodic step/file.
+8. What not to do.
 
 For Methodic 7.1.1 specifically, the dispatcher uses the dedicated motor-output oscillation evidence tool. You may also run it directly when iterating on evidence collection:
 
@@ -233,12 +272,13 @@ If the user gives required observations such as motor/ESC heat, audible oscillat
 Every Methodic final answer must include clear next steps:
 
 1. Methodic step and result.
-2. Safety gate.
-3. Evidence used and missing evidence.
-4. Manual observations still required.
-5. Whether to proceed, proceed with caution, repeat the step, stop for bench checks, or not proceed.
-6. What not to do.
-7. The next Methodic step only if the evidence supports it.
+2. Can proceed? Use the safety gate to answer proceed, proceed with caution, repeat, bench check, or do not proceed.
+3. Why.
+4. Evidence used.
+5. Missing evidence and manual observations still required.
+6. Before proceeding.
+7. Next Methodic step/file only if the evidence supports it.
+8. What not to do.
 
 This mode does not auto-tune, upload parameters, or recommend blind gain changes. Never skip Methodic safety gates and never declare the aircraft safe to fly.
 

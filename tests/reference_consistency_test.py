@@ -273,15 +273,30 @@ def test_methodic_step_7_1_1_structured_result():
 def test_skill_links_methodic_reference():
     skill = (ROOT / "SKILL.md").read_text(encoding="utf-8")
     for required in [
-        "Mode 0: Methodic Configurator step review",
+        "Mode 0: Methodic Configurator tuning step review",
         "references/methodic-configurator-workflows.md",
         "references/methodic-step-registry.yaml",
         "references/methodic-output-patterns.md",
         "https://ardupilot.github.io/MethodicConfigurator/TUNING_GUIDE_ArduCopter",
         "python scripts/ap_methodic_step.py",
         "Treat the step result as structured evidence, not final truth",
+        "Can proceed?",
+        "Next Methodic step/file",
     ]:
         assert_true(required in skill, f"SKILL.md missing Methodic reference: {required}")
+
+
+def test_readme_mentions_methodic_mode():
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    for required in [
+        "Methodic Configurator Support",
+        "not an automatic tuner",
+        "7.1.1 Motor output oscillation check",
+        "9.5 AutoTune sequence",
+        "13 Productive configuration",
+        "python scripts/ap_methodic_step.py",
+    ]:
+        assert_true(required in readme, f"README.md missing Methodic mode content: {required}")
 
 
 def test_final_answer_patterns_linked_and_complete():
@@ -300,8 +315,22 @@ def test_final_answer_patterns_linked_and_complete():
         "Recommended next steps",
         "What not to do",
         "Do not overstate confidence",
+        "Methodic Configurator Step Review",
+        "Methodic 7.1.1 Motor Output Oscillation",
     ]:
         assert_true(phrase in text, f"final-answer patterns missing phrase: {phrase}")
+
+
+def test_final_answer_patterns_include_methodic_requirements():
+    text = (ROOT / "references" / "final-answer-patterns.md").read_text(encoding="utf-8")
+    section = markdown_section(text, "Methodic Configurator Step Review")
+    for phrase in [
+        "Methodic step result",
+        "Can proceed?",
+        "Next Methodic step/file",
+        "What not to do",
+    ]:
+        assert_true(phrase in section, f"Methodic final-answer pattern missing phrase: {phrase}")
 
 
 def test_safety_relevant_final_answer_patterns_have_action_plan_terms():

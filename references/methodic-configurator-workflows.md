@@ -51,10 +51,34 @@ If these observations are required and unavailable, classify the step as `inconc
 ## Agent Workflow
 
 1. Identify the Methodic step from the user request.
-2. Run `python scripts/ap_methodic_step.py LOG.BIN --step STEP_ID --out out/methodic_STEP.json --summary out/methodic_STEP.md --plots out/plots/methodic_STEP`.
-3. Inspect the JSON, Markdown summary, and plots.
-4. Cross-check missing evidence and manual observations.
-5. Write the final response yourself with a clear result, safety gate, evidence, confidence limits, recommended next steps, and what not to do.
+2. Run validation and indexing before step interpretation.
+
+   ```bash
+   python scripts/ap_log_validate.py LOG.BIN --json out/validate.json --summary out/validate.md
+   python scripts/ap_log_index.py LOG.BIN --json out/index.json --summary out/index.md
+   ```
+
+3. Run `python scripts/ap_methodic_step.py LOG.BIN --step STEP_ID --out out/methodic_STEP.json --summary out/methodic_STEP.md --plots out/plots/methodic_STEP`.
+4. Inspect the JSON result, safety gate, evidence used, missing evidence, Markdown summary, and plots.
+5. Cross-check missing evidence and manual observations.
+6. For multi-step work, update progress with `python scripts/ap_methodic_progress.py out/methodic_*.json --out out/methodic_progress.json --summary out/methodic_progress.md`.
+7. For before/after work, use `python scripts/ap_methodic_compare.py BEFORE.BIN AFTER.BIN --step STEP_ID --out out/methodic_compare_STEP.json`.
+8. Write the final response yourself with a clear result, proceed/no-proceed answer, why, evidence, missing evidence, before-proceeding actions, next Methodic step/file, and what not to do.
+
+## Final Answer Requirements
+
+Every Methodic answer must include:
+
+- Methodic step result.
+- Can proceed?
+- Why.
+- Evidence.
+- Missing evidence.
+- Before proceeding.
+- Next Methodic step/file.
+- What not to do.
+
+Failed, conditional, and inconclusive safety gates must not be skipped without user confirmation and a documented safety rationale.
 
 ## Official Source
 

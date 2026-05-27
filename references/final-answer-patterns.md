@@ -38,6 +38,129 @@ changes.
 8. What not to do.
    Call out unsafe shortcuts and unsupported changes.
 
+## Methodic Configurator Step Review
+
+Use this when the user names a Methodic Configurator step, asks if they can
+proceed to the next Methodic file, or asks to review AutoTune, QuikTune, System
+ID, notch/filter, first-flight, position, Guided, precision-land, or productive
+configuration evidence.
+
+1. Methodic step result.
+   State the step ID/title and script result exactly, plus the safety gate.
+2. Can proceed?
+   Answer plainly: proceed, proceed with caution, repeat the step, bench check,
+   do not proceed, not applicable, or inconclusive. Do not declare the aircraft
+   safe.
+3. Why.
+   Give the short interpretation that connects the result to the strongest
+   evidence and safety gate.
+4. Evidence.
+   List the decisive log/parameter/manual-observation evidence. Include plots
+   the agent inspected.
+5. Missing evidence.
+   Name missing messages, parameter context, manual observations, or unsupported
+   checks and what they prevent concluding.
+6. Before proceeding.
+   State checks or evidence collection required before the next Methodic file or
+   step. Include bench/hardware checks when the safety gate requires them.
+7. Next Methodic step/file.
+   Name the next step only if the current evidence supports it. If blocked,
+   name the step that must be repeated or resolved.
+8. What not to do.
+   Do not skip failed, conditional, or inconclusive safety gates without user
+   confirmation and a documented safety rationale. Do not make blind parameter
+   changes, auto-apply gains, disable safety checks, or treat script output as
+   final truth.
+
+## Methodic 7.1.1 Motor Output Oscillation
+
+Use this for "Check motor output oscillation", "I am on Methodic step 7.1.1",
+or "Can I proceed to the notch step?"
+
+1. Methodic step result.
+   State `7.1.1 Check for Motor Output Oscillation`, result, and safety gate.
+2. Can proceed?
+   Say whether the evidence supports moving to Methodic 8.1 notch/filter review.
+3. Why.
+   Distinguish roll/pitch/yaw oscillation from steady bias. Do not call yaw
+   steady bias a roll/pitch oscillation.
+4. Evidence.
+   Include RC-centered hover window, `RATE.ROut`/`POut`/`YOut`/`AOut` summaries,
+   high-pass/sign-change classification, PID term context, motor output
+   saturation/headroom, vibration/clipping, and ESC/motor temperature telemetry
+   if available.
+5. Missing evidence.
+   State whether `RATE`, `RCOU`/`RCO2`/`RCO3`, `RCIN`, PID messages, ESC
+   telemetry, or motor/ESC temperature observations are missing.
+6. Before proceeding.
+   If conditional due to yaw steady bias, inspect motor alignment, motor
+   verticality, frame twist, prop mismatch, motor order/direction, yaw torque
+   imbalance, coaxial interference, and motor/ESC temperatures.
+7. Next Methodic step/file.
+   If accepted, proceed to Methodic 8.1 harmonic notch/filter review. If failed,
+   repeat 7.1.1 after resolving the blocker.
+8. What not to do.
+   Do not halve roll/pitch gains when roll/pitch outputs are below threshold and
+   not oscillatory. Do not continue tuning through output saturation, severe
+   vibration, visible/audible oscillation, or hot motor/ESC observations.
+
+## Methodic 8.1 Notch / Filter Review
+
+1. Methodic step result.
+   State `8.1 Harmonic notch / filter review`, result, and safety gate.
+2. Can proceed?
+   Say whether the evidence supports moving to the throttle-controller step or
+   only a controlled filter-review capture.
+3. Why.
+   Tie the result to VIBE/clipping, FFT/raw IMU availability, dominant peaks,
+   current notch parameters, PID Dmod/Flags, ESC/RPM evidence, and logging
+   health.
+4. Evidence.
+   Include filter-review readiness, notch source recommendation, dominant
+   peaks, vibration/clipping, current notch configuration, and relevant plots.
+5. Missing evidence.
+   State whether FFT/raw IMU/batch sampler, ESC/RPM, PID Dmod/Flags, or logging
+   health evidence is missing.
+6. Before proceeding.
+   If data is missing, request a targeted diagnostic capture and warn to disable
+   high-volume logging afterward.
+7. Next Methodic step/file.
+   If accepted, proceed to Methodic 8.2 throttle controller. If blocked, fix
+   mechanical vibration/logging/filter evidence first.
+8. What not to do.
+   Do not use notch filters to hide mechanical problems. Do not recommend
+   aggressive notch count/attenuation blindly. Do not leave raw/high-rate
+   logging enabled for everyday use.
+
+## Methodic 9.5 AutoTune Review
+
+1. Methodic step result.
+   State `9.5 AutoTune sequence`, result, and safety gate.
+2. Can proceed?
+   Say whether the evidence supports accepting the AutoTune review, repeating
+   after resolving causes, or reverting/reducing externally and retesting.
+3. Why.
+   Tie the result to AutoTune detection, axis, completion/save status, changed
+   parameters, prerequisite evidence, post-tune tracking, and poor-solution
+   indicators.
+4. Evidence.
+   Include `ATUN`/`ATDE`, mode sequence, saved/discarded context, gain changes,
+   rate/attitude tracking, rate outputs, motor saturation, vibration, and
+   battery/power evidence.
+5. Missing evidence.
+   State whether `ATUN`, PID, RATE/ATT, motor outputs, VIBE, BAT/POWR, MODE,
+   MSG/EV/ERR, or PARM evidence is absent.
+6. Before proceeding.
+   Require filters, vibration, headroom, and stable control evidence before
+   recommending further AutoTune work.
+7. Next Methodic step/file.
+   If accepted, proceed according to the registry. If partial/failed or
+   over-aggressive, address the cause and repeat/review before later steps.
+8. What not to do.
+   Do not blindly accept AutoTune gains, auto-apply them, or recommend AutoTune
+   on an unstable aircraft. Do not increase gains when vibration, saturation, or
+   noise exists.
+
 ## Mission Yaw And Wobble
 
 Use this when the user reports mission yaw, AUTO yaw, wobble, unstable manual
