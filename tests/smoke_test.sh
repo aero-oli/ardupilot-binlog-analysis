@@ -212,6 +212,7 @@ python tests/methodic_ekf_altitude_source_test.py
 python tests/methodic_quicktune_review_test.py
 python tests/methodic_magfit_review_test.py
 python tests/methodic_tune_eval_test.py
+python tests/methodic_autotune_review_test.py
 python - <<'PY'
 import sys
 sys.path.insert(0, "scripts")

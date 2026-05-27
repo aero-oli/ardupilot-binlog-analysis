@@ -13,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from ap_common import AnalysisError, ensure_dir, iter_dataflash_messages, message_to_dict, message_type, safe_float, write_json
 from ap_methodic_711_motor_oscillation import analyze_motor_oscillation_711
+from ap_methodic_autotune_review import analyze_autotune_review
 from ap_methodic_ekf_altitude_source import analyze_ekf_altitude_source
 from ap_methodic_first_flight import analyze_first_flight
 from ap_methodic_magfit_review import analyze_magfit_review
@@ -59,6 +60,7 @@ STEP_IMPLEMENTATIONS = {
     "9.2": "analyze_9_2",
     "9.3": "analyze_9_3",
     "9.4": "analyze_9_4",
+    "9.5": "analyze_9_5",
     "9.6": "analyze_9_6",
 }
 
@@ -565,6 +567,27 @@ def analyze_9_3(log_path: Path, step: dict[str, Any], plots_dir: Path | None, ma
 
 def analyze_9_4(log_path: Path, step: dict[str, Any], plots_dir: Path | None, manual_observations: list[str]) -> dict[str, Any]:
     return analyze_tune_eval_step(log_path, step, plots_dir, manual_observations, methodic_step="9.4")
+
+
+def analyze_9_5(log_path: Path, step: dict[str, Any], plots_dir: Path | None, manual_observations: list[str]) -> dict[str, Any]:
+    try:
+        result = analyze_autotune_review(log_path, plots_dir=plots_dir)
+        if manual_observations:
+            result["evidence_used"].append({"type": "manual_observations_provided_to_dispatcher", "value": manual_observations})
+        return normalize_schema(result)
+    except Exception as exc:
+        result = empty_result(step)
+        result["result"] = "inconclusive"
+        result["safety_gate"] = "repeat_step"
+        result["missing_evidence"] = [f"Step 9.5 AutoTune evidence could not be read: {exc}"]
+        result["checked_but_not_supported"] = ["methodic_9_5_autotune_review"]
+        result["recommended_next_steps"] = [
+            "Collect a readable AutoTune log with ATUN, ATT, RATE, PIDR/PIDP/PIDY, RCOU/RCO2/RCO3, VIBE, BAT, MODE, MSG/EV/ERR, and PARM evidence.",
+            "Do not accept AutoTune results from an unreadable, partial, unstable, or prerequisite-limited log.",
+            "Do not auto-apply gains; inspect ATUN, parameter changes, post-tune tracking, vibration, power, and motor headroom first.",
+        ]
+        result["confidence_limits"] = ["No deterministic 9.5 evidence was available because log parsing failed."]
+        return normalize_schema(result)
 
 
 def analyze_9_6(log_path: Path, step: dict[str, Any], plots_dir: Path | None, manual_observations: list[str]) -> dict[str, Any]:

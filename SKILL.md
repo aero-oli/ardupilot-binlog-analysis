@@ -132,6 +132,14 @@ python scripts/ap_methodic_tune_eval.py BEFORE.BIN AFTER.BIN --compare --out out
 
 This tool reviews isolated-axis input quality, ATT/RATE tracking, RATE output demand, PID terms/flags/Dmod, RC contamination/coupling, mapped motor output saturation, vibration/clipping, battery/board power, and before/after comparability. It must not write gains, claim improvement from non-comparable logs, or recommend gain increases when vibration, clipping, saturation, or power issues are present.
 
+For Methodic 9.5 AutoTune review, the dispatcher uses the dedicated AutoTune evidence tool. You may also run it directly:
+
+```bash
+python scripts/ap_methodic_autotune_review.py LOG.BIN --out out/methodic_9_5.json --summary out/methodic_9_5.md --plots out/plots/methodic_9_5
+```
+
+This tool reviews `ATUN`/`ATDE`, tuned axes, completion/save status, AutoTune-relevant parameter changes, prerequisite evidence, post-AutoTune tracking, poor-solution indicators, motor output headroom, vibration/clipping, battery state, and mode/message context. It must not auto-apply gains or recommend AutoTune unless initial tune, filters, vibration, actuator headroom, and control stability are acceptable.
+
 If the user gives required observations such as motor/ESC heat, audible oscillation, visible shaking, or hard-to-control behaviour, pass them as repeated `--manual-observation` values. If those observations are not available, preserve that as missing evidence; do not promote the step to a clean pass from log evidence alone.
 
 `ap_methodic_step.py` returns a standard schema with `result`, `safety_gate`, `evidence_used`, `missing_evidence`, `manual_observations_required`, `findings`, `parameter_context`, `plots`, `recommended_next_steps`, `what_not_to_do`, `next_methodic_step`, and `confidence_limits`. Treat the step result as structured evidence, not final truth. Inspect the JSON, summary, and plots before writing conclusions yourself.
