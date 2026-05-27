@@ -123,6 +123,15 @@ python scripts/ap_methodic_magfit_review.py LOG.BIN --out out/methodic_9_1.json 
 
 This tool reviews MAG field evidence, heading diversity, MagFit flight-profile suitability, MAG timing correlation with current/throttle, EKF yaw/mag test ratios, GPS/yaw-source context, and compass/EKF warnings. It must not write compass offsets, compass orientation, motor-compensation, or EKF yaw-source parameters automatically.
 
+For Methodic 9.3 tune evaluation with feed-forward disabled, 9.4 tune evaluation with feed-forward enabled, and 9.6 performance evaluation, the dispatcher uses the dedicated post-tune evidence tool. You may also run it directly:
+
+```bash
+python scripts/ap_methodic_tune_eval.py LOG.BIN --step 9.3 --out out/methodic_9_3.json --summary out/methodic_9_3.md --plots out/plots/methodic_9_3
+python scripts/ap_methodic_tune_eval.py BEFORE.BIN AFTER.BIN --compare --out out/tune_compare.json
+```
+
+This tool reviews isolated-axis input quality, ATT/RATE tracking, RATE output demand, PID terms/flags/Dmod, RC contamination/coupling, mapped motor output saturation, vibration/clipping, battery/board power, and before/after comparability. It must not write gains, claim improvement from non-comparable logs, or recommend gain increases when vibration, clipping, saturation, or power issues are present.
+
 If the user gives required observations such as motor/ESC heat, audible oscillation, visible shaking, or hard-to-control behaviour, pass them as repeated `--manual-observation` values. If those observations are not available, preserve that as missing evidence; do not promote the step to a clean pass from log evidence alone.
 
 `ap_methodic_step.py` returns a standard schema with `result`, `safety_gate`, `evidence_used`, `missing_evidence`, `manual_observations_required`, `findings`, `parameter_context`, `plots`, `recommended_next_steps`, `what_not_to_do`, `next_methodic_step`, and `confidence_limits`. Treat the step result as structured evidence, not final truth. Inspect the JSON, summary, and plots before writing conclusions yourself.

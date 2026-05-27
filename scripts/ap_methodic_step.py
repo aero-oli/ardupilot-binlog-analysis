@@ -20,6 +20,7 @@ from ap_methodic_notch_review import analyze_notch_review
 from ap_methodic_pid_notch_review import analyze_pid_notch_review
 from ap_methodic_quicktune_review import analyze_quicktune_review
 from ap_methodic_throttle_controller import analyze_throttle_controller
+from ap_methodic_tune_eval import analyze_tune_eval
 from ap_methodic_oscillation import classify_oscillation
 from ap_methodic_rc import analyze_rc_input_contamination
 from ap_methodic_registry import MethodicRegistryError, get_step, load_registry
@@ -56,6 +57,9 @@ STEP_IMPLEMENTATIONS = {
     "8.5": "analyze_8_5",
     "9.1": "analyze_9_1",
     "9.2": "analyze_9_2",
+    "9.3": "analyze_9_3",
+    "9.4": "analyze_9_4",
+    "9.6": "analyze_9_6",
 }
 
 
@@ -555,6 +559,18 @@ def analyze_9_2(log_path: Path, step: dict[str, Any], plots_dir: Path | None, ma
     return analyze_quicktune_step(log_path, step, plots_dir, manual_observations, methodic_step="9.2")
 
 
+def analyze_9_3(log_path: Path, step: dict[str, Any], plots_dir: Path | None, manual_observations: list[str]) -> dict[str, Any]:
+    return analyze_tune_eval_step(log_path, step, plots_dir, manual_observations, methodic_step="9.3")
+
+
+def analyze_9_4(log_path: Path, step: dict[str, Any], plots_dir: Path | None, manual_observations: list[str]) -> dict[str, Any]:
+    return analyze_tune_eval_step(log_path, step, plots_dir, manual_observations, methodic_step="9.4")
+
+
+def analyze_9_6(log_path: Path, step: dict[str, Any], plots_dir: Path | None, manual_observations: list[str]) -> dict[str, Any]:
+    return analyze_tune_eval_step(log_path, step, plots_dir, manual_observations, methodic_step="9.6")
+
+
 def analyze_quicktune_step(log_path: Path, step: dict[str, Any], plots_dir: Path | None, manual_observations: list[str], *, methodic_step: str) -> dict[str, Any]:
     try:
         result = analyze_quicktune_review(log_path, plots_dir=plots_dir, methodic_step=methodic_step)
@@ -571,6 +587,27 @@ def analyze_quicktune_step(log_path: Path, step: dict[str, Any], plots_dir: Path
             "Collect a readable tuning log with ATT, RATE, PIDR/PIDP/PIDY, RCOU/RCO2/RCO3, VIBE, BAT, MODE, MSG, and PARM evidence.",
             "Use before/after parameter files when the log does not preserve QuikTune or manual tuning parameter changes.",
             "Do not accept tune results or proceed to later tuning from an unreadable or inconclusive review.",
+        ]
+        result["confidence_limits"] = [f"No deterministic {methodic_step} evidence was available because log parsing failed."]
+        return normalize_schema(result)
+
+
+def analyze_tune_eval_step(log_path: Path, step: dict[str, Any], plots_dir: Path | None, manual_observations: list[str], *, methodic_step: str) -> dict[str, Any]:
+    try:
+        result = analyze_tune_eval(log_path, plots_dir=plots_dir, step=methodic_step)
+        if manual_observations:
+            result["evidence_used"].append({"type": "manual_observations_provided_to_dispatcher", "value": manual_observations})
+        return normalize_schema(result)
+    except Exception as exc:
+        result = empty_result(step)
+        result["result"] = "inconclusive"
+        result["safety_gate"] = "repeat_step"
+        result["missing_evidence"] = [f"Step {methodic_step} tune-evaluation evidence could not be read: {exc}"]
+        result["checked_but_not_supported"] = [f"methodic_{methodic_step.replace('.', '_')}_tune_eval"]
+        result["recommended_next_steps"] = [
+            "Collect a readable post-tune evaluation log with meaningful isolated roll, pitch, and yaw inputs plus ATT, RATE, PIDR/PIDP/PIDY, RCIN, RCOU/RCO2/RCO3, VIBE, BAT/POWR, MODE, and PARM evidence.",
+            "Do not tune from an unreadable, contaminated, or non-excited log.",
+            "Do not proceed to later Methodic tuning until the agent has inspected the evidence and safety gates.",
         ]
         result["confidence_limits"] = [f"No deterministic {methodic_step} evidence was available because log parsing failed."]
         return normalize_schema(result)
