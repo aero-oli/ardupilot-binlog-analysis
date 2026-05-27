@@ -22,6 +22,7 @@ from ap_methodic_first_flight import analyze_first_flight
 from ap_methodic_magfit_review import analyze_magfit_review
 from ap_methodic_notch_review import analyze_notch_review
 from ap_methodic_pid_notch_review import analyze_pid_notch_review
+from ap_methodic_position_controller_review import analyze_position_controller_review
 from ap_methodic_quicktune_review import analyze_quicktune_review
 from ap_methodic_sysid_review import analyze_sysid_review
 from ap_methodic_throttle_controller import analyze_throttle_controller
@@ -72,6 +73,7 @@ STEP_IMPLEMENTATIONS = {
     "10.2": "analyze_10_2",
     "11.1": "analyze_11_1",
     "11.2": "analyze_11_2",
+    "12.1": "analyze_12_1",
 }
 
 
@@ -717,6 +719,27 @@ def analyze_11_2(log_path: Path, step: dict[str, Any], plots_dir: Path | None, m
     if manual_observations:
         result["evidence_used"].append({"type": "manual_observations_provided_to_dispatcher", "value": manual_observations})
     return normalize_schema(result)
+
+
+def analyze_12_1(log_path: Path, step: dict[str, Any], plots_dir: Path | None, manual_observations: list[str]) -> dict[str, Any]:
+    try:
+        result = analyze_position_controller_review(log_path, plots_dir=plots_dir)
+        if manual_observations:
+            result["evidence_used"].append({"type": "manual_observations_provided_to_dispatcher", "value": manual_observations})
+        return normalize_schema(result)
+    except Exception as exc:
+        result = empty_result(step)
+        result["result"] = "inconclusive"
+        result["safety_gate"] = "repeat_step"
+        result["missing_evidence"] = [f"Step 12.1 position-controller evidence could not be read: {exc}"]
+        result["checked_but_not_supported"] = ["methodic_12_1_position_controller_review"]
+        result["recommended_next_steps"] = [
+            "Collect a readable Loiter/PosHold log with GPS/GPA, XKF*/NKF*, ATT/RATE, CTUN, RCIN, MODE, VIBE, BAT/POWR, PARM, and POS/NTUN/PSC evidence.",
+            "Do not tune position controller until GPS/EKF health and inner attitude/rate loop evidence are acceptable.",
+            "Do not auto-change PSC, LOIT, or WPNAV parameters from unreadable or missing evidence.",
+        ]
+        result["confidence_limits"] = ["No deterministic 12.1 evidence was available because log parsing failed."]
+        return normalize_schema(result)
 
 
 def analyze_quicktune_step(log_path: Path, step: dict[str, Any], plots_dir: Path | None, manual_observations: list[str], *, methodic_step: str) -> dict[str, Any]:

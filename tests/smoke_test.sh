@@ -218,6 +218,7 @@ python tests/methodic_wind_drag_review_test.py
 python tests/methodic_baro_comp_review_test.py
 python tests/methodic_sysid_review_test.py
 python tests/methodic_analytical_pid_review_test.py
+python tests/methodic_position_controller_review_test.py
 python - <<'PY'
 import sys
 sys.path.insert(0, "scripts")

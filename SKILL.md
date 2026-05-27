@@ -180,6 +180,14 @@ python scripts/ap_methodic_analytical_pid_review.py --sysid out/methodic_11_1.js
 
 This tool checks whether the System ID input was model-ready, whether proposed `ATC_RAT_*`, `ATC_ANG_*`, and `ATC_ACCEL_*` changes are bounded, whether rollback values are available, and whether an optional validation log shows oscillation, saturation, vibration, or clipping. It must not apply parameters, generate final PID values, or accept analytical outputs without a controlled validation plan.
 
+For Methodic 12.1 position-controller tuning review, the dispatcher uses the dedicated outer-loop evidence tool. You may also run it directly:
+
+```bash
+python scripts/ap_methodic_position_controller_review.py LOG.BIN --out out/methodic_12_1.json --summary out/methodic_12_1.md --plots out/plots/methodic_12_1
+```
+
+This tool reviews Loiter/PosHold or other position-control evidence only after checking GPS/EKF confidence and inner attitude/rate loop prerequisites. It inspects `GPS`/`GPA`, `XKF*`/`NKF*`, `ATT`/`RATE`, `CTUN`, `RCIN`, `MODE`, `VIBE`, `BAT`/`POWR`, `PARM`, and optional `POS`/`NTUN`/`PSC`/`RNGF` messages. It must not tune outer loops when inner loops or GPS/EKF are poor, and it must not auto-change `PSC_*`, `LOIT_*`, or `WPNAV_*` parameters.
+
 If the user gives required observations such as motor/ESC heat, audible oscillation, visible shaking, or hard-to-control behaviour, pass them as repeated `--manual-observation` values. If those observations are not available, preserve that as missing evidence; do not promote the step to a clean pass from log evidence alone.
 
 `ap_methodic_step.py` returns a standard schema with `result`, `safety_gate`, `evidence_used`, `missing_evidence`, `manual_observations_required`, `findings`, `parameter_context`, `plots`, `recommended_next_steps`, `what_not_to_do`, `next_methodic_step`, and `confidence_limits`. Treat the step result as structured evidence, not final truth. Inspect the JSON, summary, and plots before writing conclusions yourself.

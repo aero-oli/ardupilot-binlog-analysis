@@ -315,10 +315,10 @@ steps:
     phase: "position_controller"
     official_anchor: "#121-position-controller"
     official_url: "https://ardupilot.github.io/MethodicConfigurator/TUNING_GUIDE_ArduCopter#121-position-controller"
-    required_messages: [POS]
-    strongly_recommended_messages: [NTUN, GPS, XKF4, ATT, RATE, MODE, PARM]
-    optional_messages: [RCIN, CTUN, MSG, EV, ERR]
-    relevant_parameters: [PSC_POSXY_*, PSC_VELXY_*, WPNAV_*, LOIT_*]
+    required_messages: [GPS, ATT, RATE, CTUN, MODE]
+    strongly_recommended_messages: [GPA, XKF4, RCIN, VIBE, BAT, POWR, PARM, POS, NTUN, PSC]
+    optional_messages: [XKF1, XKF3, NKF1, NKF3, NKF4, RNGF, MSG, EV, ERR]
+    relevant_parameters: [PSC_POSXY_P, PSC_VELXY_*, PSC_ACCXY_*, PSC_POSZ_P, PSC_VELZ_*, PSC_ACCZ_*, WPNAV_*, LOIT_*]
     preferred_window: "Position-control maneuvers after attitude/rate loops are tuned."
     manual_observations_required: ["Position modes were controllable", "No toilet-bowling or runaway drift"]
     pass_fail_summary: "Pass when position tracking evidence supports the intended mode without estimator or inner-loop blockers."
