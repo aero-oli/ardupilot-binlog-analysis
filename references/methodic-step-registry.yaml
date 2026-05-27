@@ -276,14 +276,14 @@ steps:
     next_step_if_fail: "Resolve barometer protection/compensation before advanced tuning"
     safety_gate_notes: "Do not hide poor barometer placement or airflow exposure with unsupported parameter changes."
   - step_id: "11.1"
-    aliases: ["system-id", "system identification"]
+    aliases: ["system-id", "sysid", "system identification"]
     title: "System ID flights"
     phase: "system_identification"
     official_anchor: "#111-system-identification-flights"
     official_url: "https://ardupilot.github.io/MethodicConfigurator/TUNING_GUIDE_ArduCopter#111-system-identification-flights"
     required_messages: [SID]
-    strongly_recommended_messages: [SIDD, SIDS, RATE, ATT, MODE, PARM]
-    optional_messages: [RCOU, VIBE, BAT, MSG, EV, ERR]
+    strongly_recommended_messages: [SIDD, SIDS, RATE, ATT, RCOU, VIBE, BAT, MODE, PARM]
+    optional_messages: [RCO2, RCO3, POWR, MSG, EV, ERR]
     relevant_parameters: [SID_*, ATC_RAT_*, ATC_ANG_*, INS_HNTCH_*]
     preferred_window: "System ID active segments for roll, pitch, and yaw in no-wind conditions."
     manual_observations_required: ["No-wind condition", "Vehicle remained controllable with detuned PIDs", "Axis under test is known"]

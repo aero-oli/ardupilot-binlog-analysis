@@ -22,6 +22,7 @@ from ap_methodic_magfit_review import analyze_magfit_review
 from ap_methodic_notch_review import analyze_notch_review
 from ap_methodic_pid_notch_review import analyze_pid_notch_review
 from ap_methodic_quicktune_review import analyze_quicktune_review
+from ap_methodic_sysid_review import analyze_sysid_review
 from ap_methodic_throttle_controller import analyze_throttle_controller
 from ap_methodic_tune_eval import analyze_tune_eval
 from ap_methodic_wind_drag_review import analyze_wind_drag_review
@@ -68,6 +69,7 @@ STEP_IMPLEMENTATIONS = {
     "9.7": "analyze_9_7",
     "10.1": "analyze_10_1",
     "10.2": "analyze_10_2",
+    "11.1": "analyze_11_1",
 }
 
 
@@ -660,6 +662,27 @@ def analyze_10_2(log_path: Path, step: dict[str, Any], plots_dir: Path | None, m
             "Do not auto-change BARO compensation parameters; inspect evidence and validate any external change with a fresh log.",
         ]
         result["confidence_limits"] = ["No deterministic 10.2 evidence was available because log parsing failed."]
+        return normalize_schema(result)
+
+
+def analyze_11_1(log_path: Path, step: dict[str, Any], plots_dir: Path | None, manual_observations: list[str]) -> dict[str, Any]:
+    try:
+        result = analyze_sysid_review(log_path, plots_dir=plots_dir)
+        if manual_observations:
+            result["evidence_used"].append({"type": "manual_observations_provided_to_dispatcher", "value": manual_observations})
+        return normalize_schema(result)
+    except Exception as exc:
+        result = empty_result(step)
+        result["result"] = "inconclusive"
+        result["safety_gate"] = "repeat_step"
+        result["missing_evidence"] = [f"Step 11.1 System ID evidence could not be read: {exc}"]
+        result["checked_but_not_supported"] = ["methodic_11_1_sysid_review"]
+        result["recommended_next_steps"] = [
+            "Collect a readable System ID log with SID, SIDD, SIDS, RATE, ATT, RCOU/RCO2/RCO3, VIBE, BAT, MODE, and PARM evidence.",
+            "Do not use System ID data for analytical model fitting when excitation, response, saturation, vibration, or logging quality is unresolved.",
+            "Do not generate PID values or auto-apply model results from the dispatcher output.",
+        ]
+        result["confidence_limits"] = ["No deterministic 11.1 evidence was available because log parsing failed."]
         return normalize_schema(result)
 
 
