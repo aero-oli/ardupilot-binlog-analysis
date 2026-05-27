@@ -140,6 +140,14 @@ python scripts/ap_methodic_autotune_review.py LOG.BIN --out out/methodic_9_5.jso
 
 This tool reviews `ATUN`/`ATDE`, tuned axes, completion/save status, AutoTune-relevant parameter changes, prerequisite evidence, post-AutoTune tracking, poor-solution indicators, motor output headroom, vibration/clipping, battery state, and mode/message context. It must not auto-apply gains or recommend AutoTune unless initial tune, filters, vibration, actuator headroom, and control stability are acceptable.
 
+For Methodic 9.7 derivative feed-forward calculation review, the dispatcher uses the dedicated D_FF evidence tool. You may also run it directly:
+
+```bash
+python scripts/ap_methodic_dff_calc.py LOG.BIN --axis roll,pitch,yaw --out out/methodic_9_7.json --summary out/methodic_9_7.md --plots out/plots/methodic_9_7
+```
+
+This tool checks clean isolated manoeuvres, angular acceleration, RC axis isolation, RATE output response, actuator saturation, vibration/clipping, RATE sample rate, and current `ATC_RAT_*_D_FF` values. It may produce candidate values only when evidence is strong enough; it must not write D_FF parameters, and any externally applied candidate requires validation with a fresh log.
+
 If the user gives required observations such as motor/ESC heat, audible oscillation, visible shaking, or hard-to-control behaviour, pass them as repeated `--manual-observation` values. If those observations are not available, preserve that as missing evidence; do not promote the step to a clean pass from log evidence alone.
 
 `ap_methodic_step.py` returns a standard schema with `result`, `safety_gate`, `evidence_used`, `missing_evidence`, `manual_observations_required`, `findings`, `parameter_context`, `plots`, `recommended_next_steps`, `what_not_to_do`, `next_methodic_step`, and `confidence_limits`. Treat the step result as structured evidence, not final truth. Inspect the JSON, summary, and plots before writing conclusions yourself.
