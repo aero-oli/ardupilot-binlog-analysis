@@ -13,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from ap_common import AnalysisError, ensure_dir, iter_dataflash_messages, message_to_dict, message_type, safe_float, write_json
 from ap_methodic_711_motor_oscillation import analyze_motor_oscillation_711
+from ap_methodic_analytical_pid_review import analyze_analytical_pid_review
 from ap_methodic_autotune_review import analyze_autotune_review
 from ap_methodic_baro_comp_review import analyze_baro_comp_review
 from ap_methodic_dff_calc import analyze_dff_calc
@@ -70,6 +71,7 @@ STEP_IMPLEMENTATIONS = {
     "10.1": "analyze_10_1",
     "10.2": "analyze_10_2",
     "11.1": "analyze_11_1",
+    "11.2": "analyze_11_2",
 }
 
 
@@ -684,6 +686,37 @@ def analyze_11_1(log_path: Path, step: dict[str, Any], plots_dir: Path | None, m
         ]
         result["confidence_limits"] = ["No deterministic 11.1 evidence was available because log parsing failed."]
         return normalize_schema(result)
+
+
+def analyze_11_2(log_path: Path, step: dict[str, Any], plots_dir: Path | None, manual_observations: list[str]) -> dict[str, Any]:
+    result = empty_result(step)
+    result["result"] = "inconclusive"
+    result["safety_gate"] = "repeat_step"
+    result["missing_evidence"] = [
+        "Methodic 11.2 requires a System ID review JSON and proposed .param file; the generic step dispatcher only accepts one log/path input.",
+        "Run scripts/ap_methodic_analytical_pid_review.py directly with --sysid and --proposed-params.",
+    ]
+    result["checked_but_not_supported"] = ["methodic_11_2_direct_metadata_inputs"]
+    result["recommended_next_steps"] = [
+        "Run scripts/ap_methodic_analytical_pid_review.py --sysid out/methodic_11_1.json --proposed-params proposed.param --out out/methodic_11_2.json.",
+        "Add --before-log for rollback/baseline values and --after-log when a controlled validation log exists.",
+        "Do not apply analytical PID outputs until System ID quality, proposed deltas, rollback values, and validation evidence have been reviewed.",
+    ]
+    result["what_not_to_do"] = [
+        "Do not auto-apply analytical PID parameters from the dispatcher.",
+        "Do not generate final PID values from Methodic 11.2 review.",
+        "Do not proceed when validation evidence shows oscillation, motor saturation, vibration, clipping, or power issues.",
+    ]
+    result["confidence_limits"] = ["Dispatcher cannot supply the required 11.2 proposed-parameter and constraint inputs."]
+    if log_path.suffix.lower() == ".json":
+        try:
+            direct = analyze_analytical_pid_review(sysid_path=log_path, proposed_params_path=None)
+            result["evidence_used"].append({"type": "partial_sysid_json_check", "value": direct.get("optimization_inputs_valid")})
+        except Exception as exc:
+            result["confidence_limits"].append(f"Partial System ID JSON check failed: {exc}")
+    if manual_observations:
+        result["evidence_used"].append({"type": "manual_observations_provided_to_dispatcher", "value": manual_observations})
+    return normalize_schema(result)
 
 
 def analyze_quicktune_step(log_path: Path, step: dict[str, Any], plots_dir: Path | None, manual_observations: list[str], *, methodic_step: str) -> dict[str, Any]:

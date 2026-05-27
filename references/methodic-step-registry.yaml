@@ -293,7 +293,7 @@ steps:
     next_step_if_fail: "Repeat System ID setup/capture after resolving data or stability issues"
     safety_gate_notes: "System ID requires deliberate excitation; do not run it on an unstable vehicle."
   - step_id: "11.2"
-    aliases: ["analytical-pid", "analytical pid optimisation", "analytical pid optimization"]
+    aliases: ["analytical-pid", "analytical pid optimisation", "analytical pid optimization", "analytical optimisation", "analytical optimization"]
     title: "Analytical PID optimisation"
     phase: "system_identification"
     official_anchor: "#112-analytical-multicopter-flight-controller-pid-optimization"
@@ -302,9 +302,9 @@ steps:
     strongly_recommended_messages: [SIDD, SIDS, RATE, ATT, PARM]
     optional_messages: [PIDR, PIDP, PIDY, RCOU, MSG, EV, ERR]
     relevant_parameters: [ATC_RAT_*, ATC_ANG_*, ATC_ACCEL_*, SID_*]
-    preferred_window: "Validated System ID datasets and resulting optimisation review."
-    manual_observations_required: ["Optimisation constraints are defined", "Model fit is accepted by the agent/user"]
-    pass_fail_summary: "Pass when model/optimisation evidence is reviewed and resulting changes have explicit validation plan."
+    preferred_window: "Validated System ID review output, proposed analytical PID parameter file, and optional before/after validation logs."
+    manual_observations_required: ["Optimisation constraints are defined", "Model fit is accepted by the agent/user", "Rollback values are available", "Controlled validation flight plan exists"]
+    pass_fail_summary: "Pass when System ID inputs are valid, proposed changes are bounded, rollback is available, and resulting changes have explicit validation plan."
     next_step_if_pass: "12.1"
     next_step_if_conditional: "12.1 with optimisation caveats or defer analytical optimisation"
     next_step_if_fail: "Do not use analytical results until System ID/model issues are resolved"

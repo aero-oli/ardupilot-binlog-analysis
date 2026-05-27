@@ -172,6 +172,14 @@ python scripts/ap_methodic_sysid_review.py LOG.BIN --out out/methodic_11_1.json 
 
 This tool reviews `SID`/`SIDD` excitation, `SIDS`/`SID_AXIS` axis context, RATE response, actuator saturation, vibration/noise, battery/power, mode context, and logging health. It may classify data as ready for model review, repeat-needed, unusable, or inconclusive; it must not generate final PID values, claim no-wind conditions from logs alone, or auto-apply analytical model results.
 
+For Methodic 11.2 analytical PID optimisation review, run the dedicated artifact-review tool directly because it needs a System ID review JSON and a proposed parameter file:
+
+```bash
+python scripts/ap_methodic_analytical_pid_review.py --sysid out/methodic_11_1.json --proposed-params proposed.param --before-log BEFORE.BIN --after-log AFTER.BIN --out out/methodic_11_2.json --summary out/methodic_11_2.md
+```
+
+This tool checks whether the System ID input was model-ready, whether proposed `ATC_RAT_*`, `ATC_ANG_*`, and `ATC_ACCEL_*` changes are bounded, whether rollback values are available, and whether an optional validation log shows oscillation, saturation, vibration, or clipping. It must not apply parameters, generate final PID values, or accept analytical outputs without a controlled validation plan.
+
 If the user gives required observations such as motor/ESC heat, audible oscillation, visible shaking, or hard-to-control behaviour, pass them as repeated `--manual-observation` values. If those observations are not available, preserve that as missing evidence; do not promote the step to a clean pass from log evidence alone.
 
 `ap_methodic_step.py` returns a standard schema with `result`, `safety_gate`, `evidence_used`, `missing_evidence`, `manual_observations_required`, `findings`, `parameter_context`, `plots`, `recommended_next_steps`, `what_not_to_do`, `next_methodic_step`, and `confidence_limits`. Treat the step result as structured evidence, not final truth. Inspect the JSON, summary, and plots before writing conclusions yourself.
