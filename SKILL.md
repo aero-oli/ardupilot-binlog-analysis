@@ -156,6 +156,14 @@ python scripts/ap_methodic_wind_drag_review.py LOG.BIN --mass-kg 12.5 --frontal-
 
 This tool reviews GPS speed, IMU/ACC acceleration, attitude/rate context, EKF/NKF wind or consistency evidence, wind variability, required mass/area metadata, and candidate `EK3_DRAG_BCOEF_X`, `EK3_DRAG_BCOEF_Y`, and `EK3_DRAG_MCOEF` context. It must not auto-set EKF drag parameters or claim coefficient accuracy in variable wind; any externally applied parameter change requires validation.
 
+For Methodic 10.2 barometer compensation review, the dispatcher uses the dedicated baro compensation evidence tool. You may also run it directly:
+
+```bash
+python scripts/ap_methodic_baro_comp_review.py LOG.BIN --out out/methodic_10_2.json --summary out/methodic_10_2.md --plots out/plots/methodic_10_2
+```
+
+This tool reviews `BARO` altitude/pressure, `CTUN.DAlt`/`Alt`, GPS altitude/speed, EKF height test ratios/innovations, forward-flight/wind-exposure segment quality, vibration/power correlation, and optional rangefinder effects. It must not infer compensation from hover-only data or auto-change baro compensation parameters.
+
 If the user gives required observations such as motor/ESC heat, audible oscillation, visible shaking, or hard-to-control behaviour, pass them as repeated `--manual-observation` values. If those observations are not available, preserve that as missing evidence; do not promote the step to a clean pass from log evidence alone.
 
 `ap_methodic_step.py` returns a standard schema with `result`, `safety_gate`, `evidence_used`, `missing_evidence`, `manual_observations_required`, `findings`, `parameter_context`, `plots`, `recommended_next_steps`, `what_not_to_do`, `next_methodic_step`, and `confidence_limits`. Treat the step result as structured evidence, not final truth. Inspect the JSON, summary, and plots before writing conclusions yourself.

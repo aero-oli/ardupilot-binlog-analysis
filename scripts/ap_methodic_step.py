@@ -14,6 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from ap_common import AnalysisError, ensure_dir, iter_dataflash_messages, message_to_dict, message_type, safe_float, write_json
 from ap_methodic_711_motor_oscillation import analyze_motor_oscillation_711
 from ap_methodic_autotune_review import analyze_autotune_review
+from ap_methodic_baro_comp_review import analyze_baro_comp_review
 from ap_methodic_dff_calc import analyze_dff_calc
 from ap_methodic_ekf_altitude_source import analyze_ekf_altitude_source
 from ap_methodic_first_flight import analyze_first_flight
@@ -66,6 +67,7 @@ STEP_IMPLEMENTATIONS = {
     "9.6": "analyze_9_6",
     "9.7": "analyze_9_7",
     "10.1": "analyze_10_1",
+    "10.2": "analyze_10_2",
 }
 
 
@@ -637,6 +639,27 @@ def analyze_10_1(log_path: Path, step: dict[str, Any], plots_dir: Path | None, m
             "Do not auto-apply EKF drag parameters from unreadable, metadata-limited, variable-wind, or unsuitable manoeuvre evidence.",
         ]
         result["confidence_limits"] = ["No deterministic 10.1 evidence was available because log parsing failed or required metadata was not supplied to the dispatcher."]
+        return normalize_schema(result)
+
+
+def analyze_10_2(log_path: Path, step: dict[str, Any], plots_dir: Path | None, manual_observations: list[str]) -> dict[str, Any]:
+    try:
+        result = analyze_baro_comp_review(log_path, plots_dir=plots_dir)
+        if manual_observations:
+            result["evidence_used"].append({"type": "manual_observations_provided_to_dispatcher", "value": manual_observations})
+        return normalize_schema(result)
+    except Exception as exc:
+        result = empty_result(step)
+        result["result"] = "inconclusive"
+        result["safety_gate"] = "repeat_step"
+        result["missing_evidence"] = [f"Step 10.2 barometer compensation evidence could not be read: {exc}"]
+        result["checked_but_not_supported"] = ["methodic_10_2_baro_comp_review"]
+        result["recommended_next_steps"] = [
+            "Collect a readable non-hover baro compensation test log with BARO, CTUN, GPS/GPA, XKF4/NKF4, ATT/RATE, MODE, VIBE, BAT/POWR, PARM, and optional RNGF evidence.",
+            "Do not infer baro compensation from hover-only, unreadable, or missing-data logs.",
+            "Do not auto-change BARO compensation parameters; inspect evidence and validate any external change with a fresh log.",
+        ]
+        result["confidence_limits"] = ["No deterministic 10.2 evidence was available because log parsing failed."]
         return normalize_schema(result)
 
 
