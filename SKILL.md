@@ -196,6 +196,14 @@ python scripts/ap_methodic_guided_operation_review.py LOG.BIN --out out/methodic
 
 This tool reviews whether Guided mode was present, position/velocity/altitude tracking, failsafe/error context, RC override or pilot intervention, companion/GCS command context when logged, GPS/EKF quality, and power/vibration confounders. It may classify evidence as ready for further Guided checks, not ready, inconclusive, or not applicable, but it must not certify Guided operation as safe or operationally ready.
 
+For Methodic 12.3 precision-landing review, the dispatcher uses the dedicated precision-land evidence tool. You may also run it directly:
+
+```bash
+python scripts/ap_methodic_precision_land_review.py LOG.BIN --out out/methodic_12_3.json --summary out/methodic_12_3.md --plots out/plots/methodic_12_3
+```
+
+This tool reviews precision-landing target messages where present, rangefinder health, descent profile, landing/mode timeline, failsafe/error context, RC intervention, GPS/EKF quality, and power/vibration confounders. It may classify evidence as ready for further controlled precision-land tests, sensor review needed, fail, inconclusive, or not applicable; it must not certify precision landing as operationally safe from one log.
+
 If the user gives required observations such as motor/ESC heat, audible oscillation, visible shaking, or hard-to-control behaviour, pass them as repeated `--manual-observation` values. If those observations are not available, preserve that as missing evidence; do not promote the step to a clean pass from log evidence alone.
 
 `ap_methodic_step.py` returns a standard schema with `result`, `safety_gate`, `evidence_used`, `missing_evidence`, `manual_observations_required`, `findings`, `parameter_context`, `plots`, `recommended_next_steps`, `what_not_to_do`, `next_methodic_step`, and `confidence_limits`. Treat the step result as structured evidence, not final truth. Inspect the JSON, summary, and plots before writing conclusions yourself.
