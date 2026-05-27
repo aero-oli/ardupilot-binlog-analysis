@@ -222,6 +222,7 @@ python tests/methodic_position_controller_review_test.py
 python tests/methodic_guided_operation_review_test.py
 python tests/methodic_precision_land_review_test.py
 python tests/methodic_productive_config_check_test.py
+python tests/methodic_workflow_orchestration_test.py
 python - <<'PY'
 import sys
 sys.path.insert(0, "scripts")

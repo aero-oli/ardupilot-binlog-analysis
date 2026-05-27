@@ -212,6 +212,20 @@ python scripts/ap_methodic_productive_config_check.py --index out/index.json --p
 
 This tool checks diagnostic logging cleanup, normal logging adequacy, `ARMING_CHECK`, battery/RC/GCS/EKF/geofence failsafes, battery monitor setup, notch/filter validation, prior Methodic progress, mode/RC mapping context, compass/GPS/yaw-source caveats, and conflicts between logged/index parameters and the external final `.param` file. It may say `ready_for_operational_checks`, `not_ready`, or `inconclusive`; it must never provide a flight-safety signoff.
 
+For Methodic multi-step tuning work, use the progress helper to combine step JSON outputs into a single blocker/next-step view:
+
+```bash
+python scripts/ap_methodic_progress.py out/methodic_7_1.json out/methodic_7_1_1.json out/methodic_8_1.json --out out/methodic_progress.json --summary out/methodic_progress.md
+```
+
+For before/after Methodic step comparison, use the compare helper:
+
+```bash
+python scripts/ap_methodic_compare.py BEFORE.BIN AFTER.BIN --step 8.1 --out out/methodic_compare_8_1.json --summary out/methodic_compare_8_1.md --plots out/plots/methodic_compare_8_1
+```
+
+These helpers organize evidence and comparability limits only. They must not generate final reports automatically, and failed or inconclusive Methodic steps must not be skipped without user confirmation and a documented safety rationale.
+
 If the user gives required observations such as motor/ESC heat, audible oscillation, visible shaking, or hard-to-control behaviour, pass them as repeated `--manual-observation` values. If those observations are not available, preserve that as missing evidence; do not promote the step to a clean pass from log evidence alone.
 
 `ap_methodic_step.py` returns a standard schema with `result`, `safety_gate`, `evidence_used`, `missing_evidence`, `manual_observations_required`, `findings`, `parameter_context`, `plots`, `recommended_next_steps`, `what_not_to_do`, `next_methodic_step`, and `confidence_limits`. Treat the step result as structured evidence, not final truth. Inspect the JSON, summary, and plots before writing conclusions yourself.
