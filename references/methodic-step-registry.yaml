@@ -111,10 +111,10 @@ steps:
     phase: "minimal_tuning"
     official_anchor: "#85-second-flight-pid-vtol-quiktune-lua-script-or-manual-pid-tune"
     official_url: "https://ardupilot.github.io/MethodicConfigurator/TUNING_GUIDE_ArduCopter#85-second-flight-pid-vtol-quiktune-lua-script-or-manual-pid-tune"
-    required_messages: [RATE]
-    strongly_recommended_messages: [PIDR, PIDP, PIDY, ATUN, RCOU, MODE, PARM]
-    optional_messages: [VIBE, ESC, ESCX, EDT2, BAT, MSG, EV, ERR]
-    relevant_parameters: [ATC_RAT_RLL_*, ATC_RAT_PIT_*, ATC_RAT_YAW_*, ATC_ANG_RLL_P, ATC_ANG_PIT_P, ATC_ANG_YAW_P, AUTOTUNE_*, QUIK_*]
+    required_messages: [ATT, RATE]
+    strongly_recommended_messages: [PIDR, PIDP, PIDY, RCOU, VIBE, BAT, MODE, MSG, PARM]
+    optional_messages: [RCO2, RCO3, RCIN, ESC, ESCX, EDT2, POWR, ATUN, EV, ERR]
+    relevant_parameters: [ATC_RAT_RLL_P, ATC_RAT_RLL_I, ATC_RAT_RLL_D, ATC_RAT_RLL_FF, ATC_RAT_PIT_P, ATC_RAT_PIT_I, ATC_RAT_PIT_D, ATC_RAT_PIT_FF, ATC_RAT_YAW_P, ATC_RAT_YAW_I, ATC_RAT_YAW_D, ATC_RAT_YAW_FF, ATC_ANG_RLL_P, ATC_ANG_PIT_P, ATC_ANG_YAW_P, ATC_ACCEL_R_MAX, ATC_ACCEL_P_MAX, ATC_ACCEL_Y_MAX, INS_HNTCH_*, INS_GYRO_FILTER]
     preferred_window: "QuikTune/manual tuning flight in the intended mode, excluding takeoff/landing transients."
     manual_observations_required: ["Outdoor light wind condition for QuikTune or controlled manual tuning condition", "No dangerous oscillation", "Pilot reports controllable response"]
     pass_fail_summary: "Pass when tune activity evidence is present and no unsafe oscillation or control-authority issue is found."
@@ -145,10 +145,10 @@ steps:
     phase: "standard_tuning"
     official_anchor: "#92-fourth-flight-pid-vtol-quiktune-lua-script-or-manual-pid-tune-optional"
     official_url: "https://ardupilot.github.io/MethodicConfigurator/TUNING_GUIDE_ArduCopter#92-fourth-flight-pid-vtol-quiktune-lua-script-or-manual-pid-tune-optional"
-    required_messages: [RATE]
-    strongly_recommended_messages: [PIDR, PIDP, PIDY, ATUN, RCOU, MODE, PARM]
-    optional_messages: [VIBE, ESC, ESCX, EDT2, BAT, MSG, EV, ERR]
-    relevant_parameters: [ATC_RAT_*, ATC_ANG_*, AUTOTUNE_*, QUIK_*]
+    required_messages: [ATT, RATE]
+    strongly_recommended_messages: [PIDR, PIDP, PIDY, RCOU, VIBE, BAT, MODE, MSG, PARM]
+    optional_messages: [RCO2, RCO3, RCIN, ESC, ESCX, EDT2, POWR, ATUN, EV, ERR]
+    relevant_parameters: [ATC_RAT_RLL_P, ATC_RAT_RLL_I, ATC_RAT_RLL_D, ATC_RAT_RLL_FF, ATC_RAT_PIT_P, ATC_RAT_PIT_I, ATC_RAT_PIT_D, ATC_RAT_PIT_FF, ATC_RAT_YAW_P, ATC_RAT_YAW_I, ATC_RAT_YAW_D, ATC_RAT_YAW_FF, ATC_ANG_RLL_P, ATC_ANG_PIT_P, ATC_ANG_YAW_P, ATC_ACCEL_R_MAX, ATC_ACCEL_P_MAX, ATC_ACCEL_Y_MAX, INS_HNTCH_*, INS_GYRO_FILTER]
     preferred_window: "Standard QuikTune/manual PID tuning flight after MagFit."
     manual_observations_required: ["Appropriate disturbance for QuikTune", "No dangerous oscillation", "Pilot reports stable control"]
     pass_fail_summary: "Pass when standard tune evidence is present and no instability or unsafe output demand is found."

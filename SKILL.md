@@ -107,6 +107,14 @@ python scripts/ap_methodic_ekf_altitude_source.py LOG.BIN --out out/methodic_8_4
 
 This tool reviews `CTUN.DAlt`/`Alt`, `BARO`, GPS/GPA altitude context, optional `RNGF`, EKF height test ratios/innovations, vibration, power, and mode/event context. It must not change EKF height-source parameters automatically.
 
+For Methodic 8.5 QuikTune/manual PID review and Methodic 9.2 QuikTune standard setup/results, the dispatcher uses the dedicated QuikTune/manual tuning evidence tool. You may also run it directly:
+
+```bash
+python scripts/ap_methodic_quicktune_review.py LOG.BIN --before-params before.param --after-params after.param --out out/methodic_8_5.json --summary out/methodic_8_5.md --plots out/plots/methodic_8_5
+```
+
+This tool reviews QuikTune/script messages, before/after or log PARM tuning changes, ATT/RATE tracking, PID terms, RATE output oscillation, RC contamination, vibration, motor outputs, and battery/power evidence. It must not write gains, auto-accept QuikTune output, or recommend gain increases when vibration, noise, saturation, or unstable tracking is present.
+
 If the user gives required observations such as motor/ESC heat, audible oscillation, visible shaking, or hard-to-control behaviour, pass them as repeated `--manual-observation` values. If those observations are not available, preserve that as missing evidence; do not promote the step to a clean pass from log evidence alone.
 
 `ap_methodic_step.py` returns a standard schema with `result`, `safety_gate`, `evidence_used`, `missing_evidence`, `manual_observations_required`, `findings`, `parameter_context`, `plots`, `recommended_next_steps`, `what_not_to_do`, `next_methodic_step`, and `confidence_limits`. Treat the step result as structured evidence, not final truth. Inspect the JSON, summary, and plots before writing conclusions yourself.

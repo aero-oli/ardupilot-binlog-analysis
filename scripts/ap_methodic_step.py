@@ -17,6 +17,7 @@ from ap_methodic_ekf_altitude_source import analyze_ekf_altitude_source
 from ap_methodic_first_flight import analyze_first_flight
 from ap_methodic_notch_review import analyze_notch_review
 from ap_methodic_pid_notch_review import analyze_pid_notch_review
+from ap_methodic_quicktune_review import analyze_quicktune_review
 from ap_methodic_throttle_controller import analyze_throttle_controller
 from ap_methodic_oscillation import classify_oscillation
 from ap_methodic_rc import analyze_rc_input_contamination
@@ -44,7 +45,16 @@ STANDARD_SCHEMA_KEYS = [
     "confidence_limits",
 ]
 
-STEP_IMPLEMENTATIONS = {"7.1": "analyze_7_1", "7.1.1": "analyze_7_1_1", "8.1": "analyze_8_1", "8.2": "analyze_8_2", "8.3": "analyze_8_3", "8.4": "analyze_8_4"}
+STEP_IMPLEMENTATIONS = {
+    "7.1": "analyze_7_1",
+    "7.1.1": "analyze_7_1_1",
+    "8.1": "analyze_8_1",
+    "8.2": "analyze_8_2",
+    "8.3": "analyze_8_3",
+    "8.4": "analyze_8_4",
+    "8.5": "analyze_8_5",
+    "9.2": "analyze_9_2",
+}
 
 
 def empty_result(step: dict[str, Any]) -> dict[str, Any]:
@@ -511,6 +521,35 @@ def analyze_8_4(log_path: Path, step: dict[str, Any], plots_dir: Path | None, ma
             "Do not change EKF height-source parameters from an unreadable or inconclusive log.",
         ]
         result["confidence_limits"] = ["No deterministic 8.4 evidence was available because log parsing failed."]
+        return normalize_schema(result)
+
+
+def analyze_8_5(log_path: Path, step: dict[str, Any], plots_dir: Path | None, manual_observations: list[str]) -> dict[str, Any]:
+    return analyze_quicktune_step(log_path, step, plots_dir, manual_observations, methodic_step="8.5")
+
+
+def analyze_9_2(log_path: Path, step: dict[str, Any], plots_dir: Path | None, manual_observations: list[str]) -> dict[str, Any]:
+    return analyze_quicktune_step(log_path, step, plots_dir, manual_observations, methodic_step="9.2")
+
+
+def analyze_quicktune_step(log_path: Path, step: dict[str, Any], plots_dir: Path | None, manual_observations: list[str], *, methodic_step: str) -> dict[str, Any]:
+    try:
+        result = analyze_quicktune_review(log_path, plots_dir=plots_dir, methodic_step=methodic_step)
+        if manual_observations:
+            result["evidence_used"].append({"type": "manual_observations_provided_to_dispatcher", "value": manual_observations})
+        return result
+    except Exception as exc:
+        result = empty_result(step)
+        result["result"] = "inconclusive"
+        result["safety_gate"] = "repeat_step"
+        result["missing_evidence"] = [f"Step {methodic_step} QuikTune/manual PID evidence could not be read: {exc}"]
+        result["checked_but_not_supported"] = [f"methodic_{methodic_step.replace('.', '_')}_quicktune_review"]
+        result["recommended_next_steps"] = [
+            "Collect a readable tuning log with ATT, RATE, PIDR/PIDP/PIDY, RCOU/RCO2/RCO3, VIBE, BAT, MODE, MSG, and PARM evidence.",
+            "Use before/after parameter files when the log does not preserve QuikTune or manual tuning parameter changes.",
+            "Do not accept tune results or proceed to later tuning from an unreadable or inconclusive review.",
+        ]
+        result["confidence_limits"] = [f"No deterministic {methodic_step} evidence was available because log parsing failed."]
         return normalize_schema(result)
 
 

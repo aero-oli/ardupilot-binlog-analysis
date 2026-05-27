@@ -209,6 +209,7 @@ python tests/methodic_notch_review_test.py
 python tests/methodic_throttle_controller_test.py
 python tests/methodic_pid_notch_review_test.py
 python tests/methodic_ekf_altitude_source_test.py
+python tests/methodic_quicktune_review_test.py
 python - <<'PY'
 import sys
 sys.path.insert(0, "scripts")
