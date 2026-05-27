@@ -148,6 +148,14 @@ python scripts/ap_methodic_dff_calc.py LOG.BIN --axis roll,pitch,yaw --out out/m
 
 This tool checks clean isolated manoeuvres, angular acceleration, RC axis isolation, RATE output response, actuator saturation, vibration/clipping, RATE sample rate, and current `ATC_RAT_*_D_FF` values. It may produce candidate values only when evidence is strong enough; it must not write D_FF parameters, and any externally applied candidate requires validation with a fresh log.
 
+For Methodic 10.1 wind estimation / drag coefficients review, the dispatcher can classify log evidence, but candidate coefficients require running the dedicated tool directly with vehicle metadata:
+
+```bash
+python scripts/ap_methodic_wind_drag_review.py LOG.BIN --mass-kg 12.5 --frontal-area-m2 0.35 --side-area-m2 0.32 --out out/methodic_10_1.json --summary out/methodic_10_1.md --plots out/plots/methodic_10_1
+```
+
+This tool reviews GPS speed, IMU/ACC acceleration, attitude/rate context, EKF/NKF wind or consistency evidence, wind variability, required mass/area metadata, and candidate `EK3_DRAG_BCOEF_X`, `EK3_DRAG_BCOEF_Y`, and `EK3_DRAG_MCOEF` context. It must not auto-set EKF drag parameters or claim coefficient accuracy in variable wind; any externally applied parameter change requires validation.
+
 If the user gives required observations such as motor/ESC heat, audible oscillation, visible shaking, or hard-to-control behaviour, pass them as repeated `--manual-observation` values. If those observations are not available, preserve that as missing evidence; do not promote the step to a clean pass from log evidence alone.
 
 `ap_methodic_step.py` returns a standard schema with `result`, `safety_gate`, `evidence_used`, `missing_evidence`, `manual_observations_required`, `findings`, `parameter_context`, `plots`, `recommended_next_steps`, `what_not_to_do`, `next_methodic_step`, and `confidence_limits`. Treat the step result as structured evidence, not final truth. Inspect the JSON, summary, and plots before writing conclusions yourself.

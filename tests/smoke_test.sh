@@ -214,6 +214,7 @@ python tests/methodic_magfit_review_test.py
 python tests/methodic_tune_eval_test.py
 python tests/methodic_autotune_review_test.py
 python tests/methodic_dff_calc_test.py
+python tests/methodic_wind_drag_review_test.py
 python - <<'PY'
 import sys
 sys.path.insert(0, "scripts")

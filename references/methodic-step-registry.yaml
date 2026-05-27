@@ -247,10 +247,10 @@ steps:
     phase: "altitude_wind"
     official_anchor: "#101-windspeed-estimation-flights"
     official_url: "https://ardupilot.github.io/MethodicConfigurator/TUNING_GUIDE_ArduCopter#101-windspeed-estimation-flights"
-    required_messages: [IMU, GPS]
-    strongly_recommended_messages: [MODE, POS, ATT, PARM]
-    optional_messages: [WIND, XKF2, XKF4, BARO, MSG, EV, ERR]
-    relevant_parameters: [EK3_DRAG_BCOEF_X, EK3_DRAG_BCOEF_Y, EK3_DRAG_MCOEF, EK3_DRAG_MCOEF, WPNAV_SPEED]
+    required_messages: [GPS, IMU]
+    strongly_recommended_messages: [GPA, ATT, RATE, XKF1, XKF2, XKF3, XKF4, NKF1, NKF2, NKF3, NKF4, ACC, MODE, RCIN, BAT, POWR, PARM]
+    optional_messages: [WIND, POS, BARO, MSG, EV, ERR]
+    relevant_parameters: [EK3_DRAG_BCOEF_X, EK3_DRAG_BCOEF_Y, EK3_DRAG_MCOEF, WPNAV_SPEED]
     preferred_window: "AltHold acceleration/deceleration tests in each direction with enough GPS speed and acceleration signal quality."
     manual_observations_required: ["Wind direction/speed context", "Known frontal/side area and vehicle mass", "Pilot confirms test direction and maneuver quality"]
     pass_fail_summary: "Pass when acceleration/GPS evidence and physical measurements support coefficient review."

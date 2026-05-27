@@ -23,6 +23,7 @@ from ap_methodic_pid_notch_review import analyze_pid_notch_review
 from ap_methodic_quicktune_review import analyze_quicktune_review
 from ap_methodic_throttle_controller import analyze_throttle_controller
 from ap_methodic_tune_eval import analyze_tune_eval
+from ap_methodic_wind_drag_review import analyze_wind_drag_review
 from ap_methodic_oscillation import classify_oscillation
 from ap_methodic_rc import analyze_rc_input_contamination
 from ap_methodic_registry import MethodicRegistryError, get_step, load_registry
@@ -64,6 +65,7 @@ STEP_IMPLEMENTATIONS = {
     "9.5": "analyze_9_5",
     "9.6": "analyze_9_6",
     "9.7": "analyze_9_7",
+    "10.1": "analyze_10_1",
 }
 
 
@@ -614,6 +616,27 @@ def analyze_9_7(log_path: Path, step: dict[str, Any], plots_dir: Path | None, ma
             "Do not auto-apply candidate D_FF values; any external parameter application requires validation with a fresh log.",
         ]
         result["confidence_limits"] = ["No deterministic 9.7 evidence was available because log parsing failed."]
+        return normalize_schema(result)
+
+
+def analyze_10_1(log_path: Path, step: dict[str, Any], plots_dir: Path | None, manual_observations: list[str]) -> dict[str, Any]:
+    try:
+        result = analyze_wind_drag_review(log_path, plots_dir=plots_dir)
+        if manual_observations:
+            result["evidence_used"].append({"type": "manual_observations_provided_to_dispatcher", "value": manual_observations})
+        return normalize_schema(result)
+    except Exception as exc:
+        result = empty_result(step)
+        result["result"] = "inconclusive"
+        result["safety_gate"] = "repeat_step"
+        result["missing_evidence"] = [f"Step 10.1 wind/drag evidence could not be read: {exc}"]
+        result["checked_but_not_supported"] = ["methodic_10_1_wind_drag_review"]
+        result["recommended_next_steps"] = [
+            "Run scripts/ap_methodic_wind_drag_review.py directly with --mass-kg, --frontal-area-m2, and --side-area-m2 plus a readable wind/drag test log.",
+            "Collect GPS/GPA, IMU/ACC, ATT/RATE, XKF/NKF, MODE, RCIN, BAT/POWR, and PARM evidence before reviewing EKF drag candidates.",
+            "Do not auto-apply EKF drag parameters from unreadable, metadata-limited, variable-wind, or unsuitable manoeuvre evidence.",
+        ]
+        result["confidence_limits"] = ["No deterministic 10.1 evidence was available because log parsing failed or required metadata was not supplied to the dispatcher."]
         return normalize_schema(result)
 
 
